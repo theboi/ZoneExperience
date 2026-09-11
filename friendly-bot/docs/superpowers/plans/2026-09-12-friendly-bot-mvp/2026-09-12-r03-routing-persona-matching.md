@@ -40,17 +40,28 @@
 - [ ] **Step 1: Write failing gateway/privacy tests.**
 
 ```python
-async def test_request_requires_policy_and_excludes_identifiers(httpx_mock: HTTPXMock) -> None:
+@pytest.mark.parametrize("forbidden", [
+    {"telegram_user_id": "telegram-id-sentinel-729"},
+    {"telegram_chat_id": "telegram-chat-sentinel-418"},
+    {"dob": "dob-sentinel-2001-02-03"},
+])
+def test_prompt_dto_forbids_structured_identity_fields(forbidden: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        KeySelectionRequest(allowed_keys={"flow.a"}, user_name="A", messages=["telegram and dob are ordinary words"], **forbidden)
+
+async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_mock: HTTPXMock) -> None:
     gateway = OpenRouterGateway(api_key="secret", client=AsyncClient())
     httpx_mock.add_response(json={"choices": [{"message": {"content": '{"key":"flow.a"}'}}]})
-    await gateway.select_key(KeySelectionRequest(allowed_keys={"flow.a"}, user_name="A", messages=["hello"]))
+    request = KeySelectionRequest(allowed_keys={"flow.a"}, user_name="A", messages=["I can say telegram and dob in ordinary text"])
+    await gateway.select_key(request)
     body = json.dumps(httpx_mock.get_requests()[0].json())
     assert '"zdr": true' in body and '"data_collection": "deny"' in body
-    assert "telegram" not in body and "dob" not in body and "secret" not in body
+    assert "telegram-id-sentinel-729" not in body and "telegram-chat-sentinel-418" not in body
+    assert "dob-sentinel-2001-02-03" not in body and "telegram" in body and "dob" in body
 ```
 
 - [ ] **Step 2: Run the failing test.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q`. Expected: FAIL because the R03 modules do not exist.
-- [ ] **Step 3: Implement the strict gateway.** Define constants `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}` and `logprobs=False`; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
+- [ ] **Step 3: Implement the strict gateway.** Put `model_config = ConfigDict(extra="forbid")` on every prompt DTO. Define constants `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}` and `logprobs=False`; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
 - [ ] **Step 4: Run focused checks.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q && uv run ruff check src/friendly_bot/routing tests/unit/routing && uv run mypy src/friendly_bot/routing`. Expected: exit 0.
 - [ ] **Step 5: Commit.** Run: `git add friendly-bot/src/friendly_bot/hyperparameters.py friendly-bot/src/friendly_bot/routing friendly-bot/tests/unit/routing/test_openrouter_gateway.py && git commit -m "feat: add private OpenRouter key gateway"`.
 
@@ -150,6 +161,38 @@ async def test_one_capacity_slot_has_one_concurrent_winner() -> None:
 - [ ] **Step 4: Run focused checks.** Run: `cd friendly-bot && uv run pytest tests/unit/matching/test_normal_matching.py tests/unit/matching/test_safety_matching.py tests/integration/matching/test_reservations.py -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot`. Expected: exit 0.
 - [ ] **Step 5: Commit.** Run: `git add friendly-bot/src/friendly_bot/matching friendly-bot/tests/unit/matching friendly-bot/tests/integration/matching/test_reservations.py && git commit -m "feat: add safe responder matching"`.
 
+### Task 6: R03 acceptance, review, and execution handoff
+
+**Files:** Modify `friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md`; create `friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-execution.json`.
+
+**Interfaces:** Consumes all completed Tasks 1–5 and their F01 G1 contract evidence. Produces the execution completion manifest consumed by G2 and I04.
+
+- [ ] **Step 1: Run the complete R03 focused evidence once at the final feature commit.**
+
+Run: `cd friendly-bot && uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot`
+
+Expected: every command exits 0; record the exact final feature commit from `git rev-parse HEAD` and this command in the execution manifest.
+
+- [ ] **Step 2: Write the execution status and manifest from fresh evidence.**
+
+Set `status/r03.md` to execution-complete only if Step 1 passed and `git merge-base --is-ancestor <final-feature-commit> origin/main` succeeds after push. Create lowercase JSON with `worker`, `phase`, `status`, the exact final feature commit, focused command/output summary, F01 G1 commit inspected, privacy-negative test names, review result, and remote reachability command/result. Do not claim G2 passed; G2 requires T02 evidence and coordinator verification.
+
+- [ ] **Step 3: Request review before publishing the handoff.**
+
+Submit the exact R03 feature diff, focused-suite output, privacy-negative evidence, and execution manifest to the repository review workflow. Resolve every actionable R03-owned finding, rerun the affected focused command, and record the review identifier/result in `r03-execution.json`.
+
+- [ ] **Step 4: Validate and commit the handoff.**
+
+Run: `python3 -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-execution.json && git diff --check && git add friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-execution.json && git commit -m "docs: record R03 execution evidence"`
+
+Expected: valid JSON, no whitespace errors, and only the two handoff paths staged.
+
+- [ ] **Step 5: Reconcile, push, and prove remote evidence.**
+
+Run: `git fetch origin && git merge --no-edit origin/main && cd friendly-bot && uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && cd .. && git push origin main && git fetch origin && git merge-base --is-ancestor HEAD origin/main`
+
+Expected: affected suite passes after reconciliation; push succeeds; the handoff commit is reachable from `origin/main`.
+
 ## Plan self-review
 
-The five tasks cover provider policy/redaction, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools, rematch exclusions, and concurrency. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Interface names match F01's published UoW/repository ownership; actual execution verifies their equivalent direct methods at G1 before code is started.
+The six tasks cover provider policy/redaction, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools, rematch exclusions, concurrency, review, full R03 acceptance evidence, and a G2-consumable execution handoff. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Interface names match F01's published UoW/repository ownership; actual execution verifies their equivalent direct methods at G1 before code is started.

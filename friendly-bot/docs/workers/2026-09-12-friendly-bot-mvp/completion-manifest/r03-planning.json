@@ -6,8 +6,9 @@
   "date": "2026-09-12",
   "integration_authority_inspected": {
     "remote": "origin/main",
-    "commit": "73365ee"
+    "commit": "8b37b950f057db02802a5c2333de0357d241036c"
   },
+  "planning_artifact_commit": "8b37b950f057db02802a5c2333de0357d241036c",
   "execution_prerequisites": [
     "Coordinator-passed PG receipt reachable from origin/main.",
     "F01 G1 implementation evidence, including the published UnitOfWork/repository contract, reachable from origin/main."
@@ -18,6 +19,11 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md",
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json"
   ],
+  "artifact_sha256": {
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md": "f2cc53c2cede5d49befc970bb7d44dab031632248a7dac3bf1170c9e1ee5ca49",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md": "de262d344326be899abc400b2b3ac1d925cfc11bfd5f7caa4579d6eb7dacabbb",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md": "3804c712fe4e9082eb2042987355815f32bec7cac3b1985679bc8bc244613c49"
+  },
   "authority_impact": {
     "product_specification": "no-impact",
     "evidence": "Approved authorities already contain the complete R03 behavior; these artifacts specify modules, contracts, and TDD evidence only.",
@@ -33,13 +39,14 @@
     "execution_check": "At G1, verify F01's direct repository methods are equivalent to the exact R03 consumer signatures in the R03 design before implementation."
   },
   "pass_1_verification": [
-    "python -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json",
+    "python3 -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json",
     "rg -n 'TBD|TODO|implement later|fill in details' friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md",
     "git diff --check"
   ],
   "product_code_created": false,
   "remote_reachability": {
-    "commit_source": "containing planning-artifact commit",
-    "proof_command": "git merge-base --is-ancestor HEAD origin/main"
+    "commit": "8b37b950f057db02802a5c2333de0357d241036c",
+    "proof_command": "git merge-base --is-ancestor 8b37b950f057db02802a5c2333de0357d241036c origin/main",
+    "result": "confirmed before this corrective planning update"
   }
 }

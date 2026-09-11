@@ -44,7 +44,7 @@ Before Pass 2, R03 verifies that G1's actual F01 interface provides these operat
 
 `OpenRouterGateway` posts to `https://openrouter.ai/api/v1/chat/completions` with the configured model, prompt logging disabled, and `provider={"zdr": true, "data_collection": "deny"}`. A response is accepted only when its entire parsed assistant content is a single JSON object `{"key":"<one allowed key>"}`. Any unavailable compliant endpoint, non-2xx response after bounded retry, malformed object, unknown key, or multiple key is a closed failure.
 
-Prompt DTOs admit user name, persona, user-authored message/reply bodies, unsummarized messages, candidate keys/gists/context labels, and match candidate aliases with interests and `cg_name`. They have no field for Telegram user/chat IDs, source message IDs, operational DOB, contact URL, UUID, raw database record, or diagnostic payload. R03's redaction test serializes the final request body and asserts these values cannot appear.
+Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forbid")`. The DTOs admit user name, persona, user-authored message/reply bodies, unsummarized messages, candidate keys/gists/context labels, and match candidate aliases with interests and `cg_name`. They reject `telegram_user_id`, `telegram_chat_id`, `dob`, source message IDs, contact URL, UUID, raw database records, and diagnostic payloads. Gateway tests prove those forbidden keys raise `ValidationError`, then serialize a valid DTO and prove sentinel Telegram-ID/DOB values are absent while ordinary user-authored words such as “telegram” and “dob” remain allowed.
 
 ## 4. Routing contract
 
