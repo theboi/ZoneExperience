@@ -21,7 +21,7 @@ The MVP runs locally on the decision owner's machine. Human connection shares a 
 
 ### 2.1 Roles
 
-All people have one shared identity. Operational roles are NBNC, server, leader, and staff, with capability inheritance `staff > leader > server`. Admin is an independent superuser capability and does not automatically make someone a matching target.
+All people have one shared identity. Operational roles are NBNC, server, leader, and staff, with capability inheritance `staff > leader > server`. Role is stored once on that shared user identity; the operational profile does not duplicate it. Admin is an independent superuser capability and does not automatically make someone a matching target.
 
 Operational profiles store login identity, interests, `cg_name`, contact URL, availability, capacity, and service attendance. NBNCs do not provide DOBs. Prefilled operational accounts authenticate using normalized name and DOB.
 

@@ -75,6 +75,7 @@ No application package, schema, migration, or test foundation exists yet. A work
 - Structured Telegram IDs and DOBs never enter OpenRouter input. OpenRouter requests require ZDR and denied provider data collection.
 - Unhandled `error` dispatch invokes the code-owned hardcoded sender. It is never a configured or root discussion flow.
 - Normal matching selects exact-role servers attending the service. Safety matching selects leaders or staff who attend or are always available.
+- `users.role` is the sole role source; operational profiles reference users and never duplicate role.
 - Zone X is the first JSON seed and end-to-end acceptance fixture.
 - PostgreSQL owns durable state; correctness does not depend on process memory.
 - No web admin UI, bot-relayed human chat, serverless hosting, free-form LLM answers, or production deployment is included.

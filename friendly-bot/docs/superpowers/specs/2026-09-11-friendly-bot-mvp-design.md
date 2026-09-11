@@ -250,7 +250,7 @@ The OpenRouter API key is a secret supplied outside source control.
 
 ### 9.1 Identity and roles
 
-All people share a `users` identity record. Operational roles are `nbnc`, `server`, `leader`, and `staff`, with capability inheritance `staff > leader > server`. Admin is an independent superuser flag and does not automatically make a person eligible for human matching.
+All people share a `users` identity record. Operational roles are `nbnc`, `server`, `leader`, and `staff`, with capability inheritance `staff > leader > server`. The role is stored once on the shared user identity; an operational profile references that identity and does not duplicate role. Admin is an independent superuser flag and does not automatically make a person eligible for human matching.
 
 An NBNC does not provide a DOB. Prefilled operational profiles used for login contain normalized name and DOB. A Telegram account may occupy at most one operational login, and an operational profile may have at most one logged-in Telegram account.
 
@@ -274,7 +274,7 @@ Outside a service, NBNCs receive basic options including directions to Star and 
 
 `/login` starts a name-and-DOB login flow. If the matching operational profile already has a Telegram account attached, login fails until `/logout` is used from that account or an admin manually clears it. Stronger verification is outside the MVP.
 
-On first successful server login, the bot asks for hobbies, interests, and conversation topics for matching. `/manage` exposes “Edit interests.” Operational profiles also store `cg_name`, a validated Telegram contact URL, matching capacity, and availability.
+On first successful operational-user login, the bot asks for hobbies, interests, and conversation topics for matching. This applies to servers, leaders, and staff. `/manage` exposes “Edit interests.” Operational profiles also store `cg_name`, a validated Telegram contact URL, matching capacity, and availability.
 
 `/logout` detaches the Telegram account without deleting the shared user or operational profile.
 

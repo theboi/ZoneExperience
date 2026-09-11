@@ -9,7 +9,7 @@
 | Scope | Friendly Bot local MVP runtime, persistence, flow engine, integrations, privacy, and recovery |
 | Decision owner | Ryan The |
 | Effective date | 2026-09-11 |
-| Last evidence review | 2026-09-12 at repository commit `cf92af6`; implementation absent |
+| Last evidence review | 2026-09-12 at repository commit `689bb2c`; implementation absent |
 | Related authorities | [`product-specification.md`](product-specification.md) |
 | Historical task artifacts | [`../superpowers/specs/`](../superpowers/specs/) |
 
@@ -49,6 +49,7 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-011 | Let actions emit one terminal `ActionEvent` handled only by a direct child event trigger; invoke a non-configurable hardcoded sender for an unhandled `error` | Flow execution | Ryan The | 2026-09-12 | Per-action fallback flows, configured default-error flows, and error bubbling |
 | ARCH-012 | Use distinct hardcoded actions for server-only normal matching and leader-or-staff-only safety matching | Matching eligibility | Ryan The | 2026-09-12 | Role-inherited normal matching |
 | ARCH-013 | Use Zone X as the first canonical JSON seed and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-12 | Illustrative-only Zone X example |
+| ARCH-014 | Store each person's role once on the shared user identity; operational profiles reference that identity and do not duplicate role | Identity data | Ryan The | 2026-09-12 | Duplicate user/profile role columns |
 
 ## 4. Architecture contract
 
@@ -99,6 +100,8 @@ Checkpoint return is branch-local. Every branch begins at the system checkpoint 
 ### 4.6 Persistence ownership
 
 PostgreSQL is authoritative for users, operational profiles, service definitions, flow versions, open selections, checkpoint ancestry, messages, personas, attendance, matches, update offsets, deduplication, deliveries, timing claims, and diagnostics.
+
+`users.role` is the sole role source. Operational profiles contain login and matching attributes and join to the shared user identity for role checks. Audience and matching queries never read a duplicate profile role.
 
 Database constraints and transactions, not process memory, enforce uniqueness and idempotency. The process may cache immutable flow versions but must invalidate by version identity rather than mutate cached definitions.
 
@@ -157,3 +160,4 @@ Earlier design exploration considered Telegram Serverless, Cloud Run, Cloud Sche
 | 2026-09-11 | Bootstrapped the approved Friendly Bot local MVP architecture | User-approved design conversation | Dated design specification |
 | 2026-09-12 | Renamed gatherings to services, added direct-child action-event dispatch, and separated matching role pools | User-approved design revision | Dated design specification and Zone X worked example |
 | 2026-09-12 | Made unhandled-error delivery a hardcoded harness path and promoted Zone X to the first development seed and acceptance fixture | User-approved design revision | Dated design specification and Zone X service document |
+| 2026-09-12 | Normalized role ownership onto the shared user identity and reconciled worker implementation contracts | Planning-gate cross-plan review | F01, T02, R03, and I04 planning artifacts |
