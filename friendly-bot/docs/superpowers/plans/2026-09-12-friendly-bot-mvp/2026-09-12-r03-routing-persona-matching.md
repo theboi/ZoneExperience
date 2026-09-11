@@ -69,7 +69,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_m
 
 **Files:** Modify `routing/contracts.py`; create `routing/router.py`, `tests/unit/routing/test_router.py`, `tests/integration/routing/test_router_uow.py`.
 
-**Interfaces:** Consumes F01 `OpenSelectionState`, `PublishedFlowDefinition`, `MessageDiscussionFlowTrigger`, and `OpenSelectionRepository.list_for_user(user_id: UUID, *, now: datetime) -> list[OpenSelectionState]`. Produces `ConstrainedRouter.route_update(user_id: UUID, incoming: IncomingText, now: datetime) -> RoutingResult` and `CandidateAssembler.assemble(selections: Sequence[OpenSelectionState], definitions: Mapping[UUID, PublishedFlowDefinition], *, now: datetime) -> list[RoutingCandidate]`.
+**Interfaces:** Consumes F01 `OpenSelectionState`, `PublishedFlowDefinition`, `MessageDiscussionFlowTrigger`, and `OpenSelectionRepository.list_for_user(user_id: UUID, *, now: datetime) -> list[OpenSelectionState]`. Produces `RoutingDecision(key: str)`, `RoutingResult(selected_keys: tuple[RoutingDecision, ...], terminal: RoutingTerminal)`, `ConstrainedRouter.route_update(user_id: UUID, incoming: IncomingText, now: datetime) -> RoutingResult`, and `CandidateAssembler.assemble(selections: Sequence[OpenSelectionState], definitions: Mapping[UUID, PublishedFlowDefinition], *, now: datetime) -> list[RoutingCandidate]`. `DiscussionFlow.next_flow_mode` remains the sole flow selection/reuse configuration.
 
 - [ ] **Step 1: Write failing routing tests.**
 
@@ -77,7 +77,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_m
 async def test_router_selects_two_distinct_keys_then_done() -> None:
     gateway = StubGateway(["flow.current", "flow.global", "system.done"])
     result = await router.route_update(USER, IncomingText(body="help", replied_to_body="old question"), NOW)
-    assert [selection.key for selection in result.selections] == ["flow.current", "flow.global"]
+    assert [decision.key for decision in result.selected_keys] == ["flow.current", "flow.global"]
 
 async def test_ambiguous_and_no_match_are_terminals() -> None:
     assert (await router_with("system.clarify_ambiguous_context").route_update(USER, TEXT, NOW)).terminal == RoutingTerminal.CLARIFY
@@ -85,7 +85,7 @@ async def test_ambiguous_and_no_match_are_terminals() -> None:
 ```
 
 - [ ] **Step 2: Run the failing test.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_router.py tests/integration/routing/test_router_uow.py -q`. Expected: FAIL because candidate assembler and router are absent.
-- [ ] **Step 3: Implement candidate and terminal rules.** Load current, reusable-past, system-global, service-global, and valid service selections together. Traverse only message-trigger descendants, include native reply body as prompt context, remove a selected key before the next call, reject duplicates, cap at `ROUTING_MAX_ATTEMPTS`, and map only `system.done`, `system.no_match`, and `system.clarify_ambiguous_context` to terminals. Never persist reply-message IDs.
+- [ ] **Step 3: Implement candidate and terminal rules.** Define `RoutingDecision(key: str)` and `RoutingResult(selected_keys: tuple[RoutingDecision, ...], terminal: RoutingTerminal)`. Load current, reusable-past, system-global, service-global, and valid service selections together. Traverse only message-trigger descendants, include native reply body as prompt context, remove a selected key before the next call, reject duplicates, cap at `ROUTING_MAX_ATTEMPTS`, and map only `system.done`, `system.no_match`, and `system.clarify_ambiguous_context` to terminals. `DiscussionFlow.next_flow_mode` remains F01's sole flow selection/reuse configuration. Never persist reply-message IDs.
 - [ ] **Step 4: Run focused checks.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_router.py tests/integration/routing/test_router_uow.py -q && uv run ruff check src/friendly_bot/routing tests/unit/routing tests/integration/routing && uv run mypy src/friendly_bot/routing`. Expected: exit 0.
 - [ ] **Step 5: Commit.** Run: `git add friendly-bot/src/friendly_bot/routing friendly-bot/tests/unit/routing/test_router.py friendly-bot/tests/integration/routing/test_router_uow.py && git commit -m "feat: route only configured flow keys"`.
 

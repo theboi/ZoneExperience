@@ -20,9 +20,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md": "9a49f76dcf44ab5e1378f17477e87d091110f5c27b15817bddf1ee79e285379f",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md": "ebaa34da2258730f5f89770030172fd838fe24f7edd9d1acd8e7ac90529b2ad1",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md": "3fb518ec9e8a373b3b169b2b4bd1069566425b104fa51702d6bdc67969fa1ea6"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md": "80146f467485bd4099d5fb5d2cee47c66bb0fcaf027a4b3329509053e6a68a8e",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md": "b8ce4af925c08b506093334799c59fcf4a4f18813c5cd52042267166711ae5e7",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md": "9f6f365db495a0311b7128a6586ff9de41c0d9444f426a30b98229bcc213e7ec"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -37,6 +37,11 @@
       "ConversationRepository, PersonaRepository, OperationalProfileRepository, AttendanceRepository, MatchRepository, and OpenSelectionRepository"
     ],
     "execution_check": "After G1 supplies implementation evidence, consume the exact F01 repository signatures recorded in the R03 design directly."
+  },
+  "i04_routing_seam": {
+    "commit_inspected": "c044e4aa57df1c5c6f9130353fe8e08f442effe7",
+    "result_contract": "RoutingResult.selected_keys is tuple[RoutingDecision, ...]; RoutingDecision contains key: str.",
+    "flow_configuration": "DiscussionFlow.next_flow_mode is the sole selection/reuse configuration."
   },
   "pass_1_verification": [
     "python3 -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json",

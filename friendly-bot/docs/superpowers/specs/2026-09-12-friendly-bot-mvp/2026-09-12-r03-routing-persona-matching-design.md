@@ -50,7 +50,24 @@ Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forb
 
 `CandidateAssembler.assemble(selections: Sequence[OpenSelectionState], definitions: Mapping[UUID, PublishedFlowDefinition], *, now: datetime) -> list[RoutingCandidate]` reconstructs candidates from F01 open selections and immutable flow definitions. It emits `RoutingCandidate(key, gist, source, is_current, service_id)` only for `MessageDiscussionFlowTrigger` descendants; buttons, commands, automatic triggers, action events, and expired service selections are omitted. Duplicate keys are a publication/runtime invariant failure, never silently preferred. The allowed set also includes `system.done`, `system.no_match`, and `system.clarify_ambiguous_context`.
 
-`ConstrainedRouter.route_update` sends the user persona plus the unsummarized segment and native reply text, validates each model key against the shrinking allowed set, and returns ordered `FlowSelection` values plus exactly one terminal `RoutingTerminal`. It never treats current as exclusive, never maps Telegram message IDs to selections, and cannot run one key twice in one update.
+Routing result types are explicit and distinct from F01 flow configuration:
+
+```python
+@dataclass(frozen=True)
+class RoutingDecision:
+    key: str
+
+@dataclass(frozen=True)
+class RoutingResult:
+    selected_keys: tuple[RoutingDecision, ...]
+    terminal: RoutingTerminal
+
+async def ConstrainedRouter.route_update(
+    self, user_id: UUID, incoming: IncomingText, now: datetime,
+) -> RoutingResult: ...
+```
+
+`ConstrainedRouter.route_update` sends the user persona plus the unsummarized segment and native reply text, validates each model key against the shrinking allowed set, and returns ordered `RoutingDecision` items in `RoutingResult.selected_keys` plus exactly one terminal `RoutingTerminal`. `DiscussionFlow.next_flow_mode` remains the only configuration that controls flow selection/reuse. The routing result never treats current as exclusive, never maps Telegram message IDs to selections, and cannot return one key twice in one update.
 
 ## 5. Persona contract
 
