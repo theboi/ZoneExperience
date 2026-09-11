@@ -6,7 +6,7 @@
   "date": "2026-09-12",
   "integration_authority_inspected": {
     "remote": "origin/main",
-    "commit": "23350575bfaff92de934d2b47cdb89c498c0ad0d"
+    "commit": "db386457aaa72a413ba1cd1afe69ef6e6b2a2ce3"
   },
   "execution_prerequisites": [
     "A coordinator-passed PG receipt reachable from origin/main.",
@@ -20,9 +20,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/i04-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-i04-runtime-zone-x-design.md": "28e7fd7631a618e52a21dccd4b4e698d4f6eaa024e982af0b8a3ced264978103",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-i04-runtime-zone-x.md": "fc34ed85a6779aa52a0aa4c596e024932a1d9877896b783130ff21d0441ec368",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/i04.md": "3daa1fffd4310632630984157dc4fe877f1e83ae6becf1e9d1bbf00a5305ba06"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-i04-runtime-zone-x-design.md": "7443c4b7b07562358773aa03410ad7873391a88191168a6d04d444c25a089282",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-i04-runtime-zone-x.md": "5bc584c81bdc9c6b04b28a8fe22448632540cc92c6bb192ed61a83617e391bc0",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/i04.md": "040f0b5969d6d7a0104253aea589fb642ec3c83066da49ed26852e762319aab1"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -30,18 +30,18 @@
     "living_authorities_modified": []
   },
   "f01_contract_reconciliation": {
-    "source_commit": "9b5b4e5c7fef5b3a215572cc3f74174590dc5a2d",
+    "source_commit": "9bc9e84c6f553d10c1173c786bcb48b4a8513e86",
     "consumed": [
       "friendly_bot.domain.DiscussionFlow, DiscussionAction, ActionEvent, ActionEventDiscussionFlowTrigger, SelectionTransitionEngine, and publication types",
       "frozen UserRecord, OperationalProfileRecord, ServiceRecord, AttendanceRecord, MatchAssignmentRecord, and DiagnosticRecord DTOs",
       "UnitOfWork plus direct flow-version, open-selection, user, profile, service, attendance, conversation, delivery, match, and diagnostic repositories"
     ],
     "normalization": "users.role is authoritative; operational_profiles has no role column and matching joins profile attributes to exact users.role.",
-    "remaining_execution_check": "G1 must add the canonical send_service_choice_buttons discriminator to the F01 DiscussionAction union and publication validation before I04 can publish Zone X."
+    "resolved_contract": "F01 registers SendServiceChoiceButtonsAction with choice_source fixed to resolved_service_options and service_bound fixed to true; I04 renders the resulting local service-choice records."
   },
   "t02_r03_contract_reconciliation": {
     "t02_source_commit": "23350575bfaff92de934d2b47cdb89c498c0ad0d",
-    "r03_source_commit": "50ab700c2256c9c046b481389f6908b9ea3550c4",
+    "r03_source_commit": "db386457aaa72a413ba1cd1afe69ef6e6b2a2ce3",
     "t02_consumption": [
       "TelegramGateway, TelegramPoller, OutboundDeliveryWorker, OnboardingService, OperationalAccountService",
       "ServiceAttendanceService, ServiceLifecycleService, ServiceDeliveryScheduler, preflight, and runtime lock"
@@ -49,7 +49,7 @@
     "r03_consumption": [
       "ConstrainedRouter, RoutingTerminal, RoutingResult selected keys/RoutingDecision, PersonaMaintenanceService, MatchingService"
     ],
-    "remaining_execution_check": "G2 must use RoutingDecision or selected keys rather than a FlowSelection wrapper; I04 does not add a compatibility type."
+    "resolved_contract": "R03 returns ordered RoutingDecision values in RoutingResult.selected_keys; DiscussionFlow.next_flow_mode remains the only configuration/reuse authority."
   },
   "i04_planned_exports": [
     "ActionContext",
