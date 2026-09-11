@@ -16,9 +16,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/f01-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "ea434470758ece7302b4cfcaa69f9f771ae0e4e2381c6cfa49666525a00c2cec",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "f60beac851a16f1d1e11e0b1977af14d00c7704ee3935c0013b92afe58b9392c",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "2dfdb77e2ebe318c0fcdf9cfaeb23f1f56c6f77a332111a882efd66dd5f54c13"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "7576ab2731cad448f4638b82166519e8ee664f73c962ad10c59fb9ab1dd92ff8",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "1bec697e7ea87be637324fb42f9c3330aad5325b18aaea523df49d1d8205086f",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "dfbcf2b24d5454afb4525c59950cd83a90f3654b7a8a68bd163e1fa28a9b0f60"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -35,10 +35,29 @@
     ],
     "persistence": [
       "UnitOfWork",
+      "UserRepository",
+      "OperationalProfileRepository",
+      "OperationalLoginRepository",
+      "ServiceRepository",
+      "AttendanceRepository",
+      "PollStateRepository",
       "FlowVersionRepository",
       "OpenSelectionRepository",
       "UpdateRepository",
-      "DeliveryRepository"
+      "ConversationRepository",
+      "PersonaRepository",
+      "MatchRepository",
+      "DeliveryRepository",
+      "DiagnosticRepository"
+    ]
+  },
+  "reconciliation": {
+    "remote": "origin/main",
+    "commit": "968f53f",
+    "findings": [
+      "users.role is the sole role source; operational_profiles.role is absent",
+      "T02/R03/I04 consumed repository signatures are explicit in the F01 design and plan",
+      "F01 plan contains no ellipsis test placeholders"
     ]
   },
   "pass_1_verification": [

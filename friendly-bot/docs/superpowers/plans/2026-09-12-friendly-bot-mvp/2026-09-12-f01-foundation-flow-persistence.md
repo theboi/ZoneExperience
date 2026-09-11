@@ -213,7 +213,13 @@ Run: `git add friendly-bot/src/friendly_bot/domain/flows.py friendly-bot/src/fri
     (NextFlowMode.ALLOW_MANY, False, True),
     (NextFlowMode.CHECKPOINT, False, True),
 ])
-def test_current_parent_transition(mode: NextFlowMode, expect_deleted: bool, expect_reusable: bool) -> None: ...
+def test_current_parent_transition(mode: NextFlowMode, expect_deleted: bool, expect_reusable: bool) -> None:
+    child = DiscussionFlow(key="system.home.directions", trigger=button_trigger("system.home.directions"), actions=[], next_flows=[], next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY)
+    parent_definition = DiscussionFlow(key="system.home", trigger=None, actions=[], next_flows=[child], next_flow_mode=mode)
+    parent = OpenSelectionState(id=uuid4(), user_id=uuid4(), flow_version_id=uuid4(), parent_flow_key="system.home", service_id=None, is_current=True, is_global_interruptive=False, ancestor_flow_keys=["system.home"], checkpoint_flow_keys=["system.home"] if mode is NextFlowMode.CHECKPOINT else [], opened_at=NOW, last_focused_at=NOW)
+    transition = SelectionTransitionEngine().select_child(parent=parent, child=child, parent_definition=parent_definition, now=NOW)
+    assert (parent.id in transition.delete_selection_ids) is expect_deleted
+    assert (parent.id in transition.reusable_past_selection_ids) is expect_reusable
 
 def test_leaf_returns_only_its_nearest_nested_checkpoint() -> None:
     transition = engine.return_to_nearest_checkpoint(branch=nested_branch, now=NOW)
@@ -267,7 +273,15 @@ async def test_processed_update_id_is_unique(session: AsyncSession) -> None:
     with pytest.raises(IntegrityError):
         await session.commit()
 
-async def test_active_overlapping_attendance_is_rejected(session: AsyncSession) -> None: ...
+async def test_start_or_switch_leaves_one_active_attendance(session: AsyncSession) -> None:
+    user = await seed_user(session, role=OperationalRole.NBNC)
+    first_service = await seed_service(session, key="zone_x_2026_10_18", interaction_ends_at=NOW + timedelta(hours=2))
+    second_service = await seed_service(session, key="zone_y_2026_10_18", interaction_ends_at=NOW + timedelta(hours=2))
+    repository = SqlAlchemyAttendanceRepository(session)
+    await repository.start_or_switch(user.id, first_service.id, attendee_kind="ordinary", started_at=NOW)
+    switched = await repository.start_or_switch(user.id, second_service.id, attendee_kind="ordinary", started_at=NOW + timedelta(minutes=1))
+    active = await repository.active_for_user(user.id, now=NOW + timedelta(minutes=1))
+    assert switched.ended_previous and active is not None and active.service_id == second_service.id
 ```
 
 - [ ] **Step 2: Run the test to verify it fails.**
@@ -288,7 +302,7 @@ class OpenFlowSelection(Base):
     checkpoint_flow_keys: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
 ```
 
-Implement every table and exact durable uniqueness/foreign-key/check constraint in the F01 spec, including active attendance, idempotency tables, match records, diagnostics, and `reserved_capacity <= capacity`. Keep ORM rows private to persistence.
+Implement every table and exact durable uniqueness/foreign-key/check constraint in the F01 spec, including active attendance, idempotency tables, match records, diagnostics, and `reserved_capacity <= capacity`. `users.role` is the sole persisted role field: `operational_profiles` has no `role` column, and matching/audience queries join `operational_profiles.user_id` to `users.id`. Keep ORM rows private to persistence.
 
 - [ ] **Step 4: Run schema constraints after applying metadata to the integration database.**
 
@@ -307,13 +321,41 @@ Run: `git add friendly-bot/src/friendly_bot/persistence friendly-bot/tests/integ
 - Create: `friendly-bot/tests/integration/persistence/test_repositories.py`, `test_uow.py`
 
 **Interfaces:**
-- Produces: `UnitOfWork`, `FlowVersionRepository`, `OpenSelectionRepository`, `UpdateRepository`, `DeliveryRepository`, and the typed repository collection in the F01 spec.
+- Produces: `UnitOfWork` with `.users`, `.operational_profiles`, `.operational_logins`, `.services`, `.attendances`, `.poll_state`, `.updates`, `.conversations`, `.personas`, `.matches`, `.open_selections`, `.deliveries`, `.diagnostics`, and `.flow_versions`; every property exposes the exact protocol below.
 - Consumes: Task 4 transitions and Task 5 ORM records.
+
+`repositories.py` defines frozen DTOs `UserRecord`, `OperationalProfileRecord`, `OperationalLoginRecord`, `ServiceRecord`, `AttendanceRecord`, `ServiceTimestampRecord`, `ConversationMessageRecord`, `PersonaCursorRecord`, `MatchCandidateRecord`, `MatchAssignmentRecord`, `PollStateRecord`, `OutboundDeliveryRecord`, `DeliveryAttemptRecord`, and `DiagnosticRecord`. `UserRecord.role` is the only role source. It also defines `LoginAttachmentResult` with exactly `attached`, `occupied`, and `not_found`, and `AttendanceStartResult(attendance, ended_previous)`.
+
+| Repository | Exact public operations |
+| --- | --- |
+| `UserRepository` | `resolve_telegram_sender(telegram_user_id: int, *, received_at: datetime) -> UserRecord`; `require_by_telegram_id(telegram_user_id: int) -> UserRecord`; `set_display_name(user_id: UUID, display_name: str, *, at: datetime) -> UserRecord` |
+| `OperationalProfileRepository` | `find_by_login_identity(normalized_name: str, dob: date) -> OperationalProfileRecord | None`; `update_interests(profile_id: UUID, interests: list[str], *, at: datetime) -> OperationalProfileRecord` |
+| `OperationalLoginRepository` | `attach(profile_id: UUID, user_id: UUID, *, at: datetime) -> LoginAttachmentResult`; `detach_for_user(user_id: UUID, *, at: datetime) -> OperationalLoginRecord | None` |
+| `ServiceRepository` | `get(service_id: UUID) -> ServiceRecord`; `list_ongoing(*, now: datetime) -> list[ServiceRecord]`; `list_due_timestamps(*, now: datetime) -> list[ServiceTimestampRecord]`; `list_audience_user_ids(audience: ServiceAudience, service_id: UUID | None, *, now: datetime) -> list[UUID]` |
+| `AttendanceRepository` | `start_or_switch(user_id: UUID, service_id: UUID, *, attendee_kind: str, started_at: datetime) -> AttendanceStartResult`; `active_for_user(user_id: UUID, *, now: datetime) -> AttendanceRecord | None`; `end_active_for_service(service_id: UUID, *, ended_at: datetime) -> int` |
+| `PollStateRepository` | `get() -> PollStateRecord`; `advance_monotonically(next_update_offset: int, *, at: datetime) -> PollStateRecord` |
+| `UpdateRepository` | `claim_update(telegram_update_id: int, *, received_at: datetime) -> bool` |
+| `ConversationRepository` | `record_incoming(*, user_id: UUID, source_message_id: int, body: str, replied_to_body: str | None, occurred_at: datetime) -> ConversationMessageRecord`; `list_after(user_id: UUID, message_id: UUID | None) -> list[ConversationMessageRecord]` |
+| `PersonaRepository` | `get_or_create(user_id: UUID) -> PersonaCursorRecord`; `advance(user_id: UUID, *, persona: str, last_message_id: UUID, generated_at: datetime) -> None` |
+| `MatchRepository` | `list_eligible_normal(service_id: UUID, request_id: UUID) -> list[MatchCandidateRecord]`; `list_eligible_safety(service_id: UUID | None, request_id: UUID) -> list[MatchCandidateRecord]`; `reserve_ranked(request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime) -> MatchAssignmentRecord | None`; `release_and_exclude(request_id: UUID, profile_id: UUID, *, reason: str, now: datetime) -> None` |
+| `OpenSelectionRepository` | `list_for_user(user_id: UUID, *, now: datetime) -> list[OpenSelectionState]`; `apply(transition: SelectionTransition | CheckpointReturnTransition) -> None`; `expire_service_bound(service_id: UUID, *, at: datetime) -> int` |
+| `DeliveryRepository` | `claim_timestamp_delivery(service_timestamp_id: UUID, user_id: UUID) -> bool`; `enqueue(delivery: NewOutboundDelivery) -> OutboundDeliveryRecord`; `claim_next_safe(*, now: datetime) -> OutboundDeliveryRecord | None`; `start_attempt(delivery_id: UUID, correlation_id: UUID, *, started_at: datetime) -> DeliveryAttemptRecord`; `finish_attempt(delivery_id: UUID, attempt_id: UUID, outcome: DeliveryOutcome, *, now: datetime) -> None` |
+| `DiagnosticRepository` | `record(*, correlation_id: UUID, severity: str, safe_summary: str, safe_context: dict[str, JsonValue], at: datetime) -> DiagnosticRecord`; `enqueue_admin_notifications(diagnostic_id: UUID, *, at: datetime) -> int` |
+| `FlowVersionRepository` | `publish(definition: PublishedFlowDefinition, *, scope_kind: FlowScopeKind, service_id: UUID | None, published_by_user_id: UUID | None) -> FlowVersionRecord`; `get(flow_version_id: UUID) -> FlowVersionRecord` |
 
 - [ ] **Step 1: Write failing repository transaction and idempotency tests.**
 
 ```python
-async def test_uow_rolls_back_open_selection_when_action_effect_fails(uow_factory: UnitOfWorkFactory) -> None: ...
+async def test_uow_rolls_back_open_selection_when_action_effect_fails(uow_factory: UnitOfWorkFactory) -> None:
+    user_id = uuid4()
+    transition = selection_transition_for(user_id=user_id, parent_key="system.home", child_key="system.home.directions")
+    with pytest.raises(SimulatedActionFailure):
+        async with uow_factory() as uow:
+            await uow.lock_user(user_id)
+            await uow.open_selections.apply(transition)
+            raise SimulatedActionFailure("executor failed before commit")
+    async with uow_factory() as verify:
+        assert await verify.open_selections.list_for_user(user_id, now=NOW) == []
 
 async def test_concurrent_update_claim_has_exactly_one_winner(uow_factory: UnitOfWorkFactory) -> None:
     winners = await asyncio.gather(*[claim_same_update(uow_factory) for _ in range(2)])
