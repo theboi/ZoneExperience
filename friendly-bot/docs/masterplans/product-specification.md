@@ -65,7 +65,7 @@ System-global and service-global roots are automatic checkpoints. Every timestam
 
 The application persists every open child group. Current groups are a soft routing preference; past reusable and global groups remain eligible. Native reply text is additional context, not a hard routing boundary. One incoming message may select several different configured flows, while each flow key runs at most once for that update.
 
-Actions may emit one terminal `ActionEvent`. The harness deterministically selects a matching event-triggered direct child without consulting the LLM. Action events do not bubble through ancestors. An unexpected failure emits the reserved `error` event; a direct child may handle it, otherwise the harness runs the fixed default flow: “Sorry, an error occurred. Error log: {telegram_user_id}.”
+Actions may emit one terminal `ActionEvent`. The harness deterministically selects a matching event-triggered direct child without consulting the LLM. Action events do not bubble through ancestors. An unexpected failure emits the reserved `error` event; a direct child may handle it, otherwise the harness invokes its non-configurable hardcoded error sender: “Sorry, an error occurred. Error log: {telegram_user_id}.” The default error path is not a discussion flow.
 
 ### 4.2 Services
 
@@ -75,7 +75,7 @@ One highkey service before door close enrolls automatically. Multiple services w
 
 Timestamp audiences are all NBNCs, all servers, all leaders, service NBNCs, service servers, service leaders, or all service attendees. Role inheritance applies to operational audiences.
 
-Zone X provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service.
+Zone X is the first seeded development service and end-to-end acceptance fixture. It provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service. Its implemented configuration must be an equivalent JSON form of the canonical [Zone X service document](../examples/zone-x-service-example.md).
 
 ### 4.3 Records and persistence
 
@@ -97,7 +97,7 @@ The application never sends structured Telegram IDs or DOBs to OpenRouter. The u
 
 Secrets are external to source control and redacted from logs and notifications. Database constraints protect login ownership, service activity, matching capacity, flow keys, and idempotency. Conversation and operational data require application authorization and restricted local database access.
 
-Every emitted application error and debug diagnostic creates a sanitized notification for every admin and a structured diagnostic record. Action failures stop later actions and retry safe failures. After retry exhaustion, the direct `error` child runs when configured; otherwise the harness uses the fixed default error flow. The Telegram user ID used as the error-log reference is rendered locally and is never sent to OpenRouter.
+Every emitted application error and debug diagnostic creates a sanitized notification for every admin and a structured diagnostic record. Action failures stop later actions and retry safe failures. After retry exhaustion, the direct `error` child runs when configured; otherwise the harness calls the hardcoded error sender. That sender is application code, not configurable JSON or a root discussion flow, and leaves the failed selection available for a safe retry. The Telegram user ID used as the error-log reference is rendered locally and is never sent to OpenRouter.
 
 ## 7. Acceptance requirements
 
@@ -108,7 +108,7 @@ Every emitted application error and debug diagnostic creates a sanitized notific
 - Current, reusable-past, and global selections route according to their approved importance and reuse semantics.
 - Leaves and never-mind requests return through the nearest checkpoint on the selected branch.
 - Service enrollment, overlaps, latecomers, timestamps, audiences, and expiry behave as specified.
-- Zone X exposes the approved before, during, and after behaviors without free-form model replies.
+- The canonical Zone X JSON seed exposes the approved before, during, and after behaviors without free-form model replies and passes the end-to-end service acceptance suite.
 - Normal, rematch, capacity, and safety matching never select ineligible people.
 - Restart recovery does not duplicate logical Telegram updates or timestamp delivery.
 - OpenRouter prompt construction and provider policy enforce the approved privacy boundary.

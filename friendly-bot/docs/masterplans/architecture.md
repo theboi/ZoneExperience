@@ -9,7 +9,7 @@
 | Scope | Friendly Bot local MVP runtime, persistence, flow engine, integrations, privacy, and recovery |
 | Decision owner | Ryan The |
 | Effective date | 2026-09-11 |
-| Last evidence review | 2026-09-12 at repository commit `e8ab5eb`; implementation absent |
+| Last evidence review | 2026-09-12 at repository commit `cf92af6`; implementation absent |
 | Related authorities | [`product-specification.md`](product-specification.md) |
 | Historical task artifacts | [`../superpowers/specs/`](../superpowers/specs/) |
 
@@ -46,8 +46,9 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-008 | Use OpenRouter with mandatory ZDR and denied provider collection, excluding structured Telegram IDs and DOBs | Privacy | Ryan The | 2026-09-11 | Unrestricted provider routing |
 | ARCH-009 | Reuse EdenMind Telegram durability concepts without copying product-specific tuition behavior | Integration reliability | Ryan The | 2026-09-11 | Greenfield transport behavior |
 | ARCH-010 | Model real-world Zone gatherings as services; reserve event terminology for typed action outcomes | Domain language | Ryan The | 2026-09-12 | Real-world `Event` naming |
-| ARCH-011 | Let actions emit one terminal `ActionEvent` handled only by a direct child event trigger; use a fixed default for an unhandled `error` | Flow execution | Ryan The | 2026-09-12 | Per-action fallback flows and error bubbling |
+| ARCH-011 | Let actions emit one terminal `ActionEvent` handled only by a direct child event trigger; invoke a non-configurable hardcoded sender for an unhandled `error` | Flow execution | Ryan The | 2026-09-12 | Per-action fallback flows, configured default-error flows, and error bubbling |
 | ARCH-012 | Use distinct hardcoded actions for server-only normal matching and leader-or-staff-only safety matching | Matching eligibility | Ryan The | 2026-09-12 | Role-inherited normal matching |
+| ARCH-013 | Use Zone X as the first canonical JSON seed and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-12 | Illustrative-only Zone X example |
 
 ## 4. Architecture contract
 
@@ -80,6 +81,8 @@ An action may synchronously emit one terminal `ActionEvent`. Emission stops the 
 Action classes declare their possible non-error event keys. Publication requires exactly one direct handler for each declared outcome and at most one direct `error` handler. Event-driven cycles without a Telegram-input boundary are invalid.
 
 Flow definitions are authored as JSON, validated into typed Pydantic objects, and published as immutable PostgreSQL `JSONB`. Active open selections remain pinned to their version when a later version is published. Human-readable YAML may be used only in explanatory documentation.
+
+The first shipped service definition is the Zone X JSON seed. It must be behaviorally equivalent to the canonical human-readable Zone X document and drives the end-to-end service acceptance suite.
 
 ### 4.4 Runtime state boundary
 
@@ -117,7 +120,7 @@ The routing gateway strips structured Telegram IDs and DOBs from prompt objects.
 
 ### 4.10 Failure and diagnostics boundary
 
-Retriable errors use bounded retries and idempotency keys. After exhaustion, the harness emits the reserved `error` action event and stops later actions. A direct `error` child handles it when configured. Otherwise, without ancestor bubbling, the harness runs the fixed default flow: “Sorry, an error occurred. Error log: {telegram_user_id}.”
+Retriable errors use bounded retries and idempotency keys. After exhaustion, the harness emits the reserved `error` action event and stops later actions. A direct `error` child handles it when configured. Otherwise, without ancestor bubbling, the harness invokes a hardcoded sender with: “Sorry, an error occurred. Error log: {telegram_user_id}.” This sender is application code, not a `DiscussionFlow`, root flow, or published JSON object. The failed selection remains available for a safe retry.
 
 Every emitted error and debug diagnostic creates a sanitized diagnostic record and notification fan-out to every admin. The affected user's Telegram ID is rendered locally in the default user-facing error and admin diagnostics but is never included in OpenRouter input. Secrets and sensitive raw payloads remain excluded.
 
@@ -127,6 +130,7 @@ Every emitted error and debug diagnostic creates a sanitized diagnostic record a
 | --- | --- | --- |
 | [`product-specification.md`](product-specification.md) | Architecture implements and is constrained by approved product behavior | Update when product behavior changes technical boundaries |
 | [`../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md`](../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md) | Historical approved design source | Promote approved changes into both living authorities when changed |
+| [`../examples/zone-x-service-example.md`](../examples/zone-x-service-example.md) | Canonical human-readable source for the first service JSON seed and acceptance fixture | Keep behaviorally equivalent to the JSON seed and service tests |
 
 ## 6. Unresolved decisions
 
@@ -144,7 +148,7 @@ No material architecture decisions remain unresolved for MVP planning. Concrete 
 
 ## 8. Superseded and historical material
 
-Earlier design exploration considered Telegram Serverless, Cloud Run, Cloud Scheduler, SQLite, a literal trigger stack, a global armed-trigger registry, Telegram-message-ID-to-flow persistence, separate flow subclasses, `FlowSelection`, boolean reuse flags, per-action fallback-flow properties, error bubbling, role-inherited normal matching, and real-world `Event` naming. These are not current architecture. The dated design specification records only the consolidated approved result.
+Earlier design exploration considered Telegram Serverless, Cloud Run, Cloud Scheduler, SQLite, a literal trigger stack, a global armed-trigger registry, Telegram-message-ID-to-flow persistence, separate flow subclasses, `FlowSelection`, boolean reuse flags, per-action fallback-flow properties, a configurable default-error root, error bubbling, role-inherited normal matching, illustrative-only Zone X content, and real-world `Event` naming. These are not current architecture. The dated design specification records only the consolidated approved result.
 
 ## 9. Evidence-backed change history
 
@@ -152,3 +156,4 @@ Earlier design exploration considered Telegram Serverless, Cloud Run, Cloud Sche
 | --- | --- | --- | --- |
 | 2026-09-11 | Bootstrapped the approved Friendly Bot local MVP architecture | User-approved design conversation | Dated design specification |
 | 2026-09-12 | Renamed gatherings to services, added direct-child action-event dispatch, and separated matching role pools | User-approved design revision | Dated design specification and Zone X worked example |
+| 2026-09-12 | Made unhandled-error delivery a hardcoded harness path and promoted Zone X to the first development seed and acceptance fixture | User-approved design revision | Dated design specification and Zone X service document |

@@ -1,10 +1,11 @@
-# Zone X Worked Service and DiscussionFlow Example
+# Zone X First Development Service
 
-> Review aid for the Friendly Bot MVP. This is a concrete example of the approved design, not executable configuration yet.
+> Canonical functional fixture for the first Friendly Bot service implementation.
 
 | Field | Example value |
 | --- | --- |
 | Service | Zone X |
+| Development use | First seeded service and end-to-end acceptance fixture |
 | Service date | Sunday, 18 October 2026 |
 | Timezone | Asia/Singapore |
 | `highkey` | `true` |
@@ -13,9 +14,9 @@
 | Service time | 2:30–4:00 pm |
 | Service interactions end | 6:00 pm |
 
-## 1. How to read this example
+## 1. How to read this service
 
-The YAML below shows one complete Zone X service, including its service-global checkpoint, latecomer flow, and every illustrative timestamp. It also shows the excerpt of the system-global root needed to understand safety and “never mind”; unrelated onboarding, login, and basic-information branches are intentionally omitted. YAML is used only to make this review document readable. The implemented seed files use JSON, and published flow versions are stored as PostgreSQL `JSONB`.
+The YAML below is the normative human-readable representation of the first development service. It shows the complete Zone X service, including its service-global checkpoint, latecomer flow, and every configured development timestamp. It also shows the excerpt of the system-global root needed to understand safety and “never mind”; unrelated onboarding, login, and basic-information branches are intentionally omitted. Implementation must provide an equivalent JSON seed, and published flow versions are stored as PostgreSQL `JSONB`.
 
 The configuration uses these rules:
 
@@ -28,27 +29,14 @@ The configuration uses these rules:
 - A child with `next_flows: []` returns to the nearest checkpoint after its actions finish.
 - Buttons do not contain navigation. A button sends a stable `button_id`; an open `ButtonDiscussionFlowTrigger` with that ID makes the matching flow eligible.
 - An action may emit one terminal `ActionEvent`. The matching direct child runs immediately without consulting the LLM.
-- An unexpected failure emits `error`. A direct `error` child handles it; otherwise the harness sends the fixed default error flow. Action events never bubble.
+- An unexpected failure emits `error`. A direct `error` child handles it; otherwise the harness invokes its hardcoded error sender. The hardcoded path is not a `DiscussionFlow` and is not part of published configuration. Action events never bubble.
 - All bot prose comes from actions. The LLM may return only one of the open flow keys or a reserved harness key.
 
-Action and trigger `type` values below are proposed serialization names for the already-approved typed subclasses. The implementation plan may rename them without changing their behavior.
+The flow graph, keys, behavior, copy, and outcomes below are the development baseline. The implementation stores an equivalent JSON seed. Any necessary serialization normalization must update this document and the living authorities in the same commit.
 
-## 2. Complete illustrative configuration
+## 2. Canonical development configuration
 
 ```yaml
-default_error_flow:
-  key: system.default.error
-  trigger:
-    type: action_event
-    event_key: error
-  actions:
-    - type: send_message
-      text: >-
-        Sorry, an error occurred. Error log: {{ telegram_user_id }}.
-  next_flow_mode: ONE_AND_ONCE_ONLY
-  return_actions: []
-  next_flows: []
-
 system_global_root_excerpt:
   key: system.global
   trigger: null
@@ -1012,9 +1000,9 @@ Please pay particular attention to these concrete assumptions:
 5. **Action outcomes:** complex actions emit one terminal `ActionEvent`, and a matching direct child continues the flow. `human_match.not_found` is an ordinary outcome rather than an exception or fallback.
 6. **Never-mind traversal:** the explicit `return_to_nearest_checkpoint` action counts as the branch return; the generic empty-leaf rule must not perform a second return afterward.
 7. **Repeated rematch button ID:** both meeting-preference branches use `zone_x.connect.not_responding`. Only the selected branch is open, so the same button ID is expected to be unambiguous.
-8. **Fixed content:** the directions, toilet location, theological answer, urgent-support wording, and all names/URLs are illustrative content requiring operational approval before launch.
+8. **Development content:** the directions, toilet location, theological answer, urgent-support wording, and all names/URLs are canonical seed values for development and acceptance tests, but still require operational approval before a real launch.
 9. **Service switching:** `resolve_service_switch_options` is a typed complex action because the buttons depend on whichever other services are active at runtime. It emits an outcome handled by a direct child flow.
 10. **Interaction expiry:** at 6:00 pm, Zone X flows and buttons expire even if an earlier prompt is unanswered. The long-term conversation remains stored.
-11. **Default errors:** an executing flow may define a direct `error` event child. If it does not, the harness runs `system.default.error` without searching any ancestor. The Telegram user ID is rendered locally and never sent to OpenRouter.
+11. **Default errors:** an executing flow may define a direct `error` event child. If it does not, the harness sends the hardcoded message “Sorry, an error occurred. Error log: {telegram_user_id}.” without searching any ancestor. This sender is application code, not a root flow or configurable JSON. The Telegram user ID is rendered locally and never sent to OpenRouter.
 
 If any assumption above is wrong, changing it may affect the product specification or architecture masterplan—not just this example.
