@@ -16,9 +16,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/f01-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "7576ab2731cad448f4638b82166519e8ee664f73c962ad10c59fb9ab1dd92ff8",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "1bec697e7ea87be637324fb42f9c3330aad5325b18aaea523df49d1d8205086f",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "dfbcf2b24d5454afb4525c59950cd83a90f3654b7a8a68bd163e1fa28a9b0f60"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "66d5fd84cff2a6f0a75a4c6bb9c1e9a6f93d40b57eae6c1092644dce3dd29a41",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "09dbdc121c55eceb21359c2d373642d76325d3ec2f3aed21247acf78519ef6b1",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "1f5257e7354e82d6bdceda779bc48cca3bf5a341a19803776bfb7887c851fcfb"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -57,7 +57,8 @@
     "findings": [
       "users.role is the sole role source; operational_profiles.role is absent",
       "T02/R03/I04 consumed repository signatures are explicit in the F01 design and plan",
-      "F01 plan contains no ellipsis test placeholders"
+      "F01 plan contains no ellipsis test placeholders",
+      "send_service_choice_buttons is a validated declarative Zone X action with runtime-derived choices"
     ]
   },
   "pass_1_verification": [

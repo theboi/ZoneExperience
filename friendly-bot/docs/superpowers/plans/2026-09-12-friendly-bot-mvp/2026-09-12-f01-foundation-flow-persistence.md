@@ -101,6 +101,10 @@ def test_zone_x_action_discriminators_parse() -> None:
     action = parse_action({"type": "find_and_reserve_server", "service_id": "{{ active_service.id }}", "capacity_required": 1})
     assert action.declared_event_keys == frozenset({"human_match.found", "human_match.not_found"})
 
+def test_runtime_service_choice_buttons_have_no_embedded_service_list() -> None:
+    action = parse_action({"type": "send_service_choice_buttons", "button_id": "service.attendance.select"})
+    assert action.choice_source == "resolved_service_options" and action.service_bound is True
+
 def test_nested_any_of_and_unknown_discriminator_are_rejected() -> None:
     with pytest.raises(ValidationError):
         parse_trigger({"type": "any_of", "triggers": [{"type": "any_of", "triggers": []}]})
@@ -126,9 +130,15 @@ class FindAndReserveServerAction(DiscussionActionBase):
     service_id: str
     capacity_required: PositiveInt = 1
     declared_event_keys: ClassVar[frozenset[str]] = frozenset({"human_match.found", "human_match.not_found"})
+
+class SendServiceChoiceButtonsAction(DiscussionActionBase):
+    type: Literal["send_service_choice_buttons"]
+    button_id: StableButtonId
+    choice_source: Literal["resolved_service_options"] = "resolved_service_options"
+    service_bound: Literal[True] = True
 ```
 
-Implement all action discriminators enumerated in the F01 spec, stable key/button regex checks, nonempty `llm_gist`, and `AnyOf` flattening rules. Do not add executor callables.
+Implement all action discriminators enumerated in the F01 spec, stable key/button regex checks, nonempty `llm_gist`, and `AnyOf` flattening rules. `SendServiceChoiceButtonsAction` must accept the canonical `button_id`-only Zone X form and supply only `choice_source="resolved_service_options"` plus `service_bound=True`; it carries no service IDs or executor callback. Do not add executor callables.
 
 - [ ] **Step 4: Run the focused union tests.**
 
