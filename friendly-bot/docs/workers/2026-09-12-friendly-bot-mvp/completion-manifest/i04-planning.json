@@ -69,7 +69,9 @@
   "product_code_created": false,
   "runtime_started": false,
   "remote_reachability": {
-    "state": "pending planning-artifact commit",
-    "required_proof": "git merge-base --is-ancestor <i04-planning-commit> origin/main"
+    "planning_artifacts_commit": "c044e4aa57df1c5c6f9130353fe8e08f442effe7",
+    "remote": "origin/main",
+    "verified": true,
+    "proof": "git merge-base --is-ancestor c044e4aa57df1c5c6f9130353fe8e08f442effe7 origin/main exited 0 after push"
   }
 }
