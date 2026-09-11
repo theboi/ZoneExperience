@@ -19,7 +19,7 @@ The existing product specification already owns every R03 user-visible outcome, 
 
 ## 2. F01 reconciliation and required consumed contract
 
-F01 has published the shared `friendly_bot.domain` models (`DiscussionFlow`, `MessageDiscussionFlowTrigger`, `OpenSelectionState`) and `persistence.uow.UnitOfWork`, with `ConversationRepository`, `PersonaRepository`, `OperationalProfileRepository`, `AttendanceRepository`, `MatchRepository`, and `OpenSelectionRepository`. R03 consumes those records under one F01 transaction and creates neither a migration, an ORM model, a session, nor a side table. The `a920d2d` correction only removes a source-coded database credential default, so it does not alter R03's consumed persistence interface.
+F01 has published the shared `friendly_bot.domain` models (`DiscussionFlow`, `MessageDiscussionFlowTrigger`, `OpenSelectionState`) and `persistence.uow.UnitOfWork`, with `ConversationRepository`, `PersonaRepository`, `OperationalProfileRepository`, `AttendanceRepository`, `MatchRepository`, and `OpenSelectionRepository`. R03 consumes those records under one F01 transaction and creates neither a migration, an ORM model, a session, nor a side table. F01 reconciliation commit `9b5b4e5` makes `users.role` the sole persisted role source and requires matching queries to join `operational_profiles.user_id` to `users.id`.
 
 R03 requires these typed repository operations from F01's stated “direct methods for externally required operations”; their execution implementation is one exact F01-owned interface, not an adapter or fallback:
 
@@ -36,7 +36,7 @@ class MatchRepository(Protocol):
     async def release_and_exclude(self, request_id: UUID, profile_id: UUID, *, reason: str, now: datetime) -> None: ...
 ```
 
-Before Pass 2, R03 verifies that G1's actual F01 interface provides these operations with equivalent DTOs and transactional semantics. A discrepancy blocks R03 execution for a focused F01 contract repair; R03 must not use SQLAlchemy internals or make a duplicate persistence path.
+R03 consumes these exact F01 protocols and frozen DTOs after G1 supplies their implemented evidence. R03 does not translate them through an adapter, access SQLAlchemy internals, or create a duplicate persistence path.
 
 ## 3. Gateway and privacy boundary
 
@@ -48,7 +48,7 @@ Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forb
 
 ## 4. Routing contract
 
-`CandidateAssembler` reconstructs candidates from F01 open selections and immutable flow definitions. It emits `RoutingCandidate(key, gist, source, is_current, service_id)` only for `MessageDiscussionFlowTrigger` descendants; buttons, commands, automatic triggers, action events, and expired service selections are omitted. Duplicate keys are a publication/runtime invariant failure, never silently preferred. The allowed set also includes `system.done`, `system.no_match`, and `system.clarify_ambiguous_context`.
+`CandidateAssembler.assemble(selections: Sequence[OpenSelectionState], definitions: Mapping[UUID, PublishedFlowDefinition], *, now: datetime) -> list[RoutingCandidate]` reconstructs candidates from F01 open selections and immutable flow definitions. It emits `RoutingCandidate(key, gist, source, is_current, service_id)` only for `MessageDiscussionFlowTrigger` descendants; buttons, commands, automatic triggers, action events, and expired service selections are omitted. Duplicate keys are a publication/runtime invariant failure, never silently preferred. The allowed set also includes `system.done`, `system.no_match`, and `system.clarify_ambiguous_context`.
 
 `ConstrainedRouter.route_update` sends the user persona plus the unsummarized segment and native reply text, validates each model key against the shrinking allowed set, and returns ordered `FlowSelection` values plus exactly one terminal `RoutingTerminal`. It never treats current as exclusive, never maps Telegram message IDs to selections, and cannot run one key twice in one update.
 
@@ -58,9 +58,9 @@ Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forb
 
 ## 6. Matching contract
 
-Normal matching queries only profiles with exact role `server`, active attendance at the request service, positive free capacity, and no active exclusion for the request. Leaders/staff are excluded even though they inherit server capabilities for service audiences. The rank prompt receives local aliases (for example `candidate-0`), interests, and `cg_name`; only the service maps aliases back to profile UUIDs. It atomically reserves the first rankable candidate through F01's guarded capacity update before the meeting preference is shown. No qualifying assignment produces the ordinary `human_match.not_found` action event.
+Normal matching uses F01's query that joins each operational profile to its user and reads the exact role from `users.role`. It admits only `server` users with active attendance at the request service, positive free capacity, and no active exclusion for the request. `leader` and `staff` users are excluded even though they inherit server capabilities for service audiences. The rank prompt receives local aliases (for example `candidate-0`), interests, and `cg_name`; only the service maps aliases back to profile UUIDs. It atomically reserves the first rankable candidate through F01's guarded capacity update before the meeting preference is shown. No qualifying assignment produces the ordinary `human_match.not_found` action event.
 
-Safety matching queries only exact `leader` or `staff` profiles. A responder qualifies when `always_available` is true or they attend the current service; ordinary servers are never included. No candidate produces `safety_match.not_found`, allowing I04's action executor to send configured urgent-support copy, notify admins, and retain pending state. It never falls back to normal matching.
+Safety matching uses F01's joined query and admits only users whose `users.role` is exactly `leader` or `staff`. A responder qualifies when their operational profile has `always_available=True` or their user attends the current service; ordinary `server` users are never included. No candidate produces `safety_match.not_found`, allowing I04's action executor to send configured urgent-support copy, notify admins, and retain pending state. It never falls back to normal matching.
 
 For rematch, `release_and_exclude` releases the active reservation, writes the request/profile exclusion, and notifies the previous responder in the same user-serialized transaction before ranking again. `reserve_ranked` locks/guards capacity so concurrent requests yield at most the available number of reservations. Capacity remains reserved until rematch, service interaction end, or admin intervention.
 

@@ -69,7 +69,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_m
 
 **Files:** Modify `routing/contracts.py`; create `routing/router.py`, `tests/unit/routing/test_router.py`, `tests/integration/routing/test_router_uow.py`.
 
-**Interfaces:** Consumes F01 `OpenSelectionState`, `DiscussionFlow`, `MessageDiscussionFlowTrigger`, and `OpenSelectionRepository.list_for_user`. Produces `ConstrainedRouter.route_update(user_id: UUID, incoming: IncomingText, now: datetime) -> RoutingResult` and `CandidateAssembler.assemble(...) -> list[RoutingCandidate]`.
+**Interfaces:** Consumes F01 `OpenSelectionState`, `PublishedFlowDefinition`, `MessageDiscussionFlowTrigger`, and `OpenSelectionRepository.list_for_user(user_id: UUID, *, now: datetime) -> list[OpenSelectionState]`. Produces `ConstrainedRouter.route_update(user_id: UUID, incoming: IncomingText, now: datetime) -> RoutingResult` and `CandidateAssembler.assemble(selections: Sequence[OpenSelectionState], definitions: Mapping[UUID, PublishedFlowDefinition], *, now: datetime) -> list[RoutingCandidate]`.
 
 - [ ] **Step 1: Write failing routing tests.**
 
@@ -118,7 +118,7 @@ async def test_gateway_failure_preserves_old_cursor() -> None:
 
 **Files:** Create `friendly-bot/src/friendly_bot/matching/__init__.py`, `matching/service.py`, `tests/unit/matching/test_normal_matching.py`, `tests/integration/matching/test_reservations.py`.
 
-**Interfaces:** Consumes F01 `UnitOfWork.matches.list_eligible_normal`, `.reserve_ranked`, `.release_and_exclude`, and `lock_user`. Produces `MatchingService.reserve_normal(request_id: UUID, service_id: UUID, now: datetime) -> MatchAssignmentRecord | None` and `.rematch_normal(...)`.
+**Interfaces:** Consumes F01 `UnitOfWork.matches.list_eligible_normal(service_id: UUID, request_id: UUID) -> list[MatchCandidateRecord]`, `.reserve_ranked(request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime) -> MatchAssignmentRecord | None`, `.release_and_exclude(request_id: UUID, profile_id: UUID, *, reason: str, now: datetime) -> None`, and `lock_user(user_id: UUID) -> None`. Produces `MatchingService.reserve_normal(request_id: UUID, service_id: UUID, *, now: datetime) -> MatchAssignmentRecord | None` and `MatchingService.rematch_normal(request_id: UUID, previous_profile_id: UUID, service_id: UUID, *, now: datetime) -> MatchAssignmentRecord | None`.
 
 - [ ] **Step 1: Write failing normal-match tests.**
 
@@ -129,7 +129,7 @@ async def test_normal_pool_is_exact_server_attendees_with_capacity() -> None:
     assert leader.id not in gateway.rank_prompt_profile_ids
 
 async def test_rematch_releases_and_excludes_before_new_reservation() -> None:
-    await service.rematch_normal(REQUEST, old_profile.id, SERVICE, NOW)
+    await service.rematch_normal(REQUEST, old_profile.id, SERVICE, now=NOW)
     assert old_profile.id in repository.exclusions_for(REQUEST)
     assert repository.reservation_for(old_profile.id).released_at == NOW
 ```
@@ -195,4 +195,4 @@ Expected: affected suite passes after reconciliation; push succeeds; the handoff
 
 ## Plan self-review
 
-The six tasks cover provider policy/redaction, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools, rematch exclusions, concurrency, review, full R03 acceptance evidence, and a G2-consumable execution handoff. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Interface names match F01's published UoW/repository ownership; actual execution verifies their equivalent direct methods at G1 before code is started.
+The six tasks cover provider policy/redaction, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools from joined `users.role`, rematch exclusions, concurrency, review, full R03 acceptance evidence, and a G2-consumable execution handoff. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Interface names and signatures are the exact F01 published UoW/repository contracts; execution waits for their G1 implementation evidence before code is started.

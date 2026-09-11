@@ -6,7 +6,7 @@
   "date": "2026-09-12",
   "integration_authority_inspected": {
     "remote": "origin/main",
-    "commit": "8b37b950f057db02802a5c2333de0357d241036c"
+    "commit": "9b5b4e5c7fef5b3a215572cc3f74174590dc5a2d"
   },
   "planning_artifact_commit": "8b37b950f057db02802a5c2333de0357d241036c",
   "execution_prerequisites": [
@@ -20,9 +20,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md": "f2cc53c2cede5d49befc970bb7d44dab031632248a7dac3bf1170c9e1ee5ca49",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md": "de262d344326be899abc400b2b3ac1d925cfc11bfd5f7caa4579d6eb7dacabbb",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md": "3804c712fe4e9082eb2042987355815f32bec7cac3b1985679bc8bc244613c49"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching-design.md": "9a49f76dcf44ab5e1378f17477e87d091110f5c27b15817bddf1ee79e285379f",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-r03-routing-persona-matching.md": "ebaa34da2258730f5f89770030172fd838fe24f7edd9d1acd8e7ac90529b2ad1",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md": "3fb518ec9e8a373b3b169b2b4bd1069566425b104fa51702d6bdc67969fa1ea6"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -30,13 +30,13 @@
     "living_authorities_modified": []
   },
   "f01_reconciliation": {
-    "planning_commit": "a920d2d6948cc09212196a5473b2643a1a95bf7f",
+    "planning_commit": "9b5b4e5c7fef5b3a215572cc3f74174590dc5a2d",
     "consumed_contracts": [
       "friendly_bot.domain.DiscussionFlow and OpenSelectionState",
       "friendly_bot.persistence.uow.UnitOfWork",
       "ConversationRepository, PersonaRepository, OperationalProfileRepository, AttendanceRepository, MatchRepository, and OpenSelectionRepository"
     ],
-    "execution_check": "At G1, verify F01's direct repository methods are equivalent to the exact R03 consumer signatures in the R03 design before implementation."
+    "execution_check": "After G1 supplies implementation evidence, consume the exact F01 repository signatures recorded in the R03 design directly."
   },
   "pass_1_verification": [
     "python3 -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-planning.json",
