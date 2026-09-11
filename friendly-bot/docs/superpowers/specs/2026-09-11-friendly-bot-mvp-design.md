@@ -11,7 +11,7 @@
 
 ## 1. Purpose and scope
 
-Friendly Bot is a low-barrier Telegram connection point for youths who may be shy to approach a physical connect point, raise their hand during an altar call, or ask lingering questions in person. The MVP supports NBNC onboarding, event-aware conversation flows, server login and attendance, constrained LLM routing, and interest-based introductions to a friendly human.
+Friendly Bot is a low-barrier Telegram connection point for youths who may be shy to approach a physical connect point, raise their hand during an altar call, or ask lingering questions in person. The MVP supports NBNC onboarding, service-aware conversation flows, server login and attendance, constrained LLM routing, and interest-based introductions to a friendly human.
 
 The MVP is a Python application run locally on Ryan's machine. It uses Telegram long polling, a local PostgreSQL database, a local scheduler, and OpenRouter for constrained routing and matching. It does not include a hosted runtime, an admin UI, bot-relayed human chat, or free-form LLM responses.
 
@@ -21,7 +21,7 @@ The MVP is a Python application run locally on Ryan's machine. It uses Telegram 
 
 Flow definitions are recursive, typed, versioned JSON documents stored in PostgreSQL. Runtime state is relational and records which flow child sets are open for each user. Python owns the permitted trigger and action types and validates every flow version before publication.
 
-This approach preserves future admin configurability without spreading a recursive graph across many configuration tables or requiring a code deployment for every event-copy change.
+This approach preserves future admin configurability without spreading a recursive graph across many configuration tables or requiring a code deployment for every service-copy change.
 
 ## 3. DiscussionFlow definition
 
@@ -44,7 +44,7 @@ class DiscussionFlow:
     return_actions: list[DiscussionAction] = field(default_factory=list)
 ```
 
-`trigger=None` is permitted only for a root flow invoked automatically by system initialization, event entry, or an event timestamp.
+`trigger=None` is permitted only for a root flow invoked automatically by system initialization, service entry, or a service timestamp.
 
 An empty `actions` list is meaningful: selecting the flow performs no side effect and exposes its `next_flows`. A flow with both `actions=[]` and `next_flows=[]` is a no-op and produces a validation warning.
 
@@ -62,15 +62,17 @@ Within one Telegram update, the same flow key may execute at most once. The rout
 
 - Flow keys are unique within a published version.
 - The system-global root is a `CHECKPOINT` with `trigger=None`.
-- Every event-global root is a `CHECKPOINT` with `trigger=None`.
-- Every event timestamp owns exactly one root `DiscussionFlow`; that root has `trigger=None`.
-- A timestamp root may use any next-flow mode and inherits the event checkpoint as an ancestor.
+- Every service-global root is a `CHECKPOINT` with `trigger=None`.
+- Every service timestamp owns exactly one root `DiscussionFlow`; that root has `trigger=None`.
+- A timestamp root may use any next-flow mode and inherits the service checkpoint as an ancestor.
 - A checkpoint has at least one child.
 - `return_actions` is permitted only on a checkpoint.
 - Trigger and action discriminators must name registered Python types.
 - Button IDs are stable, namespaced identifiers.
 - Template variables must be declared and resolvable before publication.
-- Action fallbacks cannot create an immediate recursion cycle.
+- Every non-error action event declared by an action type has exactly one direct child handler.
+- A flow may define at most one direct `error` event handler.
+- Event-driven cycles without a Telegram-input boundary are invalid.
 
 ## 4. Trigger model
 
@@ -81,12 +83,13 @@ MessageDiscussionFlowTrigger(llm_gist: str)
 ButtonDiscussionFlowTrigger(button_id: str)
 CommandDiscussionFlowTrigger(command: str)
 AutomaticDiscussionFlowTrigger(reason: str)
+ActionEventDiscussionFlowTrigger(event_key: str)
 AnyOfDiscussionFlowTrigger(triggers: list[DiscussionFlowTrigger])
 ```
 
 Ordinary text uses only `llm_gist`; there is no strict-keyword path. Exact slash commands use `CommandDiscussionFlowTrigger`. Exact Telegram button callbacks use `ButtonDiscussionFlowTrigger`. Telegram-addressed commands such as `/login@friendly_bot` normalize to `/login`.
 
-Event timestamps invoke their root flow from scheduler context, so the root itself has no trigger object.
+Service timestamps invoke their root flow from scheduler context, so the root itself has no trigger object. `ActionEventDiscussionFlowTrigger` handles an event emitted while executing its direct parent flow. It is deterministic, is never offered to the LLM, and does not match events emitted by siblings, reusable past selections, or ancestors.
 
 `AnyOfDiscussionFlowTrigger` permits a single flow to accept more than one trigger mechanism without duplicating its actions.
 
@@ -100,15 +103,46 @@ All actions extend `DiscussionAction`. The MVP includes typed actions for:
 - showing Telegram typing or upload activity;
 - saving the incoming message verbatim;
 - setting or changing user fields;
-- adding or changing event attendance;
+- adding or changing service attendance;
 - ranking, assigning, releasing, and notifying human matches;
 - sharing a validated Telegram contact URL;
 - generating a user persona; and
 - returning to the nearest checkpoint.
 
-The design rejects a generic `behavior`, handler-name, or arbitrary-code action. Complex behaviors use explicit Python action subclasses with validated parameters.
+The design rejects a generic `behavior`, handler-name, or arbitrary-code action. Complex behaviors use explicit Python action subclasses with validated parameters. Normal matching uses a dedicated server-only action; safety matching uses a separate leader-or-staff-only action. Neither action accepts a configurable role list.
 
-Each action may provide an optional `fallback_flow`. Transient failures are retried safely first. After retry exhaustion, remaining actions stop and the fallback flow runs. The default fallback sends: “Sorry, an error occurred. Please try again.” The parent transition is committed only after its actions succeed, so a handled failure leaves the original choice available.
+```python
+@dataclass(frozen=True)
+class ActionEvent:
+    key: str
+    payload: ActionEventPayload | None = None
+
+
+class DiscussionAction(BaseModel):
+    type: str
+
+
+class FindAndReserveServerAction(DiscussionAction):
+    type: Literal["find_and_reserve_server"]
+    emitted_event_keys: ClassVar[frozenset[str]] = frozenset(
+        {"human_match.found", "human_match.not_found"}
+    )
+
+
+class FindAndReserveSafetyResponderAction(DiscussionAction):
+    type: Literal["find_and_reserve_safety_responder"]
+    emitted_event_keys: ClassVar[frozenset[str]] = frozenset(
+        {"safety_match.found", "safety_match.not_found"}
+    )
+```
+
+The action configuration contains validated parameters only. Its registered Python executor receives the internal action context and may call `context.emit(ActionEvent(...))`; administrators cannot supply a handler name or executable behavior. Event payloads remain in the local execution context and are never automatically included in an OpenRouter prompt.
+
+An action may emit one terminal `ActionEvent` through the execution context. Emitting an event stops the remaining actions in that flow, then the harness selects the one direct `next_flow` whose `ActionEventDiscussionFlowTrigger.event_key` matches. Action subclasses declare their possible non-error event keys so publication can require complete, unambiguous direct handlers.
+
+After safe retry exhaustion, an unexpected action failure emits the reserved `error` event and stops the remaining actions. A direct `error` child customizes recovery for that flow. If the direct children do not contain an `error` trigger, the harness runs the fixed default flow: “Sorry, an error occurred. Error log: {telegram_user_id}.” Error events never bubble to ancestors. The Telegram user ID is rendered locally for the affected user and admins and is never included in an OpenRouter request.
+
+An outcome-emitting action must be the final action in its list because later actions would be unreachable. Ordinary actions that finish successfully without emitting an event continue to the next action. The parent transition and the emitted event's child actions are committed as one idempotent processing unit.
 
 Telegram user IDs and DOBs are never inserted into OpenRouter action inputs.
 
@@ -125,7 +159,7 @@ class OpenFlowSelection:
     user_id: UUID
     flow_version_id: UUID
     parent_flow_key: str
-    event_id: UUID | None
+    service_id: UUID | None
     is_current: bool
     is_global_interruptive: bool
     ancestor_flow_keys: list[str]
@@ -134,7 +168,7 @@ class OpenFlowSelection:
     last_focused_at: datetime
 ```
 
-The referenced parent definition supplies the currently available `next_flows`. System-global, event-global, current, and reusable-past selections are all assembled into the router's single `open_selections` collection. Global interruptive flows are not passed in a separate field.
+The referenced parent definition supplies the currently available `next_flows`. System-global, service-global, current, and reusable-past selections are all assembled into the router's single `open_selections` collection. Global interruptive flows are not passed in a separate field.
 
 Current is a soft importance signal, not an eligibility boundary. Its size is not capped. A timestamp may add a current selection while another prompt awaits a reply.
 
@@ -158,7 +192,7 @@ Telegram supplies the text of a natively replied-to message. The router receives
 
 If identical or otherwise ambiguous contexts prevent a confident choice, the model returns the reserved key `system.clarify_ambiguous_context`; the harness sends: “Sorry, which message were you referring to?”
 
-Old non-event buttons remain usable as long as their parent selection remains reusable. Event-bound buttons stop at `interaction_ends_at` and send: “Sorry, the event is over!”
+Old non-service buttons remain usable as long as their parent selection remains reusable. Service-bound buttons stop at `interaction_ends_at` and send: “Sorry, the service is over!”
 
 ## 7. Checkpoint traversal
 
@@ -166,7 +200,7 @@ Every user branch has a guaranteed checkpoint ancestor:
 
 ```text
 System root checkpoint
-└── Event root checkpoint, when attending an event
+└── Service root checkpoint, when attending a service
     └── Timestamp root flow
         └── Nested discussion flows
 ```
@@ -177,7 +211,7 @@ When a selected leaf has `next_flows=[]`, the engine traverses that branch's `ch
 
 - from a checkpoint descendant, return to the nearest checkpoint;
 - from the checkpoint itself, pop it and return to the parent checkpoint;
-- from the event checkpoint, return to the system checkpoint; and
+- from the service checkpoint, return to the system checkpoint; and
 - at the system checkpoint, repeat its return actions because no higher checkpoint exists.
 
 Parallel timestamp branches carry independent checkpoint paths. A leaf never returns to an unrelated newer prompt.
@@ -193,7 +227,7 @@ For each incoming message, OpenRouter receives:
 - the current incoming message;
 - natively replied-to message text, when present;
 - all open selections and their candidate flow keys;
-- current, past, global, and event context labels; and
+- current, past, global, and service context labels; and
 - the reserved `done`, no-match, and clarification keys.
 
 The model returns exactly one permitted key per routing call. The harness validates it, executes only configured actions, removes the selected key from the same-update candidate set, and asks again until the model returns `done`. The LLM never writes user-facing bot prose.
@@ -208,7 +242,7 @@ Structured Telegram user IDs and DOB fields are never sent to OpenRouter. User-a
 
 ### 8.3 OpenRouter policy
 
-The MVP uses `qwen/qwen3.7-flash`, declared in `hyperparameters.py`. Every request requires zero-data-retention routing and denies provider data collection. Prompt logging remains disabled. If no compliant endpoint is available, the request fails closed and follows the configured action fallback; it never silently relaxes privacy requirements.
+The MVP uses `qwen/qwen3.7-flash`, declared in `hyperparameters.py`. Every request requires zero-data-retention routing and denies provider data collection. Prompt logging remains disabled. If no compliant endpoint is available, the request fails closed and emits the reserved `error` event; it never silently relaxes privacy requirements.
 
 The OpenRouter API key is a secret supplied outside source control.
 
@@ -220,7 +254,7 @@ All people share a `users` identity record. Operational roles are `nbnc`, `serve
 
 An NBNC does not provide a DOB. Prefilled operational profiles used for login contain normalized name and DOB. A Telegram account may occupy at most one operational login, and an operational profile may have at most one logged-in Telegram account.
 
-Profiles may declare `always_available=True`. Safety matching accepts staff or leaders who are either always available or attending the current event. Normal matching always requires event attendance.
+Profiles may declare `always_available=True`. Safety matching accepts staff or leaders who are either always available or attending the current service. Normal matching always requires service attendance.
 
 ### 9.2 NBNC onboarding
 
@@ -229,12 +263,12 @@ For an unknown Telegram user, `/start` or any ordinary non-special message begin
 1. “Hey! Welcome to The Zone! Glad to see you here today!”
 2. “How may I address you?”
 3. Save the next reply exactly as the name.
-4. Resolve applicable event attendance behavior.
-5. Enter the event checkpoint or the system basic-features checkpoint.
+4. Resolve applicable service attendance behavior.
+5. Enter the service checkpoint or the system basic-features checkpoint.
 
 For an existing user, `/start` welcomes them back and offers “Continue” and “Change my name.” Changing the name stores the next supplied reply exactly.
 
-Outside an event, NBNCs receive basic options including directions to Star and information about NCC.
+Outside a service, NBNCs receive basic options including directions to Star and information about NCC.
 
 ### 9.3 Operational login and management
 
@@ -246,30 +280,30 @@ On first successful server login, the bot asks for hobbies, interests, and conve
 
 No slash command has implicit behavior. `/start`, `/login`, `/logout`, `/manage`, and any future `/cancel` work only through configured `CommandDiscussionFlowTrigger` flows.
 
-## 10. Events and attendance
+## 10. Services and attendance
 
-### 10.1 Event model
+### 10.1 Service model
 
-Each event defines:
+Each service defines:
 
 - name and stable key;
 - `highkey`;
 - administrative timezone, defaulting to Asia/Singapore;
 - door-open and door-close timestamps;
 - `interaction_ends_at`;
-- an event-global checkpoint root;
+- a service-global checkpoint root;
 - a latecomer flow;
 - versioned timestamp roots; and
 - attendee records and delivery state.
 
-Each event timestamp contains one automatically invoked root:
+Each service timestamp contains one automatically invoked root:
 
 ```python
 @dataclass
-class EventTimestamp:
+class ServiceTimestamp:
     key: str
     occurs_at: datetime
-    audience: EventAudience
+    audience: ServiceAudience
     root_flow: DiscussionFlow
 ```
 
@@ -282,29 +316,29 @@ Supported audiences are:
 - `ALL_NBNCS`
 - `ALL_SERVERS`
 - `ALL_LEADERS`
-- `EVENT_NBNCS`
-- `EVENT_SERVERS`
-- `EVENT_LEADERS`
-- `ALL_EVENT_ATTENDEES`
+- `SERVICE_NBNCS`
+- `SERVICE_SERVERS`
+- `SERVICE_LEADERS`
+- `ALL_SERVICE_ATTENDEES`
 
 Role inheritance applies to audience membership: leader audiences include staff, while server audiences include leaders and staff. Admin status alone does not add a user to an operational audience.
 
 ### 10.3 Attendance rules
 
-- With exactly one ongoing highkey event before door close, the bot assumes attendance and enrolls the NBNC.
-- With multiple ongoing events and at least one highkey event, the bot requires a choice among events and provides no “none” option.
-- With only lowkey events, the bot asks whether and which event the NBNC attends.
-- Only one overlapping event is active per NBNC; switching preserves historical attendance but changes active routing and matching.
-- After door close but before `interaction_ends_at`, the bot asks whether the NBNC is at an applicable event. Confirmation enrolls them and runs the latecomer flow.
-- At `interaction_ends_at`, new attendance and event-bound interactions stop.
+- With exactly one ongoing highkey service before door close, the bot assumes attendance and enrolls the NBNC.
+- With multiple ongoing services and at least one highkey service, the bot requires a choice among services and provides no “none” option.
+- With only lowkey services, the bot asks whether and which service the NBNC attends.
+- Only one overlapping service is active per NBNC; switching preserves historical attendance but changes active routing and matching.
+- After door close but before `interaction_ends_at`, the bot asks whether the NBNC is at an applicable service. Confirmation enrolls them and runs the latecomer flow.
+- At `interaction_ends_at`, new attendance and service-bound interactions stop.
 
-The event-global checkpoint exposes a repeatable flow for “I am actually attending another event, service, or timing.”
+The service-global checkpoint exposes a repeatable flow for “I am actually attending another service or timing.”
 
 ### 10.4 Zone X behavior
 
-The mock Zone X event demonstrates the event contract:
+The mock Zone X service demonstrates the service contract:
 
-The full configuration and conversation walkthrough is in the [Zone X worked example](../../examples/zone-x-event-example.md).
+The full configuration and conversation walkthrough is in the [Zone X worked example](../../examples/zone-x-service-example.md).
 
 - Before service: directions to Star, what to expect, and connect with a friendly human.
 - During service: ask a question about service. The router selects only approved fixed answers, including “Where is the toilet?” and “Who is Jesus?” Unknown questions offer a human connection.
@@ -320,9 +354,9 @@ The flow asks:
 1. “What is one thing that interests you? (Nothing is a valid answer too!)”
 2. Whether the NBNC would like to join the matched human and meet new friends or have the human join them.
 
-The model ranks only operational users who satisfy the approved role, current-event attendance, and available-capacity constraints. Ranking uses the NBNC's stated interest, the human's interests, and `cg_name`. Capacity is configurable per server and defaults to one.
+The model ranks only users whose operational role is exactly `server` and who satisfy current-service attendance and available-capacity constraints. Leaders and staff are never candidates for normal matching. Ranking uses the NBNC's stated interest, the server's interests, and `cg_name`. Capacity is configurable per server and defaults to one.
 
-The server is assigned immediately without accept or decline. They receive the NBNC's chosen name, interest, meeting preference, event name, and notice that the NBNC may contact them. The NBNC receives the server's validated Telegram contact URL.
+The server is assigned immediately without accept or decline. They receive the NBNC's chosen name, interest, meeting preference, service name, and notice that the NBNC may contact them. The NBNC receives the server's validated Telegram contact URL.
 
 If no eligible server is available, the MVP says nobody is currently available. It never selects a server who is absent.
 
@@ -337,7 +371,7 @@ A match consumes capacity until `interaction_ends_at`, rematch, or admin interve
 
 ### 11.2 Safety connection
 
-Safety is a repeatable system-global interruptive flow. It uses the normal matching mechanism but targets staff or leaders only. An eligible responder has `always_available=True` or attends the current event.
+Safety is a repeatable system-global interruptive flow. It uses the normal matching mechanism but targets staff or leaders only. An eligible responder has `always_available=True` or attends the current service.
 
 If no responder qualifies, the bot sends an admin-configured urgent-support message, alerts all admins, and leaves the request pending. Safety matching never falls back to an ordinary server.
 
@@ -353,7 +387,7 @@ One local async runtime owns:
 
 - Telegram `getUpdates` long polling;
 - durable Telegram update cursor and deduplication;
-- event timestamp scheduling and catch-up;
+- service timestamp scheduling and catch-up;
 - durable outbound delivery and attempt records;
 - persona maintenance;
 - admin error and diagnostic notification; and
@@ -369,16 +403,16 @@ The initial schema includes records for:
 
 - users and operational profiles;
 - operational logins and availability;
-- events, attendees, timestamps, and timing deliveries;
+- services, attendees, timestamps, and timing deliveries;
 - immutable published flow versions;
 - current and reusable-past open flow selections;
 - conversation messages and persona cursors;
 - human-match requests, assignments, exclusions, and capacity;
 - Telegram update cursor and processed-update deduplication;
 - outbound delivery attempts; and
-- sanitized admin diagnostic events.
+- sanitized admin diagnostic records.
 
-Database constraints enforce unique Telegram identity attachment, one active overlapping event per NBNC, unique published flow keys within a version, nonnegative capacity, idempotent timing deliveries, and idempotent update processing.
+Database constraints enforce unique Telegram identity attachment, one active overlapping service per NBNC, unique published flow keys within a version, nonnegative capacity, idempotent timing deliveries, and idempotent update processing.
 
 ## 14. Reliability, security, and observability
 
@@ -389,6 +423,7 @@ Database constraints enforce unique Telegram identity attachment, one active ove
 - Every emitted application error and debug diagnostic creates a sanitized notification for every admin plus a structured local record with a correlation ID.
 - Per-user processing is serialized so two rapid Telegram updates cannot corrupt conversation state.
 - Flow publication is rejected on invalid recursion, unknown types, unresolved templates, duplicate keys, or invalid checkpoint structure.
+- Action events are dispatched only to direct child triggers; an unhandled `error` runs the fixed default error flow without ancestor bubbling.
 - All configured user-facing prose is sent by the harness, never generated by the router.
 
 ## 15. Verification strategy
@@ -397,6 +432,7 @@ Implementation follows test-driven development. Coverage includes:
 
 - recursive flow parsing and publication validation;
 - every trigger and action subtype;
+- declared action-event outcomes, direct event dispatch, custom error handling, and default error handling;
 - current-to-past transitions for all three next-flow modes;
 - repeated `ALLOW_MANY` choices;
 - leaf and “never mind” checkpoint traversal, including nested checkpoints;
