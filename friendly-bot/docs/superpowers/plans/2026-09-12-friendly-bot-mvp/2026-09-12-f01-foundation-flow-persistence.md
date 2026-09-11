@@ -45,9 +45,10 @@
 - [ ] **Step 1: Write the failing configuration tests.**
 
 ```python
-def test_default_database_url_uses_isolated_loopback_port() -> None:
-    assert DatabaseSettings().database_url.host == "127.0.0.1"
-    assert DatabaseSettings().database_url.port == 5832
+def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FRIENDLY_BOT_DATABASE_URL", raising=False)
+    with pytest.raises(ValidationError):
+        DatabaseSettings()
 
 def test_redacted_url_hides_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FRIENDLY_BOT_DATABASE_URL", "postgresql+asyncpg://u:secret@127.0.0.1:5832/db")
@@ -65,7 +66,7 @@ Expected: FAIL because the package and `DatabaseSettings` do not exist.
 ```python
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FRIENDLY_BOT_")
-    database_url: PostgresDsn = "postgresql+asyncpg://friendly_bot:friendly_bot@127.0.0.1:5832/friendly_bot"
+    database_url: PostgresDsn
 
     def redacted_url(self) -> str:
         return self.database_url._url.render_as_string(hide_password=True)
@@ -391,7 +392,7 @@ Write every table/index/constraint explicitly into revision `0001_foundation`; d
 
 - [ ] **Step 4: Run fresh-database migration and runtime checks.**
 
-Run: `cd friendly-bot && python scripts/db_runtime_check.py verify && docker compose -p friendly-bot-u504 up -d postgres && until pg_isready -h 127.0.0.1 -p 5832 -U friendly_bot -d friendly_bot; do sleep 1; done && FRIENDLY_BOT_DATABASE_URL="$FRIENDLY_BOT_DATABASE_URL" uv run alembic upgrade head && uv run pytest tests/integration/persistence/test_migrations.py -q`
+Run: `cd friendly-bot && uv run python scripts/db_runtime_check.py verify && docker compose -p friendly-bot-u504 up -d postgres && until pg_isready -h 127.0.0.1 -p 5832 -U friendly_bot -d friendly_bot; do sleep 1; done && FRIENDLY_BOT_DATABASE_URL="$FRIENDLY_BOT_DATABASE_URL" uv run alembic upgrade head && uv run pytest tests/integration/persistence/test_migrations.py -q`
 
 Expected: guard verifies the exact namespace, PostgreSQL becomes ready, upgrade exits 0, and migration tests pass. Do not print credentials.
 

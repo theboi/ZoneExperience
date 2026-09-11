@@ -16,9 +16,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/f01-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "cddd59437e498e04224ae24829533f09a6611f6bfbf950a0bcb50cf06380b42e",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "50b7bdf8b9f309c3b6daf53e6d9b922c40f9dece07ba64b2cfeb9859fc12399d",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "39c30d9830c48ead43f870755c22d489d3f44f99e124460aeb080098631a9443"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "ea434470758ece7302b4cfcaa69f9f771ae0e4e2381c6cfa49666525a00c2cec",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "f60beac851a16f1d1e11e0b1977af14d00c7704ee3935c0013b92afe58b9392c",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "2dfdb77e2ebe318c0fcdf9cfaeb23f1f56c6f77a332111a882efd66dd5f54c13"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -47,5 +47,10 @@
     "git diff --check"
   ],
   "product_code_created": false,
-  "remote_reachability": "pending planning-artifact commit"
+  "remote_reachability": {
+    "planning_artifacts_commit": "7fb3fd826bc3f06fef2de34a9daeec75260ccc8a",
+    "remote": "origin/main",
+    "verified": true,
+    "proof": "git merge-base --is-ancestor 7fb3fd826bc3f06fef2de34a9daeec75260ccc8a origin/main exited 0 after push"
+  }
 }
