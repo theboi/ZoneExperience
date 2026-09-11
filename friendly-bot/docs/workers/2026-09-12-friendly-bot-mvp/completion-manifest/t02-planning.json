@@ -19,8 +19,8 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/t02-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery-design.md": "00b4bd46bc5b04ad8511576a3f5931ac2c70bcdff500075e9b010532edf25e7a",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery.md": "a24189fbea55c0f6db5224287dad6a5b57b89fd09c9466edf563883c8d011d05",
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery-design.md": "df8e8dd26c2900ce4e7cf277a0b2d757a0aa77b29905ecc5ee2bf1126f4fba80",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery.md": "f511da4d872d3274b611ee63d22ef2055baf6adc02aa63bf67a2e97819da4af8",
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/t02.md": "b2f800cedc5a9602c8f9ad8d95ee395f872c36a9a6bc895333b00d9696fea1f5"
   },
   "authority_impact": {
@@ -56,5 +56,9 @@
     "git diff --check"
   ],
   "product_code_created": false,
-  "remote_reachability": "pending planning-artifact commit"
+  "remote_reachability": {
+    "planning_commit": "42314c22cce022859750000d4a00b04951e5c391",
+    "remote": "origin/main",
+    "state": "reachable"
+  }
 }

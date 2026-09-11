@@ -267,6 +267,11 @@ async def test_unknown_start_captures_next_name_exactly() -> None:
 async def test_operational_profile_cannot_attach_to_two_telegram_accounts() -> None:
     assert (await accounts.login(chat(1), "Jordan", DOB)).kind == "attached"
     assert (await accounts.login(chat(2), "Jordan", DOB)).kind == "occupied"
+
+@pytest.mark.parametrize("role", [OperationalRole.SERVER, OperationalRole.LEADER, OperationalRole.STAFF])
+async def test_first_login_for_every_operational_role_opens_interest_capture(role: OperationalRole) -> None:
+    result = await accounts.login(chat_for(role), normalized_name_for(role), dob_for(role))
+    assert result.kind == "attached" and result.opens_interest_capture
 ```
 
 - [ ] **Step 2: Run the red test.**
