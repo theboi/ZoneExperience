@@ -19,9 +19,9 @@
     "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/t02-planning.json"
   ],
   "artifact_sha256": {
-    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery-design.md": "df8e8dd26c2900ce4e7cf277a0b2d757a0aa77b29905ecc5ee2bf1126f4fba80",
-    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery.md": "f511da4d872d3274b611ee63d22ef2055baf6adc02aa63bf67a2e97819da4af8",
-    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/t02.md": "b2f800cedc5a9602c8f9ad8d95ee395f872c36a9a6bc895333b00d9696fea1f5"
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery-design.md": "9afebd176432b8243462c8024cf4863c3fd49ddcd7c2f7b2b65b295a7505460c",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-t02-telegram-service-delivery.md": "200dae0709588cd61a6b927c1fe1b811ef3c28c45c136f47a8ef554388fcd79a",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/t02.md": "9898fac03d710c0b044e203135a15bb5cb39b7a1eb35e33019253fc39c134df2"
   },
   "authority_impact": {
     "product_specification": "no-impact",
@@ -29,16 +29,17 @@
     "living_authorities_modified": []
   },
   "f01_contract_reconciliation": {
-    "source_commit": "7fb3fd826bc3f06fef2de34a9daeec75260ccc8a",
+    "source_commit": "9b5b4e5c7fef5b3a215572cc3f74174590dc5a2d",
     "consumed": [
       "persistence.uow.UnitOfWork",
-      "UpdateRepository.claim_update and durable telegram_poll_state",
-      "DeliveryRepository.claim_timestamp_delivery and enqueue",
+      "UpdateRepository.claim_update; PollStateRepository.get and advance_monotonically",
+      "DeliveryRepository.claim_timestamp_delivery, enqueue, claim_next_safe, start_attempt, and finish_attempt",
       "OpenSelectionRepository.expire_service_bound and apply",
       "SelectionTransitionEngine",
-      "FlowVersionRepository, service, attendance, user, operational-profile, conversation, and diagnostic repositories"
+      "UserRepository, OperationalProfileRepository, OperationalLoginRepository, ServiceRepository, AttendanceRepository, ConversationRepository, DiagnosticRepository, and FlowVersionRepository",
+      "UserRecord.role is the only operational-role source; OperationalProfileRecord has no role field"
     ],
-    "execution_rule": "Inspect G1's implemented exports before implementation; request an additive typed contract through the coordinator if necessary, never an ORM bypass or compatibility shim."
+    "execution_rule": "Consume F01's exact published protocols after G1; never access ORM rows, create a compatibility shim, duplicate a repository method, or read an operational-profile role."
   },
   "planned_exports_for_i04": [
     "TelegramGateway",

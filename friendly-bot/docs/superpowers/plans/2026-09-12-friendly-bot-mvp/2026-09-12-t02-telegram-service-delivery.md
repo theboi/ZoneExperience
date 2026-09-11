@@ -12,8 +12,11 @@
 
 ## Global Constraints
 
-- Begin only after a coordinator-passed `PG` receipt and implemented F01 G1 evidence are reachable from `origin/main`; inspect F01's actual exports before Task 1.
+- Begin only after a coordinator-passed `PG` receipt and implemented F01 G1 evidence are reachable from `origin/main`; consume F01's exact published protocols.
 - Use F01 `UnitOfWork`, repositories, immutable flow definitions, and `SelectionTransitionEngine`; create no migration, ORM model, local session, or persistence shim.
+- Use `uow.updates.claim_update(update_id, received_at=now)`, `uow.poll_state.get()`, and `uow.poll_state.advance_monotonically(next_offset, at=now)` for ingress; use `uow.conversations.record_incoming(user_id=..., source_message_id=..., body=..., replied_to_body=..., occurred_at=...)` for normalized input.
+- Use `uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)`, `.enqueue(delivery)`, `.claim_next_safe(now=now)`, `.start_attempt(delivery_id, correlation_id, started_at=now)`, and `.finish_attempt(delivery_id, attempt_id, outcome, now=now)` for scheduler/outbox work.
+- Use `uow.services.list_ongoing(now=now)`, `.list_due_timestamps(now=now)`, `.list_audience_user_ids(audience, service_id, now=now)`, and `uow.attendances.start_or_switch(user_id, service_id, attendee_kind=..., started_at=now)`; operational-role reads use `UserRecord.role`, never an operational profile.
 - Telegram uses long polling only. Clear a webhook before polling; do not create webhook ingress, hosted runtime, or second poller.
 - Persist/update state before side effects; retry only parsed definite non-sends; never blindly replay an ambiguous send.
 - Keep bot tokens, raw Telegram payloads, response bodies, DOBs, and user text out of logs and diagnostics.
@@ -181,7 +184,7 @@ async with self._uow_factory() as uow:
         await uow.poll_state.advance_monotonically(update.update_id + 1); return ProcessedUpdate.duplicate()
     user = await uow.users.resolve_telegram_sender(update.message.sender.id)
     await uow.lock_user(user.id)
-    await uow.conversations.record_incoming(user_id=user.id, source_message_id=update.message.message_id, body=update.message.text, occurred_at=update.message.sent_at)
+    await uow.conversations.record_incoming(user_id=user.id, source_message_id=update.message.message_id, body=update.message.text, replied_to_body=update.message.reply_text, occurred_at=update.message.sent_at)
     await self._dispatcher.dispatch(user_id=user.id, incoming=update.message, unit_of_work=uow)
     await uow.poll_state.advance_monotonically(update.update_id + 1)
 ```
@@ -230,7 +233,7 @@ Expected: FAIL because the outbox worker is absent.
 ```python
 claim = await uow.deliveries.claim_next_safe(now=now)
 if claim is None: return False
-attempt = await uow.deliveries.start_attempt(claim.id, correlation_id=correlation_id)
+attempt = await uow.deliveries.start_attempt(claim.id, correlation_id=correlation_id, started_at=now)
 outcome = await self._gateway.send(claim.message)
 await uow.deliveries.finish_attempt(claim.id, attempt.id, outcome=classify(outcome), now=now)
 ```
@@ -255,7 +258,7 @@ Run: `git add friendly-bot/src/friendly_bot/telegram/outbox.py friendly-bot/test
 
 **Interfaces:**
 - Produces: `OnboardingService.handle`, `OperationalAccountService.login`, `.manage`, `.logout`, `LoginResult`.
-- Consumes: F01 users/profiles/logins/conversation repositories and T02 outbound enqueue port; it returns configured-flow outcome data, not rendered fallback flows.
+- Consumes: F01 `UserRepository`, `OperationalProfileRepository`, `OperationalLoginRepository`, and `ConversationRepository` exact protocols plus T02 outbound enqueue port; all operational-role reads use `UserRecord.role`, not `OperationalProfileRecord`; it returns configured-flow outcome data, not rendered fallback flows.
 
 - [ ] **Step 1: Write failing onboarding/login exclusivity examples.**
 
@@ -290,7 +293,7 @@ async def logout(self, telegram_user_id: int, *, now: datetime) -> LoginResult:
         return await uow.operational_logins.detach_for_user(user.id, at=now)
 ```
 
-Store first-login interests only through the configured capture path; `/manage` exposes edit-interests state; logout detaches and never deletes profile/history. Do not reveal the occupying account.
+Store first-login interests only through the configured capture path; use the attached user's `UserRecord.role` to cover server, leader, and staff; `/manage` exposes edit-interests state; logout detaches and never deletes profile/history. Do not reveal the occupying account.
 
 - [ ] **Step 4: Run focused green tests.**
 
