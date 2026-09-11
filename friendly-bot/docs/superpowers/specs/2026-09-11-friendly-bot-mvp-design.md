@@ -304,6 +304,8 @@ The event-global checkpoint exposes a repeatable flow for “I am actually atten
 
 The mock Zone X event demonstrates the event contract:
 
+The full configuration and conversation walkthrough is in the [Zone X worked example](../../examples/zone-x-event-example.md).
+
 - Before service: directions to Star, what to expect, and connect with a friendly human.
 - During service: ask a question about service. The router selects only approved fixed answers, including “Where is the toilet?” and “Who is Jesus?” Unknown questions offer a human connection.
 - After service: “Connect with us” and “Ask a question” both route to the human-matching flow.
