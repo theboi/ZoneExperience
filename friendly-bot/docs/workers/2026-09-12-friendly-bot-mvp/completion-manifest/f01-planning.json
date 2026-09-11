@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "worker": "F01",
+  "phase": "planning",
+  "status": "planning-complete-execution-blocked",
+  "date": "2026-09-12",
+  "integration_authority_inspected": {
+    "remote": "origin/main",
+    "commit": "687a9005be7146968d07cf010beefc0c01b17cbd"
+  },
+  "execution_prerequisite": "A coordinator-passed PG receipt reachable from origin/main.",
+  "owned_artifacts": [
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/f01-planning.json"
+  ],
+  "artifact_sha256": {
+    "friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md": "cddd59437e498e04224ae24829533f09a6611f6bfbf950a0bcb50cf06380b42e",
+    "friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md": "50b7bdf8b9f309c3b6daf53e6d9b922c40f9dece07ba64b2cfeb9859fc12399d",
+    "friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/f01.md": "39c30d9830c48ead43f870755c22d489d3f44f99e124460aeb080098631a9443"
+  },
+  "authority_impact": {
+    "product_specification": "no-impact",
+    "evidence": "The existing product specification already covers the approved F01 behavior; this artifact adds implementation detail only.",
+    "living_authorities_modified": []
+  },
+  "planned_contracts": {
+    "domain": [
+      "DiscussionFlow",
+      "DiscussionFlowTrigger",
+      "DiscussionAction",
+      "validate_for_publication",
+      "SelectionTransitionEngine"
+    ],
+    "persistence": [
+      "UnitOfWork",
+      "FlowVersionRepository",
+      "OpenSelectionRepository",
+      "UpdateRepository",
+      "DeliveryRepository"
+    ]
+  },
+  "pass_1_verification": [
+    "python -m json.tool friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/f01-planning.json",
+    "rg -n 'TBD|TODO|implement later|fill in details' friendly-bot/docs/superpowers/specs/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence-design.md friendly-bot/docs/superpowers/plans/2026-09-12-friendly-bot-mvp/2026-09-12-f01-foundation-flow-persistence.md",
+    "git diff --check"
+  ],
+  "product_code_created": false,
+  "remote_reachability": "pending planning-artifact commit"
+}
