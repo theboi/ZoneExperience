@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "F01",
   "phase": "execution",
-  "status": "delivery-contract-repair-verified-locally",
+  "status": "delivery-contract-review-repair-recorded",
   "date": "2026-09-13",
   "accepted_source_and_review": {
     "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
@@ -19,6 +19,8 @@
     ],
     "production_repairs": "none; the restored accepted implementation satisfied both new acceptance examples",
     "delivery_contract_repair": {
+      "implementation_commit": "5b28c2ea0a135b0bdbde59e0b1bb08b026634500",
+      "implementation_reconciliation": "The implementation fast-forwarded the independent checkpoint-lineage commits 8a5d6ad and d7bf46e before its full F01 verification and publication.",
       "root_cause": "The original claim DTO omitted the message and lease ownership, claim selection permanently excluded claimed rows, retry timing reused created_at, and attempt correlation IDs were discarded. T02 therefore could not fence a stale worker or drive its durable outbox through F01 alone.",
       "implemented": [
         "0002_delivery_contract adds eligible_at, opaque claim token/expiry, confirmed Telegram message ID, and attempt correlation ID without rewriting 0001",
@@ -26,6 +28,15 @@
         "claim/start/finish transitions fence stale claimants, retain exact retry-at, and never recover sending or uncertain rows"
       ],
       "authority_impact": "No product, architecture, T02, R03, or I04 authority impact: this is a repair wholly within F01's existing durable-delivery boundary."
+    },
+    "delivery_contract_review_repair": {
+      "finding": "T02's dated F01 delivery references still named the pre-fencing claim/start/finish API, and coverage did not directly assert that an old token cannot renew after an expired-claim recovery.",
+      "implemented": [
+        "added a PostgreSQL assertion for stale renew rejection after recovery",
+        "reconciled only F01-generated delivery-contract references in the T02 dated design and plan",
+        "refreshed F01 provenance with the published implementation commit and reconciliation evidence"
+      ],
+      "authority_impact": "Product and architecture masterplans require no change: this review repair makes the already-approved durable-delivery implementation contract complete. T02 ownership and scope remain unchanged."
     },
     "excluded": [
       "bot and routing behavior",
@@ -68,6 +79,14 @@
       "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_migrations.py -q -k delivery_contract_upgrade",
       "green_result": "exit 0; 1 passed, 13 deselected in 7.60s",
       "contract": "0002 upgrades from 0001 to metadata parity and downgrades exactly back to 0001 delivery columns."
+    },
+    {
+      "test": "test_recovered_claim_rejects_stale_token_renewal",
+      "red_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_recovered_claim_rejects_stale_token_renewal -q",
+      "red_result": "expected nonzero under a temporary, immediately reverted renewal-token validation removal: 1 failed with DID NOT RAISE DeliveryClaimLostError after claim recovery.",
+      "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_recovered_claim_rejects_stale_token_renewal -q",
+      "green_result": "exit 0; 1 passed in 1.51s",
+      "contract": "An expired unstarted claim gets a new opaque token on recovery; the old claimant cannot renew it or start a send."
     }
   ],
   "verification": [
@@ -113,6 +132,19 @@
     {
       "command": "uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot && uv lock --check",
       "result": "exit 0; Ruff clean, 31 files formatted, mypy clean over 15 source files, and 26 packages resolved"
+    },
+    {
+      "command": "uv run pytest tests/integration/persistence/test_repositories.py -q -k 'delivery_claim_exposes or delivery_retry_at or expired_unstarted or recovered_claim_rejects' && uv run pytest tests/integration/persistence/test_migrations.py -q -k delivery_contract_upgrade",
+      "result": "exit 0; 4 delivery tests passed (13 deselected) in 2.88s and 1 migration test passed (13 deselected) in 7.97s"
+    },
+    {
+      "command": "uv run pytest tests/unit/domain tests/integration/persistence -q",
+      "result": "exit 0; 146 passed, 1 skipped in 33.95s after the review repair",
+      "coverage": "complete F01 domain, repository, schema, and migration suite with the post-recovery stale-renew assertion"
+    },
+    {
+      "command": "uv run alembic upgrade head && uv run alembic check && uv run alembic downgrade base && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot && uv lock --check",
+      "result": "exit 0; upgraded through 0002, no Alembic operations detected, downgraded to base, Ruff clean with 31 formatted files, mypy clean over 15 source files, and 26 packages resolved"
     }
   ],
   "isolated_runtime": {
@@ -294,6 +326,11 @@
     },
     "accepted_source_commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
     "task8_acceptance_commit": "fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6",
+    "delivery_contract_implementation": {
+      "commit": "5b28c2ea0a135b0bdbde59e0b1bb08b026634500",
+      "pre_commit_reconciliation": "HEAD and origin/main were both d7bf46e17d1c531cae6d79e05777510415ef89a9 after the implementation fast-forwarded the two independent checkpoint-lineage commits.",
+      "remote_reachability": "git push/fetch and merge-base succeeded; origin/main resolved to 5b28c2ea0a135b0bdbde59e0b1bb08b026634500."
+    },
     "remote_reachability": {
       "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",
       "result": "exit 0; origin/main resolved to fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 and matched the acceptance commit exactly"

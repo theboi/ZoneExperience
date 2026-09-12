@@ -15,7 +15,7 @@
 - Begin only after a coordinator-passed `PG` receipt and implemented F01 G1 evidence are reachable from `origin/main`; consume F01's exact published protocols.
 - Use F01 `UnitOfWork`, repositories, immutable flow definitions, and `SelectionTransitionEngine`; create no migration, ORM model, local session, or persistence shim.
 - Use `uow.updates.claim_update(update_id, received_at=now)`, `uow.poll_state.get()`, and `uow.poll_state.advance_monotonically(next_offset, at=now)` for ingress; use `uow.conversations.record_incoming(user_id=..., source_message_id=..., body=..., replied_to_body=..., occurred_at=...)` for normalized input.
-- Use `uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)`, `.enqueue(delivery)`, `.claim_next_safe(now=now)`, `.start_attempt(delivery_id, correlation_id, started_at=now)`, and `.finish_attempt(delivery_id, attempt_id, outcome, now=now)` for scheduler/outbox work.
+- Use `uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)` and `.enqueue(delivery)` for scheduler work. For each outbound send, commit `.claim_next_safe(now=now)` first; it returns immutable provider-neutral `claim.message` plus `claim_token`/expiry. Map that message only at the T02 Telegram boundary, then in a new UoW call `.start_attempt(claim.id, correlation_id, claim_token=claim.claim_token, started_at=now)` and commit before sending. Do not send on `DeliveryClaimLostError`; call `.renew_claim(...)` only with a live matching token; finish in a final UoW with exact `retry_at`, `safe_error`, and `confirmed_telegram_message_id`. Never auto-replay `sending` or `uncertain`; create no ORM/session/migration/persistence shim.
 - Use `uow.services.list_ongoing(now=now)`, `.list_due_timestamps(now=now)`, `.list_audience_user_ids(audience, service_id, now=now)`, and `uow.attendances.start_or_switch(user_id, service_id, attendee_kind=..., started_at=now)`; operational-role reads use `UserRecord.role`, never an operational profile.
 - Telegram uses long polling only. Clear a webhook before polling; do not create webhook ingress, hosted runtime, or second poller.
 - Persist/update state before side effects; retry only parsed definite non-sends; never blindly replay an ambiguous send.
@@ -231,14 +231,35 @@ Expected: FAIL because the outbox worker is absent.
 - [ ] **Step 3: Implement claim, attempt, and terminal transitions.**
 
 ```python
-claim = await uow.deliveries.claim_next_safe(now=now)
-if claim is None: return False
-attempt = await uow.deliveries.start_attempt(claim.id, correlation_id=correlation_id, started_at=now)
-outcome = await self._gateway.send(claim.message)
-await uow.deliveries.finish_attempt(claim.id, attempt.id, outcome=classify(outcome), now=now)
+async with self._uow_factory() as claim_uow:
+    claim = await claim_uow.deliveries.claim_next_safe(now=now)
+if claim is None:
+    return False
+request = self._telegram_request_from(claim.message, claim.idempotency_key)
+try:
+    async with self._uow_factory() as start_uow:
+        attempt = await start_uow.deliveries.start_attempt(
+            claim.id,
+            correlation_id,
+            claim_token=claim.claim_token,
+            started_at=now,
+        )
+except DeliveryClaimLostError:
+    return False
+outcome = await self._gateway.send(request)
+async with self._uow_factory() as finish_uow:
+    await finish_uow.deliveries.finish_attempt(
+        claim.id,
+        attempt.id,
+        outcome=classify(outcome),
+        now=now,
+        retry_at=exact_retry_at(outcome),
+        safe_error=safe_error(outcome),
+        confirmed_telegram_message_id=confirmed_message_id(outcome),
+    )
 ```
 
-Persist `uncertain` before returning and never place it back in pending. Honour 429 retry-after and finite backoff for 5xx only; record sanitized reason codes, not response bodies.
+The claim UoW and start UoW must commit before their respective next boundary; optionally renew only a live matching claim token before start. Persist `uncertain` before returning and never place it back in pending. Honour 429 retry-after and finite backoff for 5xx only; record sanitized reason codes, not response bodies. This consumes F01's contract directly without an ORM row, local session, migration, or persistence shim.
 
 - [ ] **Step 4: Run focused green tests.**
 

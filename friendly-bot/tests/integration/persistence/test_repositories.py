@@ -1056,6 +1056,13 @@ async def test_only_an_expired_unstarted_claim_is_recoverable_and_stale_tokens_a
         assert recovered.claim_token is not None
         assert recovered.claim_token != stale_token
         with pytest.raises(DeliveryClaimLostError):
+            await uow.deliveries.renew_claim(
+                unstarted.id,
+                claim_token=stale_token,
+                now=NOW + timedelta(minutes=1, seconds=1),
+                lease_duration=lease_duration,
+            )
+        with pytest.raises(DeliveryClaimLostError):
             await uow.deliveries.start_attempt(
                 unstarted.id,
                 uuid4(),
@@ -1071,6 +1078,50 @@ async def test_only_an_expired_unstarted_claim_is_recoverable_and_stale_tokens_a
             )
             is None
         )
+
+
+async def test_recovered_claim_rejects_stale_token_renewal(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Recovery must fence the previous owner from renewing an unstarted claim."""
+
+    user_id = await _seed_user(session_factory)
+    lease_duration = timedelta(minutes=1)
+    delivery = NewOutboundDelivery(
+        idempotency_key="delivery:stale-renewal",
+        user_id=user_id,
+        telegram_chat_id=74,
+        kind="message",
+        payload={"text": "stale renewal"},
+        eligible_at=NOW,
+    )
+    async with uow_factory() as uow:
+        enqueued = await uow.deliveries.enqueue(delivery)
+    async with uow_factory() as uow:
+        first_claim = await uow.deliveries.claim_next_safe(
+            now=NOW, lease_duration=lease_duration
+        )
+
+    assert first_claim is not None
+    assert first_claim.claim_token is not None
+    stale_token = first_claim.claim_token
+
+    async with uow_factory() as uow:
+        recovered_claim = await uow.deliveries.claim_next_safe(
+            now=NOW + lease_duration, lease_duration=lease_duration
+        )
+        assert recovered_claim is not None
+        assert recovered_claim.id == enqueued.id
+        assert recovered_claim.claim_token is not None
+        assert recovered_claim.claim_token != stale_token
+        with pytest.raises(DeliveryClaimLostError):
+            await uow.deliveries.renew_claim(
+                enqueued.id,
+                claim_token=stale_token,
+                now=NOW + lease_duration,
+                lease_duration=lease_duration,
+            )
 
 
 async def test_flow_publication_and_delivery_enqueue_are_idempotent(
