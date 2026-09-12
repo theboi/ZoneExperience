@@ -9,7 +9,7 @@
 | Scope | Friendly Bot local MVP runtime, persistence, flow engine, integrations, privacy, and recovery |
 | Decision owner | Ryan The |
 | Effective date | 2026-09-11 |
-| Last evidence review | 2026-09-12 at repository commit `689bb2c`; implementation absent |
+| Last evidence review | 2026-09-12 at repository commit `a8249b9`; implementation absent |
 | Related authorities | [`product-specification.md`](product-specification.md) |
 | Historical task artifacts | [`../superpowers/specs/`](../superpowers/specs/) |
 

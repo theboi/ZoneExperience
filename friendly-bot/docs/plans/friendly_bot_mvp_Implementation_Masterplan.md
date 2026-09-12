@@ -22,7 +22,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Frozen planning snapshot; execution unauthorized until `PG` passes |
+| Status | Approved execution snapshot; `PG` passed for the pinned planning set |
 | Blueprint ID | `2026-09-12-friendly-bot-mvp` |
 | Effective date | 2026-09-12 |
 | Integration authority | `origin/main` |
