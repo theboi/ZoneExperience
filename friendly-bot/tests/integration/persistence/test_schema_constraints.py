@@ -6,14 +6,15 @@ import json
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy import Enum, MetaData
+from sqlalchemy import Enum, MetaData, insert, select
 from sqlalchemy.dialects.postgresql import CreateEnumType, dialect
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from friendly_bot.persistence.base import Base
@@ -21,6 +22,7 @@ from friendly_bot.persistence.models import (
     FlowScopeKind,
     OperationalRole,
     ServiceAudience,
+    TelegramPollState,
 )
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
@@ -118,12 +120,53 @@ async def session() -> AsyncIterator[SchemaConnection]:
         await connection.close()
 
 
+@pytest.fixture
+async def async_session(session: SchemaConnection) -> AsyncIterator[AsyncSession]:
+    """Provide a real SQLAlchemy session bound to Task 5's isolated schema."""
+
+    database_url = os.environ["FRIENDLY_BOT_DATABASE_URL"]
+    engine = create_async_engine(
+        database_url,
+        connect_args={"server_settings": {"search_path": session.schema}},
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as database_session:
+            yield database_session
+    finally:
+        await engine.dispose()
+
+
 async def _user(
     session: SchemaConnection, *, role: OperationalRole = OperationalRole.NBNC
 ) -> UUID:
     user_id = uuid4()
     await session.insert("users", id=user_id, role=role.value)
     return user_id
+
+
+async def _profile(
+    session: SchemaConnection,
+    *,
+    user_id: UUID,
+    normalized_name: str,
+    dob: date,
+) -> UUID:
+    """Insert a minimally valid operational profile for constraint examples."""
+
+    profile_id = uuid4()
+    await session.insert(
+        "operational_profiles",
+        id=profile_id,
+        user_id=user_id,
+        normalized_name=normalized_name,
+        dob=dob,
+        interests=[],
+        always_available=True,
+        capacity=1,
+        reserved_capacity=0,
+    )
+    return profile_id
 
 
 async def _service(session: SchemaConnection, *, key: str) -> UUID:
@@ -195,6 +238,24 @@ async def test_metadata_creates_every_f01_durable_table(
         "user_processing_locks",
         "users",
     }
+
+
+async def test_async_session_can_execute_and_commit(
+    async_session: AsyncSession,
+) -> None:
+    """The supported async runtime can execute and commit through AsyncSession."""
+
+    await async_session.execute(
+        insert(TelegramPollState).values(singleton_id=1, next_update_offset=1)
+    )
+    await async_session.commit()
+
+    result = await async_session.execute(
+        select(TelegramPollState.next_update_offset).where(
+            TelegramPollState.singleton_id == 1
+        )
+    )
+    assert result.scalar_one() == 1
 
 
 async def test_processed_update_id_is_unique(session: SchemaConnection) -> None:
@@ -293,6 +354,35 @@ async def test_operational_profile_rejects_invalid_capacity_bounds(
         )
 
 
+async def test_operational_profile_login_identity_is_unique(
+    session: SchemaConnection,
+) -> None:
+    """A normalized name and date of birth resolve to exactly one profile."""
+
+    first_user_id = await _user(session, role=OperationalRole.SERVER)
+    second_user_id = await _user(session, role=OperationalRole.SERVER)
+    await _profile(
+        session,
+        user_id=first_user_id,
+        normalized_name="jordan",
+        dob=date(1990, 1, 1),
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await _profile(
+            session,
+            user_id=second_user_id,
+            normalized_name="jordan",
+            dob=date(1990, 1, 1),
+        )
+
+    await _profile(
+        session,
+        user_id=second_user_id,
+        normalized_name="jordan",
+        dob=date(1991, 1, 1),
+    )
+
+
 async def test_open_selection_treats_null_service_as_a_real_unique_key(
     session: SchemaConnection,
 ) -> None:
@@ -372,6 +462,118 @@ async def test_operational_login_keeps_only_one_active_profile_attachment(
         )
 
 
+async def test_operational_login_keeps_only_one_active_user_attachment(
+    session: SchemaConnection,
+) -> None:
+    """One Telegram identity cannot actively attach to two profiles."""
+
+    first_profile_user_id = await _user(session, role=OperationalRole.SERVER)
+    second_profile_user_id = await _user(session, role=OperationalRole.SERVER)
+    login_user_id = await _user(session)
+    first_profile_id = await _profile(
+        session,
+        user_id=first_profile_user_id,
+        normalized_name="first",
+        dob=date(1990, 1, 1),
+    )
+    second_profile_id = await _profile(
+        session,
+        user_id=second_profile_user_id,
+        normalized_name="second",
+        dob=date(1991, 1, 1),
+    )
+    await session.insert(
+        "operational_logins",
+        id=uuid4(),
+        operational_profile_id=first_profile_id,
+        user_id=login_user_id,
+        attached_at=NOW,
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await session.insert(
+            "operational_logins",
+            id=uuid4(),
+            operational_profile_id=second_profile_id,
+            user_id=login_user_id,
+            attached_at=NOW + timedelta(minutes=1),
+        )
+
+
+async def test_released_history_permits_a_later_active_login_and_match(
+    session: SchemaConnection,
+) -> None:
+    """Partial active indexes retain history while permitting a later active row."""
+
+    profile_user_id = await _user(session, role=OperationalRole.SERVER)
+    login_user_id = await _user(session)
+    requester_user_id = await _user(session)
+    profile_id = await _profile(
+        session,
+        user_id=profile_user_id,
+        normalized_name="responder",
+        dob=date(1990, 1, 1),
+    )
+    await session.insert(
+        "operational_logins",
+        id=uuid4(),
+        operational_profile_id=profile_id,
+        user_id=login_user_id,
+        attached_at=NOW,
+        detached_at=NOW + timedelta(minutes=1),
+    )
+    await session.insert(
+        "operational_logins",
+        id=uuid4(),
+        operational_profile_id=profile_id,
+        user_id=login_user_id,
+        attached_at=NOW + timedelta(minutes=2),
+    )
+
+    request_id = uuid4()
+    await session.insert(
+        "human_match_requests",
+        id=request_id,
+        requester_user_id=requester_user_id,
+        kind="normal",
+        status="pending",
+        created_at=NOW,
+    )
+    released_reservation_id = uuid4()
+    await session.insert(
+        "capacity_reservations",
+        id=released_reservation_id,
+        operational_profile_id=profile_id,
+        request_id=request_id,
+        reserved_at=NOW,
+        released_at=NOW + timedelta(minutes=1),
+    )
+    await session.insert(
+        "human_match_assignments",
+        id=uuid4(),
+        request_id=request_id,
+        responder_profile_id=profile_id,
+        capacity_reservation_id=released_reservation_id,
+        assigned_at=NOW,
+        released_at=NOW + timedelta(minutes=1),
+    )
+    active_reservation_id = uuid4()
+    await session.insert(
+        "capacity_reservations",
+        id=active_reservation_id,
+        operational_profile_id=profile_id,
+        request_id=request_id,
+        reserved_at=NOW + timedelta(minutes=2),
+    )
+    await session.insert(
+        "human_match_assignments",
+        id=uuid4(),
+        request_id=request_id,
+        responder_profile_id=profile_id,
+        capacity_reservation_id=active_reservation_id,
+        assigned_at=NOW + timedelta(minutes=2),
+    )
+
+
 async def test_delivery_and_message_idempotency_constraints(
     session: SchemaConnection,
 ) -> None:
@@ -433,6 +635,22 @@ async def test_service_timestamp_persona_and_user_lock_keys(
     await session.insert("user_processing_locks", user_id=user_id, locked_at=NOW)
     with pytest.raises(asyncpg.UniqueViolationError):
         await session.insert("user_processing_locks", user_id=user_id, locked_at=NOW)
+
+
+async def test_persona_cursor_rejects_an_orphan_last_message(
+    session: SchemaConnection,
+) -> None:
+    """A persona cursor cannot advance past an unknown conversation message."""
+
+    user_id = await _user(session)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await session.insert(
+            "persona_cursors",
+            id=uuid4(),
+            user_id=user_id,
+            persona="friendly",
+            last_message_id=uuid4(),
+        )
 
 
 async def test_match_constraints_allow_only_one_active_assignment(

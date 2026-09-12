@@ -118,6 +118,11 @@ class OperationalProfile(Base):
 
     __tablename__ = "operational_profiles"
     __table_args__ = (
+        UniqueConstraint(
+            "normalized_name",
+            "dob",
+            name="uq_operational_profiles_login_identity",
+        ),
         CheckConstraint(
             "capacity >= 0", name="ck_operational_profiles_capacity_nonnegative"
         ),
@@ -441,7 +446,9 @@ class PersonaCursor(Base):
         ForeignKey("users.id"), nullable=False, unique=True
     )
     persona: Mapped[str] = mapped_column(Text, nullable=False)
-    last_message_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_message_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("conversation_messages.id"),
+    )
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
