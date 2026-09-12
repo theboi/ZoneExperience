@@ -82,7 +82,7 @@ class SafetyUow:
 class SafetyRanker:
     async def rank_aliases(self, request: MatchRankingRequest) -> list[str]:
         self.request = request
-        return [candidate.alias for candidate in request.candidates]
+        return [candidate.alias for candidate in reversed(request.candidates)]
 
 
 async def test_safety_allows_leader_or_staff_attending_or_always_available() -> None:
@@ -98,10 +98,10 @@ async def test_safety_allows_leader_or_staff_attending_or_always_available() -> 
     assignment = await service.reserve_safety(REQUEST, SERVICE, now=NOW)
 
     assert assignment is not None
-    assert assignment.responder_profile_id == leader.profile_id
+    assert assignment.responder_profile_id == staff_always_available.profile_id
     assert uow.ranked_profile_ids == [
-        leader.profile_id,
         staff_always_available.profile_id,
+        leader.profile_id,
     ]
     assert uow.normal_queries == 0
     assert uow.safety_queries == 1

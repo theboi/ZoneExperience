@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy import Enum, MetaData
+from sqlalchemy import Enum, MetaData, select
 from sqlalchemy.dialects.postgresql import CreateEnumType, dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -20,6 +20,8 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
+    CapacityReservation,
+    HumanMatchAssignment,
     HumanMatchRequest,
     OperationalProfile,
     OperationalRole,
@@ -250,7 +252,25 @@ async def test_one_capacity_slot_has_one_concurrent_winner(
 
     async with session_factory() as session:
         profile = await session.get(OperationalProfile, responder_profile)
+        assignments = list(
+            await session.scalars(
+                select(HumanMatchAssignment).where(
+                    HumanMatchAssignment.responder_profile_id == responder_profile,
+                    HumanMatchAssignment.released_at.is_(None),
+                )
+            )
+        )
+        reservations = list(
+            await session.scalars(
+                select(CapacityReservation).where(
+                    CapacityReservation.operational_profile_id == responder_profile,
+                    CapacityReservation.released_at.is_(None),
+                )
+            )
+        )
 
     assert sum(result is not None for result in results) == 1
     assert profile is not None
     assert profile.reserved_capacity == 1
+    assert len(assignments) == 1
+    assert len(reservations) == 1
