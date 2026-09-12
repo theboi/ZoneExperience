@@ -331,6 +331,11 @@
       "pre_commit_reconciliation": "HEAD and origin/main were both d7bf46e17d1c531cae6d79e05777510415ef89a9 after the implementation fast-forwarded the two independent checkpoint-lineage commits.",
       "remote_reachability": "git push/fetch and merge-base succeeded; origin/main resolved to 5b28c2ea0a135b0bdbde59e0b1bb08b026634500."
     },
+    "delivery_contract_review_repair": {
+      "commit": "13df44abd8045d640bed9779e843a61908e6749d",
+      "pre_commit_reconciliation": "HEAD and origin/main were both 5b28c2ea0a135b0bdbde59e0b1bb08b026634500; no T02 external source had landed.",
+      "remote_reachability": "git push/fetch and merge-base succeeded; origin/main resolved to 13df44abd8045d640bed9779e843a61908e6749d."
+    },
     "remote_reachability": {
       "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",
       "result": "exit 0; origin/main resolved to fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 and matched the acceptance commit exactly"
