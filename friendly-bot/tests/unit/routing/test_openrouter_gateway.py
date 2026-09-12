@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from friendly_bot.routing.contracts import KeySelectionRequest
+from friendly_bot.routing.contracts import KeySelectionRequest, PersonaSummaryRequest
 from friendly_bot.routing.openrouter_gateway import (
     GatewayProtocolError,
     OpenRouterGateway,
@@ -113,3 +113,22 @@ async def test_gateway_fails_closed_for_non_single_whitelisted_key(content: str)
                 allowed_keys={"flow.a"}, user_name="A", messages=["hello"]
             )
         )
+
+
+async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
+    """A separate summary path must not weaken OpenRouter privacy controls."""
+
+    client = FakeHttpxClient(
+        [FakeResponse(200, {"choices": [{"message": {"content": "calm"}}]})]
+    )
+    gateway = OpenRouterGateway(api_key="test-only", client=client)
+
+    summary = await gateway.summarize_persona(
+        PersonaSummaryRequest(user_name="A", persona="old", messages=["new words"])
+    )
+
+    assert summary == "calm"
+    assert client.requests[0]["json"]["provider"] == {
+        "zdr": True,
+        "data_collection": "deny",
+    }

@@ -28,3 +28,11 @@ class KeySelectionRequest(PromptDTO):
     messages: tuple[str, ...] = ()
     reply_body: str | None = None
     candidates: tuple[RoutingPromptCandidate, ...] = ()
+
+
+class PersonaSummaryRequest(PromptDTO):
+    """The safe, content-only input for one durable persona summary."""
+
+    user_name: str = ""
+    persona: str = ""
+    messages: tuple[str, ...] = Field(min_length=1)

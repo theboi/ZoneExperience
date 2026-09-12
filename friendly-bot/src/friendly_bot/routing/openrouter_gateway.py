@@ -18,7 +18,7 @@ from friendly_bot.hyperparameters import (
     OPENROUTER_TIMEOUT_SECONDS,
     ROUTING_MAX_ATTEMPTS,
 )
-from friendly_bot.routing.contracts import KeySelectionRequest
+from friendly_bot.routing.contracts import KeySelectionRequest, PersonaSummaryRequest
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -155,24 +155,48 @@ class OpenRouterGateway:
     async def select_key(self, request: KeySelectionRequest) -> str:
         """Return one configured key or raise a closed gateway failure."""
 
-        payload: dict[str, object] = {
+        response = await self._post(
+            self._payload(
+                request,
+                (
+                    "Return exactly one JSON object with one key named 'key'. "
+                    "Its value must be one of allowed_keys. Return no prose."
+                ),
+            )
+        )
+        return self._parse_selected_key(response, request.allowed_keys)
+
+    async def summarize_persona(self, request: PersonaSummaryRequest) -> str:
+        """Return a nonempty private persona summary or fail without a fallback."""
+
+        response = await self._post(
+            self._payload(
+                request,
+                "Return a concise persona summary. Return no structured identifiers.",
+            )
+        )
+        summary = self._assistant_content(response).strip()
+        if not summary:
+            raise GatewayProtocolError("OpenRouter returned an empty persona summary")
+        return summary
+
+    def _payload(
+        self, request: KeySelectionRequest | PersonaSummaryRequest, instruction: str
+    ) -> dict[str, object]:
+        return {
             "model": OPENROUTER_MODEL,
             "provider": {"zdr": True, "data_collection": "deny"},
             "logprobs": False,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Return exactly one JSON object with one key named 'key'. "
-                        "Its value must be one of allowed_keys. Return no prose."
-                    ),
-                },
+                {"role": "system", "content": instruction},
                 {
                     "role": "user",
                     "content": json.dumps(request.model_dump(mode="json")),
                 },
             ],
         }
+
+    async def _post(self, payload: Mapping[str, object]) -> GatewayResponse:
         headers = {
             "Authorization": f"Bearer {self._api_key.get_secret_value()}",
             "Content-Type": "application/json",
@@ -195,13 +219,28 @@ class OpenRouterGateway:
                     raise GatewayTransportError("OpenRouter response exhausted")
                 await asyncio.sleep(0)
                 continue
-            return self._parse_selected_key(response, request.allowed_keys)
+            return response
         raise GatewayTransportError("OpenRouter transport exhausted")
 
     @staticmethod
     def _parse_selected_key(
         response: GatewayResponse, allowed_keys: frozenset[str]
     ) -> str:
+        try:
+            parsed = json.loads(OpenRouterGateway._assistant_content(response))
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise GatewayProtocolError("OpenRouter response was not a key selection") from error
+        if (
+            not isinstance(parsed, dict)
+            or set(parsed) != {"key"}
+            or not isinstance(parsed["key"], str)
+            or parsed["key"] not in allowed_keys
+        ):
+            raise GatewayProtocolError("OpenRouter selected an invalid key")
+        return parsed["key"]
+
+    @staticmethod
+    def _assistant_content(response: GatewayResponse) -> str:
         try:
             payload = response.json()
             if not isinstance(payload, Mapping):
@@ -218,14 +257,6 @@ class OpenRouterGateway:
             content = message["content"]
             if not isinstance(content, str):
                 raise TypeError("content must be text")
-            parsed = json.loads(content)
-        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise GatewayProtocolError("OpenRouter response was not a key selection") from error
-        if (
-            not isinstance(parsed, dict)
-            or set(parsed) != {"key"}
-            or not isinstance(parsed["key"], str)
-            or parsed["key"] not in allowed_keys
-        ):
-            raise GatewayProtocolError("OpenRouter selected an invalid key")
-        return parsed["key"]
+            return content
+        except (IndexError, KeyError, TypeError, ValueError) as error:
+            raise GatewayProtocolError("OpenRouter response was not assistant text") from error
