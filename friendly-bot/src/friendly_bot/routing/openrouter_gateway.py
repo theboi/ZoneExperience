@@ -18,7 +18,11 @@ from friendly_bot.hyperparameters import (
     OPENROUTER_TIMEOUT_SECONDS,
     ROUTING_MAX_ATTEMPTS,
 )
-from friendly_bot.routing.contracts import KeySelectionRequest, PersonaSummaryRequest
+from friendly_bot.routing.contracts import (
+    KeySelectionRequest,
+    MatchRankingRequest,
+    PersonaSummaryRequest,
+)
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -180,8 +184,36 @@ class OpenRouterGateway:
             raise GatewayProtocolError("OpenRouter returned an empty persona summary")
         return summary
 
+    async def rank_aliases(self, request: MatchRankingRequest) -> tuple[str, ...]:
+        """Rank safe local aliases without exposing durable profile identifiers."""
+
+        remaining = {candidate.alias: candidate for candidate in request.candidates}
+        if len(remaining) != len(request.candidates):
+            raise GatewayProtocolError("match aliases must be distinct")
+        ranked: list[str] = []
+        while remaining:
+            response = await self._post(
+                self._payload(
+                    MatchRankingRequest(candidates=tuple(remaining.values())),
+                    (
+                        "Return exactly one JSON object with one key named 'key'. "
+                        "Its value must be an available alias or system.done. Return no prose."
+                    ),
+                )
+            )
+            key = self._parse_selected_key(
+                response, frozenset(remaining) | {"system.done"}
+            )
+            if key == "system.done":
+                break
+            ranked.append(key)
+            del remaining[key]
+        return tuple(ranked + list(remaining))
+
     def _payload(
-        self, request: KeySelectionRequest | PersonaSummaryRequest, instruction: str
+        self,
+        request: KeySelectionRequest | PersonaSummaryRequest | MatchRankingRequest,
+        instruction: str,
     ) -> dict[str, object]:
         return {
             "model": OPENROUTER_MODEL,

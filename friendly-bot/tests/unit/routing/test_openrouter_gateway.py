@@ -9,7 +9,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from friendly_bot.routing.contracts import KeySelectionRequest, PersonaSummaryRequest
+from friendly_bot.routing.contracts import (
+    KeySelectionRequest,
+    MatchPromptCandidate,
+    MatchRankingRequest,
+    PersonaSummaryRequest,
+)
 from friendly_bot.routing.openrouter_gateway import (
     GatewayProtocolError,
     OpenRouterGateway,
@@ -132,3 +137,32 @@ async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
         "zdr": True,
         "data_collection": "deny",
     }
+
+
+async def test_match_ranking_returns_only_local_aliases() -> None:
+    """Ranking must use aliases; passing profile identifiers would disclose durable data."""
+
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {"choices": [{"message": {"content": '{"key":"candidate-1"}'}}]},
+            ),
+            FakeResponse(200, {"choices": [{"message": {"content": '{"key":"system.done"}'}}]}),
+        ]
+    )
+    gateway = OpenRouterGateway(api_key="test-only", client=client)
+
+    aliases = await gateway.rank_aliases(
+        MatchRankingRequest(
+            candidates=[
+                MatchPromptCandidate(alias="candidate-0", interests=["music"], cg_name="A"),
+                MatchPromptCandidate(alias="candidate-1", interests=["art"], cg_name="B"),
+            ]
+        )
+    )
+
+    assert aliases == ("candidate-1", "candidate-0")
+    payload = json.dumps(client.requests[0]["json"])
+    assert "candidate-0" in payload and "candidate-1" in payload
+    assert "profile-id-sentinel-443" not in payload

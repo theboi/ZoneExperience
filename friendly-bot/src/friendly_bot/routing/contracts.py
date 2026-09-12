@@ -36,3 +36,17 @@ class PersonaSummaryRequest(PromptDTO):
     user_name: str = ""
     persona: str = ""
     messages: tuple[str, ...] = Field(min_length=1)
+
+
+class MatchPromptCandidate(PromptDTO):
+    """A locally mapped match alias and the only profile attributes safe to rank."""
+
+    alias: str = Field(min_length=1)
+    interests: tuple[str, ...] = ()
+    cg_name: str | None = None
+
+
+class MatchRankingRequest(PromptDTO):
+    """An alias-only candidate pool for the external model ranking boundary."""
+
+    candidates: tuple[MatchPromptCandidate, ...] = Field(min_length=1)
