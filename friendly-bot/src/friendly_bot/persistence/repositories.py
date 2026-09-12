@@ -27,6 +27,7 @@ from friendly_bot.persistence.models import (
     FlowVersion,
     HumanMatchAssignment,
     HumanMatchExclusion,
+    HumanMatchRequest,
     OpenFlowSelection,
     OperationalLogin,
     OperationalProfile,
@@ -1109,14 +1110,42 @@ class SqlAlchemyMatchRepository:
     async def reserve_ranked(
         self, request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime
     ) -> MatchAssignmentRecord | None:
-        request = await self._session.scalar(
-            select(HumanMatchAssignment.request_id)
-            .where(HumanMatchAssignment.request_id == request_id)
+        active_assignment = await self._session.scalar(
+            select(HumanMatchAssignment)
+            .where(
+                HumanMatchAssignment.request_id == request_id,
+                HumanMatchAssignment.released_at.is_(None),
+            )
             .with_for_update()
         )
-        if request is not None:
+        if active_assignment is not None:
+            return None
+        request = await self._session.scalar(
+            select(HumanMatchRequest)
+            .where(HumanMatchRequest.id == request_id)
+            .with_for_update()
+        )
+        if request is None:
+            raise LookupError("human match request was not found")
+        active_assignment = await self._session.scalar(
+            select(HumanMatchAssignment)
+            .where(
+                HumanMatchAssignment.request_id == request_id,
+                HumanMatchAssignment.released_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if active_assignment is not None:
             return None
         for profile_id in ranked_profile_ids:
+            excluded = await self._session.scalar(
+                select(HumanMatchExclusion.id).where(
+                    HumanMatchExclusion.request_id == request_id,
+                    HumanMatchExclusion.responder_profile_id == profile_id,
+                )
+            )
+            if excluded is not None:
+                continue
             profile = await self._session.scalar(
                 update(OperationalProfile)
                 .where(
@@ -1242,7 +1271,10 @@ class SqlAlchemyOpenSelectionRepository:
     async def apply(
         self, transition: SelectionTransition | CheckpointReturnTransition
     ) -> None:
-        user_id, flow_version_id, service_id = await self._scope_for(transition)
+        source = await self._source_for(transition)
+        user_id = source.user_id
+        flow_version_id = source.flow_version_id
+        service_id = source.service_id
         delete_ids = (
             transition.delete_selection_ids
             if isinstance(transition, SelectionTransition)
@@ -1260,32 +1292,46 @@ class SqlAlchemyOpenSelectionRepository:
         )
         if delete_ids:
             await self._session.execute(
-                delete(OpenFlowSelection).where(OpenFlowSelection.id.in_(delete_ids))
+                delete(OpenFlowSelection).where(
+                    OpenFlowSelection.id.in_(delete_ids),
+                    OpenFlowSelection.user_id == user_id,
+                    OpenFlowSelection.flow_version_id == flow_version_id,
+                    OpenFlowSelection.service_id.is_not_distinct_from(service_id),
+                )
             )
         if reusable_ids:
             await self._session.execute(
                 update(OpenFlowSelection)
-                .where(OpenFlowSelection.id.in_(reusable_ids))
+                .where(
+                    OpenFlowSelection.id.in_(reusable_ids),
+                    OpenFlowSelection.user_id == user_id,
+                    OpenFlowSelection.flow_version_id == flow_version_id,
+                    OpenFlowSelection.service_id.is_not_distinct_from(service_id),
+                )
                 .values(is_current=False)
             )
         if current_keys:
             statement = update(OpenFlowSelection).where(
                 OpenFlowSelection.user_id == user_id,
+                OpenFlowSelection.flow_version_id == flow_version_id,
+                OpenFlowSelection.service_id.is_not_distinct_from(service_id),
                 OpenFlowSelection.parent_flow_key.in_(current_keys),
                 OpenFlowSelection.expires_at.is_(None),
             )
-            if flow_version_id is not None:
-                statement = statement.where(
-                    OpenFlowSelection.flow_version_id == flow_version_id
-                )
-            if service_id is not None:
-                statement = statement.where(OpenFlowSelection.service_id == service_id)
             values: dict[str, object] = {"is_current": True}
             if focused_at is not None:
                 values["last_focused_at"] = focused_at
             await self._session.execute(statement.values(**values))
         if isinstance(transition, SelectionTransition):
             for selection in transition.upsert_selections:
+                if (
+                    selection.user_id,
+                    selection.flow_version_id,
+                    selection.service_id,
+                ) != (user_id, flow_version_id, service_id):
+                    raise ValueError(
+                        "selection upsert must stay within the source branch"
+                    )
                 await self._upsert(selection)
 
     async def expire_service_bound(self, service_id: UUID, *, at: datetime) -> int:
@@ -1308,35 +1354,19 @@ class SqlAlchemyOpenSelectionRepository:
         )
         return len(selection_ids)
 
-    async def _scope_for(
+    async def _source_for(
         self, transition: SelectionTransition | CheckpointReturnTransition
-    ) -> tuple[UUID, UUID | None, UUID | None]:
-        if isinstance(transition, SelectionTransition) and transition.upsert_selections:
-            selections = transition.upsert_selections
-            user_ids = {selection.user_id for selection in selections}
-            if len(user_ids) != 1:
-                raise ValueError("selection transition must affect one user")
-            return (
-                selections[0].user_id,
-                selections[0].flow_version_id,
-                selections[0].service_id,
-            )
-        touched_ids = transition.reusable_past_selection_ids | (
-            transition.delete_selection_ids
-            if isinstance(transition, SelectionTransition)
-            else frozenset()
+    ) -> OpenFlowSelection:
+        row = await self._session.scalar(
+            select(OpenFlowSelection)
+            .where(OpenFlowSelection.id == transition.source_selection_id)
+            .with_for_update()
         )
-        if touched_ids:
-            row = await self._session.scalar(
-                select(OpenFlowSelection)
-                .where(OpenFlowSelection.id.in_(touched_ids))
-                .with_for_update()
-            )
-            if row is not None:
-                return row.user_id, row.flow_version_id, row.service_id
-        if len(self._locked_user_ids) == 1:
-            return next(iter(self._locked_user_ids)), None, None
-        raise ValueError("selection transition requires one locked user")
+        if row is None:
+            raise LookupError("selection transition source was not found")
+        if row.user_id not in self._locked_user_ids:
+            raise RuntimeError("selection transition user is not locked")
+        return row
 
     async def _upsert(self, selection: OpenSelectionState) -> None:
         row = await self._session.scalar(
@@ -1424,9 +1454,14 @@ class SqlAlchemyDeliveryRepository:
         return _delivery_record(row)
 
     async def claim_next_safe(self, *, now: datetime) -> OutboundDeliveryRecord | None:
+        """Lease one delivery created by ``now`` and mark it unavailable to peers."""
+
         row = await self._session.scalar(
             select(OutboundDelivery)
-            .where(OutboundDelivery.status.in_(("pending", "retry")))
+            .where(
+                OutboundDelivery.status.in_(("pending", "retry")),
+                OutboundDelivery.created_at <= now,
+            )
             .order_by(OutboundDelivery.created_at, OutboundDelivery.id)
             .with_for_update(skip_locked=True)
             .limit(1)

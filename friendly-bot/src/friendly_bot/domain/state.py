@@ -72,6 +72,7 @@ class OpenSelectionState:
 class CheckpointReturnTransition:
     """A branch-local request to focus a checkpoint and run its return actions."""
 
+    source_selection_id: UUID
     target_checkpoint_key: str
     current_selection_ids: frozenset[str]
     reusable_past_selection_ids: frozenset[UUID]
@@ -83,6 +84,7 @@ class CheckpointReturnTransition:
 class SelectionTransition:
     """The state mutation and declarative action effects of selecting one child."""
 
+    source_selection_id: UUID
     delete_selection_ids: frozenset[UUID]
     reusable_past_selection_ids: frozenset[UUID]
     current_selection_ids: frozenset[str]
@@ -165,6 +167,7 @@ class SelectionTransitionEngine:
                 last_focused_at=now,
             )
             return SelectionTransition(
+                source_selection_id=parent.id,
                 delete_selection_ids=delete_selection_ids,
                 reusable_past_selection_ids=reusable_past_selection_ids,
                 current_selection_ids=frozenset({str(child.key)}),
@@ -185,6 +188,7 @@ class SelectionTransitionEngine:
             )
 
         return SelectionTransition(
+            source_selection_id=parent.id,
             delete_selection_ids=delete_selection_ids,
             reusable_past_selection_ids=reusable_past_selection_ids,
             current_selection_ids=(
@@ -229,6 +233,7 @@ class SelectionTransitionEngine:
             reusable_past_selection_ids = frozenset({branch.id})
 
         return CheckpointReturnTransition(
+            source_selection_id=branch.id,
             target_checkpoint_key=target_checkpoint_key,
             current_selection_ids=frozenset({target_checkpoint_key}),
             reusable_past_selection_ids=reusable_past_selection_ids,
@@ -345,6 +350,7 @@ class SelectionTransitionEngine:
             else self._return_actions_for(target_checkpoint_key)
         )
         return CheckpointReturnTransition(
+            source_selection_id=parent.id,
             target_checkpoint_key=target_checkpoint_key,
             current_selection_ids=frozenset({target_checkpoint_key}),
             reusable_past_selection_ids=frozenset(),

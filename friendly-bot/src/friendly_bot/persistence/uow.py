@@ -71,6 +71,7 @@ class UnitOfWork:
         self._flow_versions: FlowVersionRepository | None = None
 
     async def __aenter__(self) -> Self:
+        self._locked_user_ids.clear()
         self._session = self._session_factory()
         self._transaction = await self._session.begin()
         self._users = SqlAlchemyUserRepository(self._session)

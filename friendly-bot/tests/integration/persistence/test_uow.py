@@ -19,7 +19,12 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState, SelectionTransition
 from friendly_bot.persistence.base import Base
-from friendly_bot.persistence.models import FlowScopeKind, OperationalRole, User
+from friendly_bot.persistence.models import (
+    FlowScopeKind,
+    OpenFlowSelection,
+    OperationalRole,
+    User,
+)
 from friendly_bot.persistence.uow import UnitOfWork
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
@@ -99,7 +104,7 @@ def uow_factory(
 
 async def _seed_user_and_version(
     session_factory: _SESSION_FACTORY, factory: Callable[[], UnitOfWork]
-) -> tuple[UUID, UUID]:
+) -> tuple[OpenSelectionState, UUID]:
     user_id = uuid4()
     async with session_factory.begin() as session:
         session.add(User(id=user_id, role=OperationalRole.NBNC))
@@ -114,13 +119,44 @@ async def _seed_user_and_version(
             service_id=None,
             published_by_user_id=None,
         )
-    return user_id, version.id
-
-
-def _selection_transition(user_id: UUID, flow_version_id: UUID) -> SelectionTransition:
-    selection = OpenSelectionState(
+    source = OpenSelectionState(
         id=uuid4(),
         user_id=user_id,
+        flow_version_id=version.id,
+        parent_flow_key="system.home",
+        service_id=None,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("system.home",),
+        checkpoint_flow_keys=("system.home",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    async with session_factory.begin() as session:
+        session.add(
+            OpenFlowSelection(
+                id=source.id,
+                user_id=source.user_id,
+                flow_version_id=source.flow_version_id,
+                parent_flow_key=source.parent_flow_key,
+                service_id=source.service_id,
+                is_current=source.is_current,
+                is_global_interruptive=source.is_global_interruptive,
+                ancestor_flow_keys=list(source.ancestor_flow_keys),
+                checkpoint_flow_keys=list(source.checkpoint_flow_keys),
+                opened_at=source.opened_at,
+                last_focused_at=source.last_focused_at,
+            )
+        )
+    return source, version.id
+
+
+def _selection_transition(
+    source: OpenSelectionState, flow_version_id: UUID
+) -> SelectionTransition:
+    selection = OpenSelectionState(
+        id=uuid4(),
+        user_id=source.user_id,
         flow_version_id=flow_version_id,
         parent_flow_key="system.home.directions",
         service_id=None,
@@ -132,8 +168,9 @@ def _selection_transition(user_id: UUID, flow_version_id: UUID) -> SelectionTran
         last_focused_at=NOW,
     )
     return SelectionTransition(
+        source_selection_id=source.id,
         delete_selection_ids=frozenset(),
-        reusable_past_selection_ids=frozenset(),
+        reusable_past_selection_ids=frozenset({source.id}),
         current_selection_ids=frozenset({selection.parent_flow_key}),
         upsert_selections=(selection,),
         child_actions=(),
@@ -148,18 +185,18 @@ async def test_uow_rolls_back_open_selection_when_action_effect_fails(
 ) -> None:
     """An executor failure must leave selection mutation uncommitted for retry."""
 
-    user_id, flow_version_id = await _seed_user_and_version(
-        session_factory, uow_factory
-    )
-    transition = _selection_transition(user_id, flow_version_id)
+    source, flow_version_id = await _seed_user_and_version(session_factory, uow_factory)
+    transition = _selection_transition(source, flow_version_id)
 
     with pytest.raises(SimulatedActionFailure):
         async with uow_factory() as uow:
-            await uow.lock_user(user_id)
+            await uow.lock_user(source.user_id)
             await uow.open_selections.apply(transition)
             raise SimulatedActionFailure("executor failed before commit")
     async with uow_factory() as verify:
-        assert await verify.open_selections.list_for_user(user_id, now=NOW) == []
+        assert await verify.open_selections.list_for_user(source.user_id, now=NOW) == [
+            source
+        ]
 
 
 async def test_uow_commits_user_resolution_only_without_an_exception(
@@ -173,6 +210,23 @@ async def test_uow_commits_user_resolution_only_without_an_exception(
         retrieved = await uow.users.require_by_telegram_id(81)
 
     assert retrieved == created
+
+
+async def test_reused_uow_does_not_retain_a_previous_user_lock(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A second block must explicitly lock its user instead of inheriting old scope."""
+
+    source, flow_version_id = await _seed_user_and_version(session_factory, uow_factory)
+    transition = _selection_transition(source, flow_version_id)
+    uow = uow_factory()
+
+    async with uow:
+        await uow.lock_user(source.user_id)
+    async with uow:
+        with pytest.raises(RuntimeError, match="locked"):
+            await uow.open_selections.apply(transition)
 
 
 async def test_concurrent_update_claim_has_exactly_one_winner(

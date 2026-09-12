@@ -330,6 +330,8 @@ def test_plain_leaf_returns_to_its_checkpoint_after_its_own_actions() -> None:
     )
 
     assert transition.checkpoint_return is not None
+    assert transition.source_selection_id == parent.id
+    assert transition.checkpoint_return.source_selection_id == parent.id
     assert transition.checkpoint_return.target_checkpoint_key == "system.home"
     assert [action.type for action in transition.actions_to_execute] == [
         "send_message",
