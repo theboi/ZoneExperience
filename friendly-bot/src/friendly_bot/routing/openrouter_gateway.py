@@ -243,7 +243,9 @@ class OpenRouterGateway:
                 )
             except (GatewayTransportError, OSError) as error:
                 if attempt + 1 == self._max_attempts:
-                    raise GatewayTransportError("OpenRouter transport exhausted") from error
+                    raise GatewayTransportError(
+                        "OpenRouter transport exhausted"
+                    ) from error
                 await asyncio.sleep(0)
                 continue
             if not 200 <= response.status_code < 300:
@@ -260,8 +262,16 @@ class OpenRouterGateway:
     ) -> str:
         try:
             parsed = json.loads(OpenRouterGateway._assistant_content(response))
-        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise GatewayProtocolError("OpenRouter response was not a key selection") from error
+        except (
+            IndexError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
+            raise GatewayProtocolError(
+                "OpenRouter response was not a key selection"
+            ) from error
         if (
             not isinstance(parsed, dict)
             or set(parsed) != {"key"}
@@ -291,4 +301,6 @@ class OpenRouterGateway:
                 raise TypeError("content must be text")
             return content
         except (IndexError, KeyError, TypeError, ValueError) as error:
-            raise GatewayProtocolError("OpenRouter response was not assistant text") from error
+            raise GatewayProtocolError(
+                "OpenRouter response was not assistant text"
+            ) from error

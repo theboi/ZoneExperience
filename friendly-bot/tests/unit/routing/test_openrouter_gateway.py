@@ -101,10 +101,12 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels() -> No
         '{"key":"flow.a","extra":"no"}',
         '{"key":"flow.unknown"}',
         '["flow.a"]',
-        'not json',
+        "not json",
     ],
 )
-async def test_gateway_fails_closed_for_non_single_whitelisted_key(content: str) -> None:
+async def test_gateway_fails_closed_for_non_single_whitelisted_key(
+    content: str,
+) -> None:
     """Relaxing exact-key parsing would turn model prose into routing authority."""
 
     client = FakeHttpxClient(
@@ -148,7 +150,9 @@ async def test_match_ranking_returns_only_local_aliases() -> None:
                 200,
                 {"choices": [{"message": {"content": '{"key":"candidate-1"}'}}]},
             ),
-            FakeResponse(200, {"choices": [{"message": {"content": '{"key":"system.done"}'}}]}),
+            FakeResponse(
+                200, {"choices": [{"message": {"content": '{"key":"system.done"}'}}]}
+            ),
         ]
     )
     gateway = OpenRouterGateway(api_key="test-only", client=client)
@@ -156,8 +160,12 @@ async def test_match_ranking_returns_only_local_aliases() -> None:
     aliases = await gateway.rank_aliases(
         MatchRankingRequest(
             candidates=[
-                MatchPromptCandidate(alias="candidate-0", interests=["music"], cg_name="A"),
-                MatchPromptCandidate(alias="candidate-1", interests=["art"], cg_name="B"),
+                MatchPromptCandidate(
+                    alias="candidate-0", interests=["music"], cg_name="A"
+                ),
+                MatchPromptCandidate(
+                    alias="candidate-1", interests=["art"], cg_name="B"
+                ),
             ]
         )
     )

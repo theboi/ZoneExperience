@@ -53,9 +53,7 @@ class PersonaMaintenanceService:
         self._user_name_for = user_name_for
         self._max_unsummarized_tokens = max_unsummarized_tokens
 
-    async def maintain(
-        self, user_id: UUID, now: datetime
-    ) -> PersonaMaintenanceResult:
+    async def maintain(self, user_id: UUID, now: datetime) -> PersonaMaintenanceResult:
         """Regenerate only an eligible post-cursor segment under the F01 user lock."""
 
         async with self._uow_factory() as uow:
@@ -64,9 +62,7 @@ class PersonaMaintenanceService:
             messages = await uow.conversations.list_after(
                 user_id, cursor.last_message_id
             )
-            if not _should_regenerate(
-                messages, now, self._max_unsummarized_tokens
-            ):
+            if not _should_regenerate(messages, now, self._max_unsummarized_tokens):
                 return PersonaMaintenanceResult(False, cursor.persona)
             request = PersonaSummaryRequest(
                 user_name=self._user_name_for(user_id),

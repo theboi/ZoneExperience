@@ -19,7 +19,9 @@ USER = uuid4()
 
 
 class RecordingUow:
-    def __init__(self, selection: OpenSelectionState, definition: dict[str, object]) -> None:
+    def __init__(
+        self, selection: OpenSelectionState, definition: dict[str, object]
+    ) -> None:
         self.open_selections = SimpleNamespace(list_for_user=self._list_for_user)
         self.personas = SimpleNamespace(get_or_create=self._get_cursor)
         self.conversations = SimpleNamespace(list_after=self._list_after)
@@ -35,7 +37,9 @@ class RecordingUow:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def _list_for_user(self, user_id: UUID, *, now: datetime) -> list[OpenSelectionState]:
+    async def _list_for_user(
+        self, user_id: UUID, *, now: datetime
+    ) -> list[OpenSelectionState]:
         assert user_id == USER and now == NOW
         self.calls.append("selections")
         return [self._selection]
@@ -64,7 +68,9 @@ class DoneGateway:
         return "system.done"
 
 
-async def test_router_reads_f01_uow_repositories_without_reply_identifier_state() -> None:
+async def test_router_reads_f01_uow_repositories_without_reply_identifier_state() -> (
+    None
+):
     """Native reply text reaches the prompt while no reply mapping is persisted."""
 
     version_id = uuid4()

@@ -42,7 +42,9 @@ def _definition(root_key: str, child_key: str, *, gist: str) -> PublishedFlowDef
             ),
             DiscussionFlow(
                 key=f"{child_key}.button",
-                trigger=ButtonDiscussionFlowTrigger(type="button", button_id="button.one"),
+                trigger=ButtonDiscussionFlowTrigger(
+                    type="button", button_id="button.one"
+                ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
             ),
         ],
@@ -53,7 +55,9 @@ def _definition(root_key: str, child_key: str, *, gist: str) -> PublishedFlowDef
     )
 
 
-def _selection(version_id: UUID, parent_key: str, *, current: bool) -> OpenSelectionState:
+def _selection(
+    version_id: UUID, parent_key: str, *, current: bool
+) -> OpenSelectionState:
     return OpenSelectionState(
         id=uuid4(),
         user_id=USER,
@@ -84,7 +88,9 @@ class StubGateway:
 
 
 class FakeUow:
-    def __init__(self, selections: list[OpenSelectionState], definitions: dict[UUID, object]) -> None:
+    def __init__(
+        self, selections: list[OpenSelectionState], definitions: dict[UUID, object]
+    ) -> None:
         self.open_selections = SimpleNamespace(list_for_user=self._list_selections)
         self.personas = SimpleNamespace(get_or_create=self._get_cursor)
         self.conversations = SimpleNamespace(list_after=self._list_messages)
@@ -99,7 +105,9 @@ class FakeUow:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def _list_selections(self, user_id: UUID, *, now: datetime) -> list[OpenSelectionState]:
+    async def _list_selections(
+        self, user_id: UUID, *, now: datetime
+    ) -> list[OpenSelectionState]:
         assert user_id == USER and now == NOW
         return self._selections
 
@@ -107,7 +115,9 @@ class FakeUow:
         assert user_id == USER
         return PersonaCursorRecord(USER, "steady", None, None)
 
-    async def _list_messages(self, user_id: UUID, cursor_id: UUID | None) -> list[object]:
+    async def _list_messages(
+        self, user_id: UUID, cursor_id: UUID | None
+    ) -> list[object]:
         assert user_id == USER and cursor_id is None
         return []
 
@@ -118,7 +128,9 @@ class FakeUow:
         raise AssertionError(f"unexpected service lookup for {service_id}")
 
 
-def test_candidate_assembly_keeps_current_and_reusable_message_choices_together() -> None:
+def test_candidate_assembly_keeps_current_and_reusable_message_choices_together() -> (
+    None
+):
     """Making current scope exclusive would hide a reusable configured action."""
 
     current_version = uuid4()
@@ -130,7 +142,9 @@ def test_candidate_assembly_keeps_current_and_reusable_message_choices_together(
         ],
         {
             current_version: _definition("system.current", "flow.current", gist="now"),
-            reusable_version: _definition("system.reusable", "flow.reusable", gist="later"),
+            reusable_version: _definition(
+                "system.reusable", "flow.reusable", gist="later"
+            ),
         },
         now=NOW,
     )
@@ -173,10 +187,14 @@ async def test_router_selects_two_distinct_keys_then_done() -> None:
         ],
         {
             current_version: SimpleNamespace(
-                definition=_definition("system.current", "flow.current", gist="now").document
+                definition=_definition(
+                    "system.current", "flow.current", gist="now"
+                ).document
             ),
             global_version: SimpleNamespace(
-                definition=_definition("system.global", "flow.global", gist="always").document
+                definition=_definition(
+                    "system.global", "flow.global", gist="always"
+                ).document
             ),
         },
     )

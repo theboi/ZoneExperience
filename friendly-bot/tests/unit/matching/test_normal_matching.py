@@ -105,7 +105,9 @@ async def test_normal_pool_is_exact_server_attendees_with_capacity() -> None:
     leader = _candidate(OperationalRole.LEADER)
     staff = _candidate(OperationalRole.STAFF)
     exhausted_server = _candidate(OperationalRole.SERVER, reserved_capacity=1)
-    assignment = MatchAssignmentRecord(uuid4(), REQUEST, attending_server.profile_id, NOW)
+    assignment = MatchAssignmentRecord(
+        uuid4(), REQUEST, attending_server.profile_id, NOW
+    )
     uow = FakeUow([attending_server, leader, staff, exhausted_server], assignment)
     ranker = Ranker(["candidate-0"])
     service = MatchingService(lambda: uow, ranker, lambda _: REQUESTER)

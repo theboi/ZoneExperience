@@ -104,7 +104,9 @@ class CandidateAssembler:
             root = DiscussionFlow.model_validate(definition.document)
             parent = _find_flow(root, selection.parent_flow_key)
             if parent is None:
-                raise RoutingError("open selection parent is absent from its definition")
+                raise RoutingError(
+                    "open selection parent is absent from its definition"
+                )
             for child in parent.next_flows:
                 trigger = child.trigger
                 if not isinstance(trigger, MessageDiscussionFlowTrigger):
@@ -184,7 +186,9 @@ class ConstrainedRouter:
                 return RoutingResult(tuple(selected), terminal)
             candidate = remaining.pop(key, None)
             if candidate is None:
-                raise RoutingError("gateway selected a key outside the shrinking candidate set")
+                raise RoutingError(
+                    "gateway selected a key outside the shrinking candidate set"
+                )
             selected.append(RoutingDecision(candidate.key))
         raise RoutingError("gateway did not return a reserved terminal in time")
 

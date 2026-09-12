@@ -66,11 +66,31 @@ class MatchingService:
             )
             return await self._reserve_normal_locked(uow, request_id, service_id, now)
 
+    async def reserve_safety(
+        self, request_id: UUID, service_id: UUID | None, *, now: datetime
+    ) -> MatchAssignmentRecord | None:
+        """Reserve only eligible leader/staff responders; never fall back to normal."""
+
+        async with self._uow_factory() as uow:
+            await uow.lock_user(self._requester_user_for(request_id))
+            candidates = await uow.matches.list_eligible_safety(service_id, request_id)
+            eligible = [
+                candidate for candidate in candidates if _is_safety_eligible(candidate)
+            ]
+            if not eligible:
+                return None
+            ranked_profile_ids = await self._rank_profile_ids(eligible)
+            return await uow.matches.reserve_ranked(
+                request_id, ranked_profile_ids, now=now
+            )
+
     async def _reserve_normal_locked(
         self, uow: UnitOfWork, request_id: UUID, service_id: UUID, now: datetime
     ) -> MatchAssignmentRecord | None:
         candidates = await uow.matches.list_eligible_normal(service_id, request_id)
-        eligible = [candidate for candidate in candidates if _is_normal_eligible(candidate)]
+        eligible = [
+            candidate for candidate in candidates if _is_normal_eligible(candidate)
+        ]
         if not eligible:
             return None
         ranked_profile_ids = await self._rank_profile_ids(eligible)
@@ -98,7 +118,9 @@ class MatchingService:
         for alias in ranked_aliases:
             candidate = aliases.get(alias)
             if candidate is None or candidate.profile_id in ranked_ids:
-                raise MatchingError("ranker returned an invalid or duplicate candidate alias")
+                raise MatchingError(
+                    "ranker returned an invalid or duplicate candidate alias"
+                )
             ranked_ids.append(candidate.profile_id)
         for candidate in aliases.values():
             if candidate.profile_id not in ranked_ids:
@@ -111,5 +133,14 @@ def _is_normal_eligible(candidate: MatchCandidateRecord) -> bool:
 
     return (
         candidate.role is OperationalRole.SERVER
+        and candidate.capacity > candidate.reserved_capacity
+    )
+
+
+def _is_safety_eligible(candidate: MatchCandidateRecord) -> bool:
+    """Keep normal servers out even when an upstream query is misconfigured."""
+
+    return (
+        candidate.role in {OperationalRole.LEADER, OperationalRole.STAFF}
         and candidate.capacity > candidate.reserved_capacity
     )

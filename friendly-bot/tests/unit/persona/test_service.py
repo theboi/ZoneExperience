@@ -97,10 +97,17 @@ async def test_success_advances_cursor_without_deleting_messages() -> None:
     """A successful summary must retain source rows and advance to their newest id."""
 
     old_cursor = uuid4()
-    messages = [_message("first", at=NOW - timedelta(hours=49)), _message("last", at=NOW - timedelta(hours=48))]
+    messages = [
+        _message("first", at=NOW - timedelta(hours=49)),
+        _message("last", at=NOW - timedelta(hours=48)),
+    ]
     original_messages = list(messages)
-    uow = FakeUow(PersonaCursorRecord(USER, "old", old_cursor, NOW - timedelta(days=4)), messages)
-    service = PersonaMaintenanceService(lambda: uow, SummaryGateway("updated"), lambda _: "A")
+    uow = FakeUow(
+        PersonaCursorRecord(USER, "old", old_cursor, NOW - timedelta(days=4)), messages
+    )
+    service = PersonaMaintenanceService(
+        lambda: uow, SummaryGateway("updated"), lambda _: "A"
+    )
 
     result = await service.maintain(USER, NOW)
 
@@ -127,7 +134,9 @@ async def test_gateway_failure_preserves_old_cursor() -> None:
     result = await service.maintain(USER, NOW)
 
     assert result.generated is False
-    assert uow.cursor == PersonaCursorRecord(USER, "old", old_cursor, NOW - timedelta(days=4))
+    assert uow.cursor == PersonaCursorRecord(
+        USER, "old", old_cursor, NOW - timedelta(days=4)
+    )
     assert uow.advance_calls == []
 
 
