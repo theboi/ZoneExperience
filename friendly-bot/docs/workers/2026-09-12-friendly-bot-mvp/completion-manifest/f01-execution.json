@@ -192,11 +192,32 @@
     ]
   },
   "g1": {
-    "status": "not-passed",
+    "status": "passed-for-coordinator-review",
     "verifier": "coordinator",
     "accepted_source_and_review": "Task 7 source and review are accepted at e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00.",
-    "operational_evidence_blocker": "This host has neither docker compose nor docker-compose. Real tracked Compose configuration, up, and healthcheck evidence is therefore outstanding.",
-    "non_compose_evidence": "The live disposable loopback PostgreSQL verification above passed, but it does not substitute for the missing Compose evidence.",
+    "compose_operational_evidence": {
+      "execution_path": "Colima guest Docker daemon using Docker Compose v5.1.4",
+      "working_directory": "/Users/bot2/Dev/ZoneExperience/friendly-bot",
+      "configuration_command": "docker compose -p friendly-bot-u504 -f compose.yaml config --quiet",
+      "configuration_result": "exit 0",
+      "startup_command": "docker compose -p friendly-bot-u504 -f compose.yaml up -d postgres",
+      "startup_result": "exit 0; only the declared friendly-bot-u504 project container, network, and volume were created",
+      "health_and_connectivity": "postgres became healthy and host 127.0.0.1:5832 was reachable",
+      "migration_command": "uv run alembic upgrade head",
+      "migration_result": "exit 0 against the Compose database; revision 0001_foundation",
+      "async_canary": "A string-converted DatabaseSettings async canary verified revision 0001_foundation and 23 public tables.",
+      "teardown_command": "docker compose -p friendly-bot-u504 -f compose.yaml down",
+      "teardown_result": "exit 0; the Compose container and network were removed and host port 5832 was released"
+    },
+    "host_guard_cli_limitation": {
+      "status": "unavailable",
+      "detail": "The host Docker client still lacks both docker compose and docker-compose, so db_runtime_check.py cannot directly invoke a host Compose subprocess.",
+      "effect": "The accepted guard source and mismatch tests remain valid; this limitation does not negate the real tracked Compose behavior proven through the same Colima Docker daemon's guest Compose CLI."
+    },
+    "db_runtime_check_verify": {
+      "executed": false,
+      "reason": "The host guard subprocess requires a host Compose CLI that is unavailable; this manifest does not claim that verify ran."
+    },
     "action_taken": "No external tooling was installed and no configured default error flow was added."
   },
   "remote_evidence": {
