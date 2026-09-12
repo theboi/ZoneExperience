@@ -319,6 +319,19 @@ class SelectionTransitionEngine:
                 )
             previous_index = checkpoint_index
 
+        known_checkpoint_flow_keys = tuple(
+            ancestor_key
+            for ancestor_key in ancestor_flow_keys
+            if (
+                definition := definitions.get(ancestor_key)
+            ) is not None
+            and definition.next_flow_mode is NextFlowMode.CHECKPOINT
+        )
+        if selection.checkpoint_flow_keys != known_checkpoint_flow_keys:
+            raise InvalidSelectionStateError(
+                "checkpoint lineage is missing checkpoint ancestors"
+            )
+
     def _child_checkpoint_lineage(
         self,
         *,

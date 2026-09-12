@@ -227,7 +227,7 @@ def test_checkpoint_child_selection_preserves_ancestor_and_checkpoint_lineage() 
         "service.zone_x.home",
         service_id=uuid4(),
         ancestors=["system.global", "service.zone_x.home"],
-        checkpoints=["system.global"],
+        checkpoints=["system.global", "service.zone_x.home"],
     )
     system = flow("system.global", mode=NextFlowMode.CHECKPOINT)
 
@@ -304,6 +304,35 @@ def test_leaf_returns_only_its_nearest_nested_checkpoint() -> None:
     assert transition.current_selection_ids == frozenset({"service.zone_x.questions"})
     assert "unrelated.timestamp" not in transition.current_selection_ids
     assert [action.type for action in transition.return_actions] == ["send_message"]
+
+
+def test_return_rejects_lineage_that_omits_a_known_nested_checkpoint() -> None:
+    """Breaks if corrupt state skips the nearest branch-local checkpoint."""
+
+    system = flow("system.global", mode=NextFlowMode.CHECKPOINT)
+    service_home = flow("service.zone_x.home", mode=NextFlowMode.CHECKPOINT)
+    questions = flow("service.zone_x.questions", mode=NextFlowMode.CHECKPOINT)
+    corrupt_branch = state(
+        "service.zone_x.capture_interest",
+        service_id=uuid4(),
+        ancestors=[
+            "system.global",
+            "service.zone_x.home",
+            "service.zone_x.questions",
+            "service.zone_x.capture_interest",
+        ],
+        checkpoints=["system.global", "service.zone_x.home"],
+    )
+
+    with pytest.raises(ValueError, match="missing checkpoint"):
+        SelectionTransitionEngine(
+            executed_flow_keys=set(),
+            flow_definitions={
+                system.key: system,
+                service_home.key: service_home,
+                questions.key: questions,
+            },
+        ).return_to_nearest_checkpoint(branch=corrupt_branch, now=NOW)
 
 
 def test_plain_leaf_returns_to_its_checkpoint_after_its_own_actions() -> None:
