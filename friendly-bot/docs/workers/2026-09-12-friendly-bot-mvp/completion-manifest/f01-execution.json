@@ -206,6 +206,10 @@
       "result": "exit 0; HEAD=e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00, origin/main=e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00, divergence=0 0"
     },
     "accepted_source_commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
-    "task8_acceptance_commit": "recorded by the follow-on manifest remote-evidence commit after the acceptance commit is pushed"
+    "task8_acceptance_commit": "fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6",
+    "remote_reachability": {
+      "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",
+      "result": "exit 0; origin/main resolved to fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 and matched the acceptance commit exactly"
+    }
   }
 }
