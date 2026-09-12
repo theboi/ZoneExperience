@@ -19,11 +19,27 @@ class DuplicateFlowExecutionError(RuntimeError):
         self.flow_key = flow_key
 
 
-class MissingCheckpointError(RuntimeError):
+class MissingCheckpointError(ValueError):
     """Raised when a branch cannot be returned to any checkpoint."""
 
     def __init__(self, flow_key: str) -> None:
         super().__init__(f"flow {flow_key!r} has no checkpoint to return to")
+        self.flow_key = flow_key
+
+
+class InvalidSelectionTransitionError(ValueError):
+    """Raised when a requested child is not valid for its selected parent."""
+
+
+class InvalidSelectionStateError(ValueError):
+    """Raised when stored branch lineage cannot describe one valid branch."""
+
+
+class UnresolvedCheckpointError(ValueError):
+    """Raised when a return target has no checkpoint definition to resolve."""
+
+    def __init__(self, flow_key: str) -> None:
+        super().__init__(f"unresolved checkpoint definition for flow {flow_key!r}")
         self.flow_key = flow_key
 
 
@@ -38,10 +54,18 @@ class OpenSelectionState:
     service_id: UUID | None
     is_current: bool
     is_global_interruptive: bool
-    ancestor_flow_keys: list[str]
-    checkpoint_flow_keys: list[str]
+    ancestor_flow_keys: tuple[str, ...]
+    checkpoint_flow_keys: tuple[str, ...]
     opened_at: datetime
     last_focused_at: datetime
+
+    def __post_init__(self) -> None:
+        """Normalize caller-owned lineage containers before exposing state."""
+
+        object.__setattr__(self, "ancestor_flow_keys", tuple(self.ancestor_flow_keys))
+        object.__setattr__(
+            self, "checkpoint_flow_keys", tuple(self.checkpoint_flow_keys)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,13 +111,11 @@ class SelectionTransitionEngine:
 
     def __init__(
         self,
-        executed_flow_keys: set[str] | None = None,
         *,
+        executed_flow_keys: set[str],
         flow_definitions: Mapping[str, DiscussionFlow] | None = None,
     ) -> None:
-        self._executed_flow_keys = (
-            executed_flow_keys if executed_flow_keys is not None else set()
-        )
+        self._executed_flow_keys = executed_flow_keys
         self._flow_definitions = dict(flow_definitions or {})
 
     def select_child(
@@ -106,6 +128,13 @@ class SelectionTransitionEngine:
     ) -> SelectionTransition:
         """Describe selecting ``child`` from ``parent`` for one incoming update."""
 
+        definitions = self._definitions_with_parent(parent_definition)
+        self._validate_child_selection(
+            parent=parent,
+            child=child,
+            parent_definition=parent_definition,
+            definitions=definitions,
+        )
         if child.key in self._executed_flow_keys:
             raise DuplicateFlowExecutionError(child.key)
         self._executed_flow_keys.add(child.key)
@@ -130,7 +159,7 @@ class SelectionTransitionEngine:
                 service_id=parent.service_id,
                 is_current=True,
                 is_global_interruptive=parent.is_global_interruptive,
-                ancestor_flow_keys=[*parent.ancestor_flow_keys, str(child.key)],
+                ancestor_flow_keys=(*parent.ancestor_flow_keys, str(child.key)),
                 checkpoint_flow_keys=checkpoint_flow_keys,
                 opened_at=now,
                 last_focused_at=now,
@@ -177,6 +206,7 @@ class SelectionTransitionEngine:
     ) -> CheckpointReturnTransition:
         """Describe an explicit branch-local return, popping its current checkpoint."""
 
+        self._validate_selection_lineage(branch, self._flow_definitions)
         checkpoint_flow_keys = tuple(branch.checkpoint_flow_keys)
         if not checkpoint_flow_keys:
             raise MissingCheckpointError(branch.parent_flow_key)
@@ -218,26 +248,92 @@ class SelectionTransitionEngine:
             return frozenset(), frozenset({parent.id})
         return frozenset(), frozenset()
 
+    def _definitions_with_parent(
+        self, parent_definition: DiscussionFlow
+    ) -> dict[str, DiscussionFlow]:
+        definitions = dict(self._flow_definitions)
+        parent_key = str(parent_definition.key)
+        configured_parent = definitions.get(parent_key)
+        if configured_parent is not None and configured_parent != parent_definition:
+            raise InvalidSelectionTransitionError(
+                f"parent definition for flow {parent_key!r} conflicts with flow definitions"
+            )
+        definitions[parent_key] = parent_definition
+        return definitions
+
+    def _validate_child_selection(
+        self,
+        *,
+        parent: OpenSelectionState,
+        child: DiscussionFlow,
+        parent_definition: DiscussionFlow,
+        definitions: Mapping[str, DiscussionFlow],
+    ) -> None:
+        if str(parent_definition.key) != parent.parent_flow_key:
+            raise InvalidSelectionTransitionError(
+                "parent definition key must match the selected parent flow key"
+            )
+        if not any(
+            direct_child is child for direct_child in parent_definition.next_flows
+        ):
+            raise InvalidSelectionTransitionError(
+                "selected child must be an exact direct child of the parent definition"
+            )
+        self._validate_selection_lineage(parent, definitions)
+
+    def _validate_selection_lineage(
+        self,
+        selection: OpenSelectionState,
+        definitions: Mapping[str, DiscussionFlow],
+    ) -> None:
+        ancestor_flow_keys = selection.ancestor_flow_keys
+        if (
+            not ancestor_flow_keys
+            or ancestor_flow_keys[-1] != selection.parent_flow_key
+        ):
+            raise InvalidSelectionStateError(
+                "parent_flow_key must be the ancestry tail for an open selection"
+            )
+
+        previous_index = -1
+        for checkpoint_key in selection.checkpoint_flow_keys:
+            try:
+                checkpoint_index = ancestor_flow_keys.index(
+                    checkpoint_key, previous_index + 1
+                )
+            except ValueError as error:
+                raise InvalidSelectionStateError(
+                    f"checkpoint {checkpoint_key!r} is not an ancestor of the branch"
+                ) from error
+            definition = definitions.get(checkpoint_key)
+            if definition is None:
+                raise UnresolvedCheckpointError(checkpoint_key)
+            if definition.next_flow_mode is not NextFlowMode.CHECKPOINT:
+                raise InvalidSelectionStateError(
+                    f"checkpoint {checkpoint_key!r} is not a CHECKPOINT flow"
+                )
+            previous_index = checkpoint_index
+
     def _child_checkpoint_lineage(
         self,
         *,
         parent: OpenSelectionState,
         parent_definition: DiscussionFlow,
         child: DiscussionFlow,
-    ) -> list[str]:
+    ) -> tuple[str, ...]:
         checkpoint_flow_keys = list(parent.checkpoint_flow_keys)
         if parent_definition.next_flow_mode is NextFlowMode.CHECKPOINT:
             _append_once(checkpoint_flow_keys, str(parent_definition.key))
         if child.next_flow_mode is NextFlowMode.CHECKPOINT:
             _append_once(checkpoint_flow_keys, str(child.key))
-        return checkpoint_flow_keys
+        return tuple(checkpoint_flow_keys)
 
     def _generic_leaf_return(
         self,
         *,
         parent: OpenSelectionState,
         parent_definition: DiscussionFlow,
-        checkpoint_flow_keys: list[str],
+        checkpoint_flow_keys: tuple[str, ...],
         now: datetime,
     ) -> CheckpointReturnTransition:
         if not checkpoint_flow_keys:
@@ -273,7 +369,11 @@ class SelectionTransitionEngine:
     ) -> tuple[DiscussionAction, ...]:
         definition = self._flow_definitions.get(target_checkpoint_key)
         if definition is None:
-            return ()
+            raise UnresolvedCheckpointError(target_checkpoint_key)
+        if definition.next_flow_mode is not NextFlowMode.CHECKPOINT:
+            raise InvalidSelectionStateError(
+                f"checkpoint {target_checkpoint_key!r} is not a CHECKPOINT flow"
+            )
         return tuple(definition.return_actions)
 
 
