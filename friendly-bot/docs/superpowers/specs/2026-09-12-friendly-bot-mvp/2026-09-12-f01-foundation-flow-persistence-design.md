@@ -118,8 +118,8 @@ The initial revision uses the following columns; nullable fields are marked `?`,
 | `processed_telegram_updates` | `telegram_update_id`, `received_at`, `processed_at?`, `correlation_id` |
 | `user_processing_locks` | `user_id`, `locked_at` |
 | `timestamp_delivery_claims` | `id`, `service_timestamp_id`, `user_id`, `claimed_at`, `completed_at?`, `status` |
-| `outbound_deliveries` | `id`, `idempotency_key`, `user_id`, `telegram_chat_id`, `kind`, `payload` JSONB, `status`, `created_at`, `sent_at?` |
-| `outbound_delivery_attempts` | `id`, `delivery_id`, `attempt_number`, `started_at`, `finished_at?`, `outcome`, `safe_error?` |
+| `outbound_deliveries` | `id`, `idempotency_key`, `user_id`, `telegram_chat_id`, `kind`, `payload` JSONB, `status`, `created_at`, `eligible_at`, `claim_token?`, `claim_expires_at?`, `sent_at?`, `confirmed_telegram_message_id?` |
+| `outbound_delivery_attempts` | `id`, `delivery_id`, `attempt_number`, `started_at`, `correlation_id`, `finished_at?`, `outcome`, `safe_error?` |
 | `human_match_requests` | `id`, `requester_user_id`, `service_id?`, `kind`, `interest?`, `meeting_preference?`, `status`, `created_at`, `resolved_at?` |
 | `human_match_assignments` | `id`, `request_id`, `responder_profile_id`, `capacity_reservation_id`, `assigned_at`, `released_at?`, `release_reason?` |
 | `human_match_exclusions` | `id`, `request_id`, `responder_profile_id`, `created_at` |
@@ -131,7 +131,7 @@ The initial revision uses the following columns; nullable fields are marked `?`,
 
 `persistence.uow.UnitOfWork` owns an `AsyncSession`, exposes typed repositories, and commits only on an exception-free `async with` block; otherwise it rolls back. It provides `lock_user(user_id: UUID) -> None`, which materializes/locks the user lock row before a user-scoped state transition. Repository methods return domain DTOs, never SQLAlchemy ORM objects across package boundaries. `UserRecord.role` is the sole role value; every matching/audience repository query joins `operational_profiles.user_id` to `users.id` rather than reading a duplicate profile role.
 
-The public DTOs are frozen dataclasses: `UserRecord(id, telegram_user_id, display_name, role, is_admin)`, `OperationalProfileRecord(id, user_id, normalized_name, interests, cg_name, telegram_contact_url, always_available, capacity, reserved_capacity)`, `OperationalLoginRecord(id, operational_profile_id, user_id, attached_at, detached_at)`, `ServiceRecord(id, key, highkey, doors_open_at, doors_close_at, interaction_ends_at)`, `AttendanceRecord(id, service_id, user_id, attendee_kind, started_at, ended_at)`, `ServiceTimestampRecord(id, service_id, key, occurs_at, audience, flow_version_id, root_flow_key)`, `ConversationMessageRecord(id, user_id, source_kind, source_message_id, body, replied_to_body, occurred_at)`, `PersonaCursorRecord(user_id, persona, last_message_id, generated_at)`, `MatchCandidateRecord(profile_id, user_id, role, interests, cg_name, always_available, capacity, reserved_capacity)`, `MatchAssignmentRecord(id, request_id, responder_profile_id, assigned_at)`, `PollStateRecord(next_update_offset)`, `OutboundDeliveryRecord(id, idempotency_key, status)`, `DeliveryAttemptRecord(id, delivery_id, attempt_number, started_at)`, and `DiagnosticRecord(id, correlation_id, severity, safe_summary)`. `LoginAttachmentResult` is exactly `attached`, `occupied`, or `not_found`; `AttendanceStartResult` returns the active attendance plus whether a prior active attendance was ended.
+The public DTOs are frozen dataclasses: `UserRecord(id, telegram_user_id, display_name, role, is_admin)`, `OperationalProfileRecord(id, user_id, normalized_name, interests, cg_name, telegram_contact_url, always_available, capacity, reserved_capacity)`, `OperationalLoginRecord(id, operational_profile_id, user_id, attached_at, detached_at)`, `ServiceRecord(id, key, highkey, doors_open_at, doors_close_at, interaction_ends_at)`, `AttendanceRecord(id, service_id, user_id, attendee_kind, started_at, ended_at)`, `ServiceTimestampRecord(id, service_id, key, occurs_at, audience, flow_version_id, root_flow_key)`, `ConversationMessageRecord(id, user_id, source_kind, source_message_id, body, replied_to_body, occurred_at)`, `PersonaCursorRecord(user_id, persona, last_message_id, generated_at)`, `MatchCandidateRecord(profile_id, user_id, role, interests, cg_name, always_available, capacity, reserved_capacity)`, `MatchAssignmentRecord(id, request_id, responder_profile_id, assigned_at)`, `PollStateRecord(next_update_offset)`, `OutboundDeliveryMessage(chat_id, kind, immutable payload)`, `OutboundDeliveryRecord(id, idempotency_key, status, message, eligible_at, claim_token?, claim_expires_at?, confirmed_telegram_message_id?)`, `DeliveryAttemptRecord(id, delivery_id, attempt_number, started_at, correlation_id)`, and `DiagnosticRecord(id, correlation_id, severity, safe_summary)`. `LoginAttachmentResult` is exactly `attached`, `occupied`, or `not_found`; `AttendanceStartResult` returns the active attendance plus whether a prior active attendance was ended.
 
 ```python
 class FlowVersionRepository(Protocol):
@@ -150,6 +150,10 @@ class UpdateRepository(Protocol):
 class DeliveryRepository(Protocol):
     async def claim_timestamp_delivery(self, service_timestamp_id: UUID, user_id: UUID) -> bool: ...
     async def enqueue(self, delivery: NewOutboundDelivery) -> OutboundDeliveryRecord: ...
+    async def claim_next_safe(self, *, now: datetime, lease_duration: timedelta = timedelta(minutes=1)) -> OutboundDeliveryRecord | None: ...
+    async def renew_claim(self, delivery_id: UUID, *, claim_token: UUID, now: datetime, lease_duration: timedelta = timedelta(minutes=1)) -> OutboundDeliveryRecord: ...
+    async def start_attempt(self, delivery_id: UUID, correlation_id: UUID, *, claim_token: UUID, started_at: datetime) -> DeliveryAttemptRecord: ...
+    async def finish_attempt(self, delivery_id: UUID, attempt_id: UUID, outcome: DeliveryOutcome, *, now: datetime, retry_at: datetime | None = None, safe_error: str | None = None, confirmed_telegram_message_id: int | None = None) -> None: ...
 ```
 
 The remaining public protocols are concrete because T02/R03/I04 consume them directly:
@@ -202,7 +206,7 @@ class DiagnosticRepository(Protocol):
     async def enqueue_admin_notifications(self, diagnostic_id: UUID, *, at: datetime) -> int: ...
 ```
 
-`DeliveryRepository` additionally provides `claim_next_safe(now) -> OutboundDeliveryRecord | None`, `start_attempt(delivery_id, correlation_id, started_at) -> DeliveryAttemptRecord`, and `finish_attempt(delivery_id, attempt_id, outcome, now) -> None`. F01 defines these interfaces and persistence behavior; T02/R03/I04 consume them rather than creating side tables or independent sessions.
+`claim_next_safe` atomically leases only due `pending`/`retry` rows (`eligible_at <= now`) or expired `claimed` rows. The returned `OutboundDeliveryRecord.message` has provider-neutral `chat_id`, `kind`, and recursively immutable JSON payload; F01 imports no Telegram type. The lease has an opaque UUID `claim_token` and expiry (one minute by default); only that token can renew or start. `start_attempt` persists its passed correlation ID, transitions to `sending`, and clears the lease before any network boundary. A stale or expired token raises `DeliveryClaimLostError`, so callers do not send. `sending` and `uncertain` rows are never recovered automatically. `finish_attempt` persists the outcome, optional safe error and confirmed Telegram message ID, clears ownership, and on `retry` uses exact `retry_at` or makes the row immediately eligible for existing callers. F01 defines these interfaces and persistence behavior; T02/R03/I04 consume them rather than creating side tables or independent sessions.
 
 ## 8. Migrations, verification, and downstream contract
 

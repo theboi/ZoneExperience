@@ -598,6 +598,7 @@ async def test_delivery_and_message_idempotency_constraints(
         "kind": "message",
         "payload": {"text": "hello"},
         "status": "pending",
+        "eligible_at": NOW,
     }
     await session.insert("outbound_deliveries", id=uuid4(), **delivery_values)
     with pytest.raises(asyncpg.UniqueViolationError):
@@ -830,11 +831,13 @@ async def test_remaining_claim_and_attempt_keys(session: SchemaConnection) -> No
         kind="message",
         payload={},
         status="pending",
+        eligible_at=NOW,
     )
     attempt_values = {
         "delivery_id": delivery_id,
         "attempt_number": 1,
         "started_at": NOW,
+        "correlation_id": uuid4(),
     }
     await session.insert("outbound_delivery_attempts", id=uuid4(), **attempt_values)
     with pytest.raises(asyncpg.UniqueViolationError):

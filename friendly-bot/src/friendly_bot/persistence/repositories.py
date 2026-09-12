@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from types import MappingProxyType
 from typing import Literal, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -50,6 +51,11 @@ from friendly_bot.persistence.models import (
 
 type LoginAttachmentResult = Literal["attached", "occupied", "not_found"]
 type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
+DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
+
+
+class DeliveryClaimLostError(RuntimeError):
+    """Raised when a worker no longer owns a safe outbound-delivery claim."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +178,16 @@ class NewOutboundDelivery:
     kind: str
     payload: dict[str, JsonValue]
     status: str = "pending"
+    eligible_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundDeliveryMessage:
+    """Provider-neutral durable send inputs reconstructed from the outbox row."""
+
+    chat_id: int
+    kind: str
+    payload: Mapping[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +195,11 @@ class OutboundDeliveryRecord:
     id: UUID
     idempotency_key: str
     status: str
+    message: OutboundDeliveryMessage
+    eligible_at: datetime
+    claim_token: UUID | None
+    claim_expires_at: datetime | None
+    confirmed_telegram_message_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +208,7 @@ class DeliveryAttemptRecord:
     delivery_id: UUID
     attempt_number: int
     started_at: datetime
+    correlation_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,11 +379,25 @@ class DeliveryRepository(Protocol):
     ) -> OutboundDeliveryRecord: ...
 
     async def claim_next_safe(
-        self, *, now: datetime
+        self, *, now: datetime, lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE
     ) -> OutboundDeliveryRecord | None: ...
 
+    async def renew_claim(
+        self,
+        delivery_id: UUID,
+        *,
+        claim_token: UUID,
+        now: datetime,
+        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
+    ) -> OutboundDeliveryRecord: ...
+
     async def start_attempt(
-        self, delivery_id: UUID, correlation_id: UUID, *, started_at: datetime
+        self,
+        delivery_id: UUID,
+        correlation_id: UUID,
+        *,
+        claim_token: UUID,
+        started_at: datetime,
     ) -> DeliveryAttemptRecord: ...
 
     async def finish_attempt(
@@ -371,6 +407,9 @@ class DeliveryRepository(Protocol):
         outcome: DeliveryOutcome,
         *,
         now: datetime,
+        retry_at: datetime | None = None,
+        safe_error: str | None = None,
+        confirmed_telegram_message_id: int | None = None,
     ) -> None: ...
 
 
@@ -405,6 +444,11 @@ class FlowVersionRepository(Protocol):
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _validate_lease_duration(lease_duration: timedelta) -> None:
+    if lease_duration <= timedelta():
+        raise ValueError("safe claim lease duration must be positive")
 
 
 def _user_record(row: User) -> UserRecord:
@@ -518,9 +562,41 @@ def _assignment_record(row: HumanMatchAssignment) -> MatchAssignmentRecord:
     )
 
 
+def _freeze_json(value: JsonValue) -> JsonValue:
+    """Make JSON values immutable before exposing them through a frozen DTO."""
+
+    if isinstance(value, dict):
+        return cast(
+            JsonValue,
+            MappingProxyType({key: _freeze_json(item) for key, item in value.items()}),
+        )
+    if isinstance(value, list):
+        return cast(JsonValue, tuple(_freeze_json(item) for item in value))
+    return value
+
+
+def _freeze_payload(payload: dict[str, JsonValue]) -> Mapping[str, JsonValue]:
+    """Detach the returned message payload from the ORM row and freeze it recursively."""
+
+    return MappingProxyType(
+        {key: _freeze_json(value) for key, value in payload.items()}
+    )
+
+
 def _delivery_record(row: OutboundDelivery) -> OutboundDeliveryRecord:
     return OutboundDeliveryRecord(
-        id=row.id, idempotency_key=row.idempotency_key, status=row.status
+        id=row.id,
+        idempotency_key=row.idempotency_key,
+        status=row.status,
+        message=OutboundDeliveryMessage(
+            chat_id=row.telegram_chat_id,
+            kind=row.kind,
+            payload=_freeze_payload(row.payload),
+        ),
+        eligible_at=row.eligible_at,
+        claim_token=row.claim_token,
+        claim_expires_at=row.claim_expires_at,
+        confirmed_telegram_message_id=row.confirmed_telegram_message_id,
     )
 
 
@@ -530,6 +606,7 @@ def _attempt_record(row: OutboundDeliveryAttempt) -> DeliveryAttemptRecord:
         delivery_id=row.delivery_id,
         attempt_number=row.attempt_number,
         started_at=row.started_at,
+        correlation_id=row.correlation_id,
     )
 
 
@@ -1439,6 +1516,7 @@ class SqlAlchemyDeliveryRepository:
                 kind=delivery.kind,
                 payload=delivery.payload,
                 status=delivery.status,
+                eligible_at=delivery.eligible_at or _now(),
             )
             .on_conflict_do_nothing(index_elements=[OutboundDelivery.idempotency_key])
             .returning(OutboundDelivery)
@@ -1453,14 +1531,30 @@ class SqlAlchemyDeliveryRepository:
             raise RuntimeError("outbound delivery could not be enqueued")
         return _delivery_record(row)
 
-    async def claim_next_safe(self, *, now: datetime) -> OutboundDeliveryRecord | None:
-        """Lease one delivery created by ``now`` and mark it unavailable to peers."""
+    async def claim_next_safe(
+        self,
+        *,
+        now: datetime,
+        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
+    ) -> OutboundDeliveryRecord | None:
+        """Atomically lease due work or an expired unstarted lease, never a send."""
+
+        _validate_lease_duration(lease_duration)
 
         row = await self._session.scalar(
             select(OutboundDelivery)
             .where(
-                OutboundDelivery.status.in_(("pending", "retry")),
-                OutboundDelivery.created_at <= now,
+                or_(
+                    and_(
+                        OutboundDelivery.status.in_(("pending", "retry")),
+                        OutboundDelivery.eligible_at <= now,
+                    ),
+                    and_(
+                        OutboundDelivery.status == "claimed",
+                        OutboundDelivery.claim_expires_at.is_not(None),
+                        OutboundDelivery.claim_expires_at <= now,
+                    ),
+                )
             )
             .order_by(OutboundDelivery.created_at, OutboundDelivery.id)
             .with_for_update(skip_locked=True)
@@ -1469,19 +1563,58 @@ class SqlAlchemyDeliveryRepository:
         if row is None:
             return None
         row.status = "claimed"
+        row.claim_token = uuid4()
+        row.claim_expires_at = now + lease_duration
         return _delivery_record(row)
 
-    async def start_attempt(
-        self, delivery_id: UUID, correlation_id: UUID, *, started_at: datetime
-    ) -> DeliveryAttemptRecord:
-        del correlation_id
+    async def renew_claim(
+        self,
+        delivery_id: UUID,
+        *,
+        claim_token: UUID,
+        now: datetime,
+        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
+    ) -> OutboundDeliveryRecord:
+        """Extend a still-live claim only for its exact opaque owner token."""
+
+        _validate_lease_duration(lease_duration)
         delivery = await self._session.scalar(
             select(OutboundDelivery)
             .where(OutboundDelivery.id == delivery_id)
             .with_for_update()
         )
-        if delivery is None:
-            raise LookupError("outbound delivery was not found")
+        if (
+            delivery is None
+            or delivery.status != "claimed"
+            or delivery.claim_token != claim_token
+            or delivery.claim_expires_at is None
+            or delivery.claim_expires_at <= now
+        ):
+            raise DeliveryClaimLostError("outbound delivery claim was lost")
+        delivery.claim_expires_at = now + lease_duration
+        return _delivery_record(delivery)
+
+    async def start_attempt(
+        self,
+        delivery_id: UUID,
+        correlation_id: UUID,
+        *,
+        claim_token: UUID,
+        started_at: datetime,
+    ) -> DeliveryAttemptRecord:
+        delivery = await self._session.scalar(
+            select(OutboundDelivery)
+            .where(OutboundDelivery.id == delivery_id)
+            .with_for_update()
+        )
+        if (
+            delivery is None
+            or delivery.status != "claimed"
+            or delivery.claim_token != claim_token
+            or delivery.claim_expires_at is None
+            or delivery.claim_expires_at <= started_at
+        ):
+            raise DeliveryClaimLostError("outbound delivery claim was lost")
         attempt_number = await self._session.scalar(
             select(
                 func.coalesce(func.max(OutboundDeliveryAttempt.attempt_number), 0)
@@ -1492,8 +1625,11 @@ class SqlAlchemyDeliveryRepository:
             delivery_id=delivery_id,
             attempt_number=next_attempt_number,
             started_at=started_at,
+            correlation_id=correlation_id,
         )
         delivery.status = "sending"
+        delivery.claim_token = None
+        delivery.claim_expires_at = None
         self._session.add(attempt)
         await self._session.flush()
         return _attempt_record(attempt)
@@ -1505,6 +1641,9 @@ class SqlAlchemyDeliveryRepository:
         outcome: DeliveryOutcome,
         *,
         now: datetime,
+        retry_at: datetime | None = None,
+        safe_error: str | None = None,
+        confirmed_telegram_message_id: int | None = None,
     ) -> None:
         attempt = await self._session.scalar(
             select(OutboundDeliveryAttempt)
@@ -1516,6 +1655,8 @@ class SqlAlchemyDeliveryRepository:
         )
         if attempt is None:
             raise LookupError("outbound delivery attempt was not found")
+        if attempt.finished_at is not None:
+            raise RuntimeError("outbound delivery attempt is already finished")
         delivery = await self._session.scalar(
             select(OutboundDelivery)
             .where(OutboundDelivery.id == delivery_id)
@@ -1523,11 +1664,25 @@ class SqlAlchemyDeliveryRepository:
         )
         if delivery is None:
             raise LookupError("outbound delivery was not found")
+        if delivery.status != "sending":
+            raise RuntimeError("outbound delivery is not sending")
+        if (
+            confirmed_telegram_message_id is not None
+            and confirmed_telegram_message_id <= 0
+        ):
+            raise ValueError("confirmed Telegram message id must be positive")
         attempt.finished_at = now
         attempt.outcome = outcome
+        attempt.safe_error = safe_error
         delivery.status = outcome
+        delivery.claim_token = None
+        delivery.claim_expires_at = None
+        if outcome == "retry":
+            delivery.eligible_at = retry_at or now
         if outcome == "sent":
             delivery.sent_at = now
+        if confirmed_telegram_message_id is not None:
+            delivery.confirmed_telegram_message_id = confirmed_telegram_message_id
 
 
 class SqlAlchemyDiagnosticRepository:

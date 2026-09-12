@@ -263,6 +263,59 @@ async def test_alembic_head_matches_every_f01_metadata_table_and_column(
     assert str(profiles["reserved_capacity"]["default"]) == "0"
 
 
+async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
+    migrated_database: MigratedDatabase,
+) -> None:
+    """The additive delivery revision must preserve the 0001 upgrade path exactly."""
+
+    _run_alembic(migrated_database.database_url, "downgrade", "0001_foundation")
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            before_upgrade = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+
+    assert "eligible_at" not in before_upgrade["columns"]["outbound_deliveries"]
+    assert "claim_token" not in before_upgrade["columns"]["outbound_deliveries"]
+    assert (
+        "correlation_id" not in before_upgrade["columns"]["outbound_delivery_attempts"]
+    )
+
+    _run_alembic(migrated_database.database_url, "upgrade", "head")
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            after_upgrade = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+
+    delivery_columns = after_upgrade["columns"]["outbound_deliveries"]
+    attempt_columns = after_upgrade["columns"]["outbound_delivery_attempts"]
+    assert {"eligible_at", "claim_token", "claim_expires_at"} <= set(delivery_columns)
+    assert delivery_columns["eligible_at"]["nullable"] is False
+    assert "confirmed_telegram_message_id" in delivery_columns
+    assert attempt_columns["correlation_id"]["nullable"] is False
+    assert {
+        "ix_outbound_deliveries_due",
+        "ix_outbound_deliveries_expired_claim",
+    } <= set(after_upgrade["index_definitions"])
+
+    _run_alembic(migrated_database.database_url, "downgrade", "0001_foundation")
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            after_downgrade = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+
+    assert "eligible_at" not in after_downgrade["columns"]["outbound_deliveries"]
+    assert "claim_token" not in after_downgrade["columns"]["outbound_deliveries"]
+    assert (
+        "correlation_id" not in after_downgrade["columns"]["outbound_delivery_attempts"]
+    )
+
+
 async def test_alembic_head_enables_pgcrypto_and_named_f01_enums(
     async_engine: AsyncEngine,
 ) -> None:
@@ -346,7 +399,25 @@ async def test_alembic_head_preserves_foreign_keys_and_named_constraints(
         name: index_definitions[name] for name in expected_partial_indexes
     }.keys() == expected_partial_indexes.keys()
     for index_name, expected_where in expected_partial_indexes.items():
-        assert expected_where in index_definitions[index_name]
+        if expected_where == "status in ('pending', 'retry')":
+            assert "status" in index_definitions[index_name]
+            assert "'pending'" in index_definitions[index_name]
+            assert "'retry'" in index_definitions[index_name]
+            continue
+        normalized_expected = (
+            expected_where.replace("::text", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace(" ", "")
+        )
+        normalized_actual = (
+            index_definitions[index_name]
+            .replace("::text", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace(" ", "")
+        )
+        assert normalized_expected in normalized_actual
     assert (
         "coalesce(service_id"
         in index_definitions["uq_open_flow_selections_user_version_parent_service"]

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "worker": "F01",
   "phase": "execution",
-  "status": "submitted-for-coordinator-review",
-  "date": "2026-09-12",
+  "status": "delivery-contract-repair-verified-locally",
+  "date": "2026-09-13",
   "accepted_source_and_review": {
     "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
     "summary": "Task 7 migration source and review repair accepted on origin/main before Task 8 acceptance work."
@@ -18,6 +18,15 @@
       "tests/integration/persistence/test_migrations.py"
     ],
     "production_repairs": "none; the restored accepted implementation satisfied both new acceptance examples",
+    "delivery_contract_repair": {
+      "root_cause": "The original claim DTO omitted the message and lease ownership, claim selection permanently excluded claimed rows, retry timing reused created_at, and attempt correlation IDs were discarded. T02 therefore could not fence a stale worker or drive its durable outbox through F01 alone.",
+      "implemented": [
+        "0002_delivery_contract adds eligible_at, opaque claim token/expiry, confirmed Telegram message ID, and attempt correlation ID without rewriting 0001",
+        "OutboundDeliveryRecord now exposes frozen provider-neutral message data and claim ownership",
+        "claim/start/finish transitions fence stale claimants, retain exact retry-at, and never recover sending or uncertain rows"
+      ],
+      "authority_impact": "No product, architecture, T02, R03, or I04 authority impact: this is a repair wholly within F01's existing durable-delivery boundary."
+    },
     "excluded": [
       "bot and routing behavior",
       "OpenRouter behavior",
@@ -43,6 +52,22 @@
       "green_command": "uv run pytest tests/unit/domain/test_publication.py::test_unhandled_error_has_no_configured_default_flow tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent -q",
       "green_result": "exit 0; 2 passed in 1.74s",
       "contract": "A committed timestamp delivery claim returns true once and false on the same timestamp/user retry."
+    },
+    {
+      "test": "durable outbound delivery claim, retry, and fencing PostgreSQL integration",
+      "red_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py -q -k 'delivery_claim_exposes or delivery_retry_at or expired_unstarted'",
+      "red_result": "exit 1; 3 failed, 13 deselected. The claim record lacked message data, NewOutboundDelivery lacked eligible_at, and no lease/token recovery behavior existed.",
+      "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py -q -k 'delivery_claim_exposes or delivery_retry_at or expired_unstarted'",
+      "green_result": "exit 0; 3 passed, 13 deselected in 3.54s",
+      "contract": "Claims expose immutable provider-neutral messages and opaque leases; exact retry-at gates work; only expired unstarted claims recover; stale tokens cannot start; sending/uncertain work never recovers; correlation, safe error, confirmed message ID, and immediate legacy retry eligibility persist."
+    },
+    {
+      "test": "test_delivery_contract_upgrade_from_0001_is_complete_and_reversible",
+      "red_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_migrations.py -q -k delivery_contract_upgrade",
+      "red_result": "exit 1; the 0001-to-head schema lacked eligible_at, claim token/expiry, and attempt correlation ID.",
+      "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_migrations.py -q -k delivery_contract_upgrade",
+      "green_result": "exit 0; 1 passed, 13 deselected in 7.60s",
+      "contract": "0002 upgrades from 0001 to metadata parity and downgrades exactly back to 0001 delivery columns."
     }
   ],
   "verification": [
@@ -75,6 +100,19 @@
     {
       "command": "asyncpg schema canary after alembic upgrade",
       "result": "exit 0; alembic_revision=0001_foundation, public_table_count=23, timestamp_claim_constraint=True"
+    },
+    {
+      "command": "uv run pytest tests/unit/domain tests/integration/persistence -q",
+      "result": "exit 0; 145 passed, 1 skipped in 37.27s after reconciling origin/main",
+      "coverage": "complete F01 domain, repository, schema, and migration suite after the delivery-contract repair"
+    },
+    {
+      "command": "uv run alembic upgrade head && uv run alembic check && uv run alembic downgrade base",
+      "result": "exit 0; upgraded through 0002_delivery_contract, detected no new operations, then downgraded through 0001 to base"
+    },
+    {
+      "command": "uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot && uv lock --check",
+      "result": "exit 0; Ruff clean, 31 files formatted, mypy clean over 15 source files, and 26 packages resolved"
     }
   ],
   "isolated_runtime": {
@@ -86,9 +124,11 @@
   },
   "migration": {
     "revision": "0001_foundation",
+    "delivery_contract_revision": "0002_delivery_contract",
     "verified_objects": [
       "23 public F01 tables",
-      "uq_timestamp_delivery_claims_timestamp_user"
+      "uq_timestamp_delivery_claims_timestamp_user",
+      "outbound-delivery eligible-at and expired-unstarted-claim partial indexes"
     ]
   },
   "supplied_import_contract": {
@@ -152,10 +192,32 @@
         "MatchAssignmentRecord",
         "PollStateRecord",
         "NewOutboundDelivery",
+        "OutboundDeliveryMessage",
         "OutboundDeliveryRecord",
         "DeliveryAttemptRecord",
         "DiagnosticRecord",
         "FlowVersionRecord"
+      ]
+    },
+    "delivery_contract": {
+      "exports": [
+        "NewOutboundDelivery",
+        "OutboundDeliveryMessage",
+        "OutboundDeliveryRecord",
+        "DeliveryAttemptRecord",
+        "DeliveryClaimLostError",
+        "DeliveryRepository"
+      ],
+      "telegram_mapping": [
+        "T02 must use claim.message.chat_id as the outbound Telegram request chat_id and claim.idempotency_key as its operation idempotency key.",
+        "For kind == message, T02 must validate claim.message.payload[text] as the outbound Telegram text; unknown kinds or malformed payload fields are not sent.",
+        "claim.message.payload is recursively immutable and must not be mutated; T02 may construct its own typed Telegram DTO from it but F01 never imports friendly_bot.telegram."
+      ],
+      "safe_attempt_sequence": [
+        "Claim in a committed UnitOfWork with claim_next_safe(now=...). The claim is pending/retry only when eligible_at is due, or an expired unstarted claimed row.",
+        "Before any network call, start_attempt(delivery_id, correlation_id, claim_token=claim.claim_token, started_at=...) in a committed UnitOfWork. DeliveryClaimLostError means do not send.",
+        "renew_claim accepts only the active matching claim token. start_attempt clears the lease and changes status to sending, so a started or uncertain item is never restart-recovered.",
+        "Finish with exact retry_at for a parsed Telegram 429, safe_error for sanitized detail, and confirmed_telegram_message_id for parsed success. Omitting retry_at preserves immediately eligible retry behavior for existing F01 callers."
       ]
     },
     "T02": [
@@ -168,7 +230,11 @@
       "DeliveryRepository",
       "OpenSelectionRepository",
       "ServiceTimestampRecord",
-      "NewOutboundDelivery"
+      "NewOutboundDelivery",
+      "OutboundDeliveryRecord",
+      "OutboundDeliveryMessage",
+      "DeliveryAttemptRecord",
+      "DeliveryClaimLostError"
     ],
     "R03": [
       "UnitOfWork",

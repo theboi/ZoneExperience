@@ -530,6 +530,22 @@ class OutboundDelivery(Base):
     """A logical outbound delivery protected by an idempotency key."""
 
     __tablename__ = "outbound_deliveries"
+    __table_args__ = (
+        Index(
+            "ix_outbound_deliveries_due",
+            "eligible_at",
+            "created_at",
+            "id",
+            postgresql_where=text("status IN ('pending', 'retry')"),
+        ),
+        Index(
+            "ix_outbound_deliveries_expired_claim",
+            "claim_expires_at",
+            "created_at",
+            "id",
+            postgresql_where=text("status = 'claimed'"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -547,7 +563,13 @@ class OutboundDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    eligible_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    claim_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class OutboundDeliveryAttempt(Base):
@@ -574,6 +596,7 @@ class OutboundDeliveryAttempt(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    correlation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     outcome: Mapped[str | None] = mapped_column(String(64))
     safe_error: Mapped[str | None] = mapped_column(Text)
