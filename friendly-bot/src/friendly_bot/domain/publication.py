@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
+from types import MappingProxyType
 from typing import Any, cast
 
 from pydantic import JsonValue, ValidationError
@@ -24,7 +25,7 @@ _STABLE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{2,127}$")
 _DOTTED_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 _TEMPLATE_PATTERN = re.compile(
     r"\{\{\s*([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"
-    r"\s*(?:\|\s*[^{}]+)?\}\}"
+    r"\s*(?:\|\s*optional)?\s*\}\}"
 )
 
 
@@ -66,14 +67,47 @@ class PublicationWarning:
     flow_key: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class PublishedFlowDefinition:
     """The canonical data persisted as one immutable flow version."""
 
-    document: dict[str, JsonValue]
-    flow_key_index: dict[str, tuple[int, ...]]
+    _canonical_document: bytes
+    _flow_key_index: Mapping[str, tuple[int, ...]]
     content_hash: str
-    warnings: tuple[PublicationWarning, ...] = ()
+    warnings: tuple[PublicationWarning, ...]
+
+    def __init__(
+        self,
+        *,
+        document: Mapping[str, JsonValue],
+        flow_key_index: Mapping[str, tuple[int, ...]],
+        warnings: Iterable[PublicationWarning] = (),
+    ) -> None:
+        canonical_document = canonical_json(document)
+        object.__setattr__(self, "_canonical_document", canonical_document)
+        object.__setattr__(
+            self,
+            "_flow_key_index",
+            MappingProxyType(dict(flow_key_index)),
+        )
+        object.__setattr__(
+            self,
+            "content_hash",
+            sha256(canonical_document).hexdigest(),
+        )
+        object.__setattr__(self, "warnings", tuple(warnings))
+
+    @property
+    def document(self) -> dict[str, JsonValue]:
+        """Return a detached document copy for callers and persistence adapters."""
+
+        return cast(dict[str, JsonValue], json.loads(self._canonical_document))
+
+    @property
+    def flow_key_index(self) -> dict[str, tuple[int, ...]]:
+        """Return a detached flow-key index copy for callers."""
+
+        return dict(self._flow_key_index)
 
 
 def canonical_json(document: Mapping[str, JsonValue] | JsonValue) -> bytes:
@@ -101,24 +135,31 @@ def validate_for_publication(
 ) -> PublishedFlowDefinition:
     """Validate a recursive draft and return its immutable publication data."""
 
-    if not isinstance(root, DiscussionFlow):
-        raise FlowPublicationError("publication root must be a DiscussionFlow")
     if not isinstance(context_schema, TemplateContextSchema):
         raise FlowPublicationError("publication requires a template context schema")
     if not isinstance(root_kind, RootKind):
         raise FlowPublicationError("publication root kind is invalid")
 
-    _reject_event_only_cycles(root)
-    index = _index_unique_keys(root)
-    _validate_root(root, root_kind)
-    warnings = _validate_nodes(root, context_schema)
-    document = cast(dict[str, JsonValue], root.model_dump(mode="json"))
+    normalized_root = _normalize_root(root)
+    _reject_event_only_cycles(normalized_root)
+    index = _index_unique_keys(normalized_root)
+    _validate_root(normalized_root, root_kind)
+    warnings = _validate_nodes(normalized_root, context_schema)
+    document = cast(dict[str, JsonValue], _model_dump(normalized_root, mode="json"))
     return PublishedFlowDefinition(
         document=document,
         flow_key_index=index,
-        content_hash=sha256(canonical_json(document)).hexdigest(),
-        warnings=tuple(warnings),
+        warnings=warnings,
     )
+
+
+def _normalize_root(root: object) -> DiscussionFlow:
+    try:
+        return DiscussionFlow.model_validate(_model_dump(root))
+    except (TypeError, ValidationError, ValueError) as exc:
+        raise FlowPublicationError(
+            "publication root must be an exact valid DiscussionFlow definition"
+        ) from exc
 
 
 def _index_unique_keys(root: DiscussionFlow) -> dict[str, tuple[int, ...]]:
@@ -227,12 +268,15 @@ def _parse_action_for_publication(
     return parsed
 
 
-def _model_dump(model: object) -> dict[str, Any]:
+def _model_dump(model: object, *, mode: str = "python") -> dict[str, Any]:
     if not hasattr(model, "model_dump"):
         raise TypeError("expected a Pydantic model")
     try:
-        dumped = model.model_dump(warnings="error")
-    except ValueError as exc:
+        dumped = model.model_dump(
+            mode=mode,
+            warnings="error",
+        )
+    except (TypeError, ValueError) as exc:
         raise TypeError("Pydantic model contains invalid data") from exc
     if not isinstance(dumped, dict):
         raise TypeError("Pydantic model did not produce a mapping")
@@ -293,6 +337,12 @@ def _validate_direct_event_handlers(node: DiscussionFlow, event_keys: set[str]) 
         missing_key = min(missing)
         raise FlowPublicationError(
             f"flow {node.key} has no direct handler for {missing_key}"
+        )
+    unsolicited = handlers - event_keys - {"error"}
+    if unsolicited:
+        unsolicited_key = min(unsolicited)
+        raise FlowPublicationError(
+            f"flow {node.key} has unsolicited direct handler for {unsolicited_key}"
         )
     if sum(key == "error" for key in handlers) > 1:
         raise FlowPublicationError(

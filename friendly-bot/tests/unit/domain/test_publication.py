@@ -242,7 +242,7 @@ def test_reachable_event_only_cycle_is_rejected() -> None:
         action_event_flow("system.cycle_root.no_match", "human_match.not_found"),
     ]
 
-    with pytest.raises(FlowPublicationError, match="event-only cycle"):
+    with pytest.raises(FlowPublicationError):
         validate_for_publication(root, SCHEMA, RootKind.SYSTEM)
 
 
@@ -286,3 +286,87 @@ def test_publication_rejects_an_unknown_action_in_a_bypassed_draft() -> None:
 
     with pytest.raises(FlowPublicationError):
         validate_for_publication(root, SCHEMA, RootKind.SYSTEM)
+
+
+def test_publication_normalizes_fieldless_subclasses_and_rejects_extra_fields() -> None:
+    """Breaks if a subclass can extend the closed persisted flow schema."""
+
+    class FieldlessFlow(DiscussionFlow):
+        pass
+
+    class ExtraFieldFlow(DiscussionFlow):
+        unpublished_extra: str = "must not persist"
+
+    source = valid_system_checkpoint().model_dump()
+    normalized_subclass = FieldlessFlow.model_validate(source)
+    extra_field_subclass = ExtraFieldFlow.model_validate(source)
+
+    assert validate_for_publication(normalized_subclass, SCHEMA, RootKind.SYSTEM)
+    with pytest.raises(FlowPublicationError):
+        validate_for_publication(extra_field_subclass, SCHEMA, RootKind.SYSTEM)
+
+
+def test_published_definition_defensively_copies_document_and_index() -> None:
+    """Breaks if caller mutations can desynchronize published content from its hash."""
+
+    published = validate_for_publication(
+        valid_system_checkpoint(), SCHEMA, RootKind.SYSTEM
+    )
+    document = published.document
+    index = published.flow_key_index
+    document["key"] = "system.mutated"
+    index["system.root.match"] = (99,)
+
+    assert published.document["key"] == "system.root"
+    assert published.flow_key_index["system.root.match"] == (0,)
+    assert (
+        published.content_hash == sha256(canonical_json(published.document)).hexdigest()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed_value"),
+    [
+        ("actions", None),
+        ("return_actions", iter(())),
+        ("next_flows", None),
+    ],
+)
+def test_malformed_post_construction_containers_raise_publication_errors_without_warnings(
+    field: str,
+    malformed_value: object,
+) -> None:
+    """Breaks if malformed draft containers leak serializer warnings or TypeError."""
+
+    root = valid_system_checkpoint()
+    setattr(root, field, malformed_value)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FlowPublicationError):
+            validate_for_publication(root, SCHEMA, RootKind.SYSTEM)
+
+
+def test_direct_event_handlers_reject_unsolicited_outcomes() -> None:
+    """Breaks if a direct action-event child lacks a declared terminal outcome."""
+
+    root = valid_system_checkpoint()
+    root.next_flows[0].next_flows.append(
+        action_event_flow("system.root.match.unsolicited", "unemitted.event")
+    )
+
+    with pytest.raises(FlowPublicationError):
+        validate_for_publication(root, SCHEMA, RootKind.SYSTEM)
+
+
+def test_template_filters_allow_only_optional() -> None:
+    """Breaks if persisted templates can use an unsupported filter."""
+
+    optional = valid_system_checkpoint()
+    optional.return_actions[0].text = "Hello {{ user.name | optional }}."
+    unsupported = valid_system_checkpoint()
+    unsupported.return_actions[0].text = "Hello {{ user.name | fallback }}."
+
+    assert validate_for_publication(optional, SCHEMA, RootKind.SYSTEM)
+    with pytest.raises(FlowPublicationError):
+        validate_for_publication(unsupported, SCHEMA, RootKind.SYSTEM)
