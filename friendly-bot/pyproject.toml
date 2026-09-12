@@ -1,0 +1,32 @@
+[project]
+name = "friendly-bot"
+version = "0.1.0"
+description = "Friendly Bot"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2,<3",
+    "pydantic-settings>=2,<3",
+    "SQLAlchemy>=2,<3",
+    "asyncpg>=0.29,<1",
+    "alembic>=1.13,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<1",
+    "ruff>=0.6,<1",
+    "mypy>=1.11,<2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.ruff]
+exclude = ["docs"]
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
