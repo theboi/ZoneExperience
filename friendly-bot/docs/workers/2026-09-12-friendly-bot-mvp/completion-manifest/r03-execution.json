@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "worker": "r03",
+  "phase": "execution",
+  "status": "execution-complete",
+  "date": "2026-09-13",
+  "final_feature_commit": "527184361ed64c154647580caefe262435bb69d3",
+  "f01_g1_inspected_commit": "987f8a2a90090b55285698283297bb99200774a3",
+  "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
+  "task_commits": [
+    "2f35384f0ebd450f467299ba88b223295cdf1ad1",
+    "c6ba40f4ad1a3b78029dc323cd5fc8eb2583cdc4",
+    "a9faf3bb19cbdd1eea68f1c1f390ca1f230af65e",
+    "7e29f4d39b78c4ec092d719bfa17b29faf5ccbe1",
+    "34b0f36914967a2958911404500068084d2fac35",
+    "527184361ed64c154647580caefe262435bb69d3"
+  ],
+  "focused_evidence": {
+    "command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
+    "result": "exit 0; 27 passed in 1.85s; Ruff clean; 48 files formatted; mypy clean over 24 source files",
+    "live_postgresql": "The one-capacity race test ran through F01 UnitOfWork and guarded repositories against the approved account-local friendly-bot-u504 Colima Compose PostgreSQL project. It asserted one returned winner, reserved capacity one, one active HumanMatchAssignment, and one active CapacityReservation. The exact Compose project was then torn down and loopback port 5832 was confirmed released."
+  },
+  "privacy_negative_tests": [
+    "tests/unit/routing/test_openrouter_gateway.py::test_prompt_dto_forbids_structured_identity_fields",
+    "tests/unit/routing/test_openrouter_gateway.py::test_request_requires_policy_and_excludes_identifier_sentinels",
+    "tests/unit/persona/test_service.py::test_persona_prompt_dto_forbids_structured_identity_fields"
+  ],
+  "red_green_evidence": {
+    "safety_policy": "A temporary, immediately reverted mutation excluding staff responders made test_safety_allows_leader_or_staff_attending_or_always_available fail because the expected staff alias was missing. The restored policy passed.",
+    "live_race_fixture": "The first live run failed with a foreign-key violation caused by an unsafe direct test seed order. The fixture now flushes users/services before dependent rows; the live one-capacity race passed after that isolated test-only correction."
+  },
+  "review": {
+    "identifier": "r03-task5-scoped-review-2026-09-13",
+    "task5_result": "Task 5 spec compliance passed with no Critical or Important findings. Its two evidence gaps were fixed in 5271843, and the scoped re-review marked both ADDRESSED with no new Critical or Important breakage.",
+    "whole_r03_identifier": "r03-whole-feature-review-2026-09-13",
+    "whole_r03_result": "Feature approved: no Critical or Important findings. One prompt-logging wording overstatement in the draft status was corrected before handoff publication."
+  },
+  "remote_reachability": {
+    "command": "git fetch --quiet origin main && git merge-base --is-ancestor 5271843 origin/main && git rev-list --left-right --count HEAD...origin/main",
+    "result": "exit 0; final feature commit reachable from origin/main; pre-handoff divergence 0 0"
+  },
+  "t02_reconciliation": {
+    "status": "no t02 commit was present in origin/main during task5 publication fetches",
+    "action": "no t02 surface was touched"
+  },
+  "g2": {
+    "status": "not-passed",
+    "reason": "T02 evidence and coordinator verification are still required."
+  },
+  "scope": {
+    "implemented": [
+      "private key-only OpenRouter gateway",
+      "constrained configured-key routing",
+      "durable persona cursor maintenance",
+      "normal and safety matching through F01 UnitOfWork and repository contracts"
+    ],
+    "excluded": [
+      "F01 persistence implementation changes",
+      "Telegram delivery or live calls",
+      "OpenRouter live calls",
+      "G2 approval"
+    ]
+  }
+}
