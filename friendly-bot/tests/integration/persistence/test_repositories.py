@@ -750,6 +750,45 @@ async def test_concurrent_timestamp_claim_has_exactly_one_winner(
     assert winners.count(True) == 1
 
 
+async def test_timestamp_delivery_claim_is_idempotent(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A retry after a committed claim must not obtain timestamp work again."""
+
+    user_id = await _seed_user(session_factory)
+    service_id = await _seed_service(session_factory, key="zone_x_timestamp_retry")
+    definition = PublishedFlowDefinition(
+        document={"key": "service.timestamp.notice", "revision": "idempotent"},
+        flow_key_index={"service.timestamp.notice": ()},
+    )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            definition,
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    timestamp_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add(
+            ServiceTimestamp(
+                id=timestamp_id,
+                service_id=service_id,
+                key="retry",
+                occurs_at=NOW,
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key="service.timestamp.notice",
+            )
+        )
+
+    async with uow_factory() as uow:
+        assert await uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)
+    async with uow_factory() as uow:
+        assert not await uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)
+
+
 async def test_delivery_claim_skips_an_inflight_row_and_records_attempt_outcomes(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],

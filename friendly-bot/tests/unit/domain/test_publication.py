@@ -150,18 +150,28 @@ def test_event_handlers_must_be_direct_and_exactly_once_for_normal_outcomes() ->
         validate_for_publication(root, SCHEMA, RootKind.SYSTEM)
 
 
-def test_one_direct_error_child_is_optional_but_duplicate_normal_handlers_are_rejected() -> (
-    None
-):
-    """Breaks if unhandled errors require configuration or duplicate direct outcomes pass."""
+def test_unhandled_error_has_no_configured_default_flow() -> None:
+    """I04 owns the hardcoded sender, so publication permits an absent error child."""
 
     root_without_error = valid_system_checkpoint()
+    match = root_without_error.next_flows[0]
+
+    assert all(
+        getattr(child.trigger, "event_key", None) != "error"
+        for child in match.next_flows
+    )
+    assert "error" not in match.actions[-1].declared_event_keys
+    assert validate_for_publication(root_without_error, SCHEMA, RootKind.SYSTEM)
+
+
+def test_duplicate_direct_normal_handlers_are_rejected() -> None:
+    """Breaks if duplicate direct outcomes pass validation."""
+
     duplicate_normal_handler = valid_system_checkpoint()
     duplicate_normal_handler.next_flows[0].next_flows.append(
         action_event_flow("system.root.match.found_again", "human_match.found")
     )
 
-    assert validate_for_publication(root_without_error, SCHEMA, RootKind.SYSTEM)
     with pytest.raises(FlowPublicationError):
         validate_for_publication(duplicate_normal_handler, SCHEMA, RootKind.SYSTEM)
 

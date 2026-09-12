@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "worker": "F01",
+  "phase": "execution",
+  "status": "submitted-for-coordinator-review",
+  "date": "2026-09-12",
+  "accepted_source_and_review": {
+    "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
+    "summary": "Task 7 migration source and review repair accepted on origin/main before Task 8 acceptance work."
+  },
+  "scope": {
+    "acceptance_additions": [
+      "tests/unit/domain/test_publication.py::test_unhandled_error_has_no_configured_default_flow",
+      "tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent"
+    ],
+    "covered_without_new_test_edits": [
+      "tests/unit/domain/test_state.py",
+      "tests/integration/persistence/test_migrations.py"
+    ],
+    "production_repairs": "none; the restored accepted implementation satisfied both new acceptance examples",
+    "excluded": [
+      "bot and routing behavior",
+      "OpenRouter behavior",
+      "action execution",
+      "Zone X seed data",
+      "compatibility layers",
+      "downstream worker documentation and status"
+    ]
+  },
+  "red_green_evidence": [
+    {
+      "test": "test_unhandled_error_has_no_configured_default_flow",
+      "red_command": "uv run pytest tests/unit/domain/test_publication.py::test_unhandled_error_has_no_configured_default_flow tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent -q",
+      "red_result": "expected nonzero under a temporary, immediately reverted validator mutation that required an error child: 1 failed, 1 passed",
+      "green_command": "uv run pytest tests/unit/domain/test_publication.py::test_unhandled_error_has_no_configured_default_flow tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent -q",
+      "green_result": "exit 0; 2 passed in 1.74s",
+      "contract": "An absent direct error child is legal. No normal action declares error; I04 owns its hardcoded default error sender."
+    },
+    {
+      "test": "test_timestamp_delivery_claim_is_idempotent",
+      "red_command": "uv run pytest tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent -q",
+      "red_result": "expected nonzero under a temporary, immediately reverted claim-method mutation: 1 failed",
+      "green_command": "uv run pytest tests/unit/domain/test_publication.py::test_unhandled_error_has_no_configured_default_flow tests/integration/persistence/test_repositories.py::test_timestamp_delivery_claim_is_idempotent -q",
+      "green_result": "exit 0; 2 passed in 1.74s",
+      "contract": "A committed timestamp delivery claim returns true once and false on the same timestamp/user retry."
+    }
+  ],
+  "verification": [
+    {
+      "command": "uv run pytest tests/unit/domain tests/integration/persistence -q",
+      "result": "exit 0; 141 passed, 1 skipped in 48.38s",
+      "coverage": "all F01 domain, transition, repository, and migration acceptance modules"
+    },
+    {
+      "command": "uv run ruff check .",
+      "result": "exit 0; All checks passed!"
+    },
+    {
+      "command": "uv run ruff format --check .",
+      "result": "exit 0; 30 files already formatted"
+    },
+    {
+      "command": "uv run mypy src/friendly_bot",
+      "result": "exit 0; Success: no issues found in 15 source files"
+    },
+    {
+      "command": "uv lock --check",
+      "result": "exit 0; resolved 26 packages"
+    },
+    {
+      "command": "uv run alembic upgrade head",
+      "result": "exit 0; applied 0001_foundation to the disposable database",
+      "migration_revision": "0001_foundation"
+    },
+    {
+      "command": "asyncpg schema canary after alembic upgrade",
+      "result": "exit 0; alembic_revision=0001_foundation, public_table_count=23, timestamp_claim_constraint=True"
+    }
+  ],
+  "isolated_runtime": {
+    "kind": "uniquely named disposable PostgreSQL 16-alpine container",
+    "binding": "loopback only",
+    "endpoint": "postgresql+asyncpg://***:***@127.0.0.1:32769/***",
+    "health": "healthy before and after migration canary",
+    "cleanup": "container auto-removed after verification and its loopback port was confirmed released; no named Compose resource was created"
+  },
+  "migration": {
+    "revision": "0001_foundation",
+    "verified_objects": [
+      "23 public F01 tables",
+      "uq_timestamp_delivery_claims_timestamp_user"
+    ]
+  },
+  "supplied_import_contract": {
+    "rule": "T02, R03, and I04 import these exact domain and repository/UoW contracts; they do not import ORM models, open a second session, create a side table, or add a compatibility layer.",
+    "shared_domain": {
+      "friendly_bot.domain": [
+        "ActionEvent",
+        "DiscussionAction",
+        "DiscussionFlowTrigger",
+        "parse_action",
+        "parse_trigger"
+      ],
+      "friendly_bot.domain.flows": [
+        "DiscussionFlow",
+        "NextFlowMode"
+      ],
+      "friendly_bot.domain.publication": [
+        "PublishedFlowDefinition",
+        "RootKind",
+        "TemplateContextSchema",
+        "validate_for_publication"
+      ],
+      "friendly_bot.domain.state": [
+        "OpenSelectionState",
+        "SelectionTransition",
+        "CheckpointReturnTransition",
+        "SelectionTransitionEngine"
+      ]
+    },
+    "friendly_bot.persistence.uow": [
+      "UnitOfWork"
+    ],
+    "friendly_bot.persistence.repositories": {
+      "protocols": [
+        "UserRepository",
+        "OperationalProfileRepository",
+        "OperationalLoginRepository",
+        "ServiceRepository",
+        "AttendanceRepository",
+        "PollStateRepository",
+        "UpdateRepository",
+        "ConversationRepository",
+        "PersonaRepository",
+        "MatchRepository",
+        "OpenSelectionRepository",
+        "DeliveryRepository",
+        "DiagnosticRepository",
+        "FlowVersionRepository"
+      ],
+      "records": [
+        "UserRecord",
+        "OperationalProfileRecord",
+        "OperationalLoginRecord",
+        "ServiceRecord",
+        "AttendanceRecord",
+        "AttendanceStartResult",
+        "ServiceTimestampRecord",
+        "ConversationMessageRecord",
+        "PersonaCursorRecord",
+        "MatchCandidateRecord",
+        "MatchAssignmentRecord",
+        "PollStateRecord",
+        "NewOutboundDelivery",
+        "OutboundDeliveryRecord",
+        "DeliveryAttemptRecord",
+        "DiagnosticRecord",
+        "FlowVersionRecord"
+      ]
+    },
+    "T02": [
+      "UnitOfWork",
+      "UserRepository",
+      "ServiceRepository",
+      "AttendanceRepository",
+      "PollStateRepository",
+      "UpdateRepository",
+      "DeliveryRepository",
+      "OpenSelectionRepository",
+      "ServiceTimestampRecord",
+      "NewOutboundDelivery"
+    ],
+    "R03": [
+      "UnitOfWork",
+      "ConversationRepository",
+      "PersonaRepository",
+      "MatchRepository",
+      "OperationalProfileRepository",
+      "OperationalLoginRepository",
+      "MatchCandidateRecord",
+      "MatchAssignmentRecord",
+      "PersonaCursorRecord"
+    ],
+    "I04": [
+      "ActionEvent",
+      "DiscussionFlow",
+      "DiscussionAction",
+      "validate_for_publication",
+      "SelectionTransitionEngine",
+      "UnitOfWork",
+      "all F01 repository protocols and frozen records above"
+    ]
+  },
+  "g1": {
+    "status": "not-passed",
+    "verifier": "coordinator",
+    "accepted_source_and_review": "Task 7 source and review are accepted at e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00.",
+    "operational_evidence_blocker": "This host has neither docker compose nor docker-compose. Real tracked Compose configuration, up, and healthcheck evidence is therefore outstanding.",
+    "non_compose_evidence": "The live disposable loopback PostgreSQL verification above passed, but it does not substitute for the missing Compose evidence.",
+    "action_taken": "No external tooling was installed and no configured default error flow was added."
+  },
+  "remote_evidence": {
+    "remote": "origin/main",
+    "pre_task_reconciliation": {
+      "command": "git fetch --quiet origin main; git rev-list --left-right --count HEAD...origin/main",
+      "result": "exit 0; HEAD=e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00, origin/main=e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00, divergence=0 0"
+    },
+    "accepted_source_commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
+    "task8_acceptance_commit": "recorded by the follow-on manifest remote-evidence commit after the acceptance commit is pushed"
+  }
+}
