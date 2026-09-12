@@ -183,3 +183,16 @@ uv lock --check
 Results: publication suite `24 passed`; Task 1–2 regression suite `49 passed`;
 full current suite `73 passed`; Ruff, formatting, strict mypy, and lock
 verification each exited 0.
+
+### Review integration and remote proof
+
+- Review repair commit: `e65929dfb51a6a996f7a700fea5c1009f1be3624`
+  (`fix: harden flow publication boundary`).
+- Fetched and merged `origin/main` using `git merge --no-edit origin/main`;
+  it was already up to date and no rebase was used.
+- Re-ran the focused, Task 1–2, full, Ruff, format, strict mypy, and lock
+  commands after that merge; all exited 0 with the counts above.
+- Pushed `main`, fetched again, and proved
+  `git merge-base --is-ancestor HEAD origin/main`. Both `HEAD` and
+  `origin/main` resolved to
+  `e65929dfb51a6a996f7a700fea5c1009f1be3624`.
