@@ -4,7 +4,8 @@ services:
   postgres:
     image: postgres:16-alpine
     env_file:
-      - .runtime/u504/postgres.env
+      - path: .runtime/u504/postgres.env
+        required: false
     ports:
       - "127.0.0.1:5832:5432"
     healthcheck:

@@ -758,4 +758,3 @@ def downgrade() -> None:
     op.execute("DROP TYPE service_audience")
     op.execute("DROP TYPE flow_scope_kind")
     op.execute("DROP TYPE operational_role")
-    op.execute("DROP EXTENSION IF EXISTS pgcrypto")
