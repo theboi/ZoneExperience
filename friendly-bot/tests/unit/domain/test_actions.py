@@ -1,3 +1,5 @@
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -148,13 +150,37 @@ def test_invalid_or_unregistered_actions_are_rejected(data: dict[str, object]) -
 
 def test_action_event_requires_a_stable_key_and_json_payload() -> None:
     event = ActionEvent(
-        key="human_match.found", payload={"rank": 1, "candidate": "Taylor"}
+        key="human_match.found",
+        payload={
+            "rank": 1,
+            "candidate": "Taylor",
+            "details": {"scores": [1.5, None, True]},
+        },
     )
 
     assert event.model_dump() == {
         "key": "human_match.found",
-        "payload": {"rank": 1, "candidate": "Taylor"},
+        "payload": {
+            "rank": 1,
+            "candidate": "Taylor",
+            "details": {"scores": [1.5, None, True]},
+        },
     }
 
     with pytest.raises(ValidationError):
         ActionEvent(key="Bad Event")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"non_finite": math.nan},
+        {"nested": {"non_finite": math.inf}},
+        {"items": [{"non_finite": -math.inf}]},
+    ],
+)
+def test_action_event_rejects_non_finite_floats_at_every_json_depth(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ActionEvent(key="human_match.found", payload=payload)  # type: ignore[arg-type]
