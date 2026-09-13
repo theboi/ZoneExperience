@@ -117,20 +117,20 @@ class TelegramRuntimeLock:
 
         connection = self._required_live_connection()
         if connection.is_closed():
-            self._lost = True
+            await self._lose_health_connection()
             raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
         try:
             result = await connection.fetchval(_HEALTH_SQL)
         except asyncio.CancelledError:
-            self._lost = True
+            await self._lose_health_connection()
             raise
         except Exception as error:
-            self._lost = True
+            await self._lose_health_connection()
             raise TelegramRuntimeLockLostError(
                 "runtime_lock_connection_lost"
             ) from error
         if type(result) is not int or result != 1:
-            self._lost = True
+            await self._lose_health_connection()
             raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
 
     async def aclose(self) -> None:
@@ -156,6 +156,13 @@ class TelegramRuntimeLock:
         if self._lost or self._connection is None:
             raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
         return self._connection
+
+    async def _lose_health_connection(self) -> None:
+        """Latch health loss and release the session without masking the probe result."""
+
+        self._lost = True
+        with suppress(Exception):
+            await self.aclose()
 
 
 async def _close_after_failed_acquisition(

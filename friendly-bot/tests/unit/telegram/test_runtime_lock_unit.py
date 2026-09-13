@@ -78,6 +78,7 @@ async def test_cancelled_health_check_latches_the_lock_as_lost() -> None:
     with pytest.raises(asyncio.CancelledError):
         await lock.ensure_healthy()
 
+    assert connection.closed
     with pytest.raises(TelegramRuntimeLockLostError):
         await lock.ensure_healthy()
 
@@ -183,3 +184,20 @@ async def test_failed_context_enter_closes_the_acquired_lock_session() -> None:
             pytest.fail("the lock context body must not start")
 
     assert connection.closed
+
+
+@pytest.mark.parametrize("health_outcome", [RuntimeError("offline"), 0])
+async def test_failed_or_invalid_health_check_closes_and_latches_the_session(
+    health_outcome: object,
+) -> None:
+    """A bad ownership probe must release the live session before future work stops."""
+
+    connection = FakeConnection([True, health_outcome])
+    lock = await TelegramRuntimeLock.acquire(lambda: _factory(connection))
+
+    with pytest.raises(TelegramRuntimeLockLostError):
+        await lock.ensure_healthy()
+
+    assert connection.closed
+    with pytest.raises(TelegramRuntimeLockLostError):
+        await lock.ensure_healthy()

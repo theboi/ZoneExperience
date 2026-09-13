@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 
 import asyncpg
 import pytest
-from sqlalchemy.engine import URL, make_url
+from pydantic import PostgresDsn
 
+from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
 from friendly_bot.telegram.runtime_lock import (
     TelegramRuntimeAlreadyRunningError,
     TelegramRuntimeLock,
@@ -21,17 +22,11 @@ from friendly_bot.telegram.runtime_lock import (
 class Postgres:
     """Open direct, non-pooled PostgreSQL connections for one integration test."""
 
-    url: URL
+    connection_factory: DirectPostgresConnectionFactory
     connections: list[asyncpg.Connection[asyncpg.Record]] = field(default_factory=list)
 
     async def connect(self) -> asyncpg.Connection[asyncpg.Record]:
-        connection = await asyncpg.connect(
-            host=self.url.host,
-            port=self.url.port,
-            user=self.url.username,
-            password=self.url.password,
-            database=self.url.database,
-        )
+        connection = await self.connection_factory()
         self.connections.append(connection)
         return connection
 
@@ -48,7 +43,7 @@ async def postgres() -> AsyncIterator[Postgres]:
     database_url = os.environ.get("FRIENDLY_BOT_DATABASE_URL")
     if not database_url:
         pytest.skip("FRIENDLY_BOT_DATABASE_URL is required for PostgreSQL integration")
-    instance = Postgres(make_url(database_url))
+    instance = Postgres(DirectPostgresConnectionFactory(PostgresDsn(database_url)))
     try:
         yield instance
     finally:
