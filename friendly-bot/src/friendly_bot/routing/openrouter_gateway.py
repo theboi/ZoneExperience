@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Literal, Protocol
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from pydantic import SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from friendly_bot.hyperparameters import (
+    OPENROUTER_MAX_RESPONSE_BYTES,
     OPENROUTER_MODEL,
     OPENROUTER_TIMEOUT_SECONDS,
     ROUTING_MAX_ATTEMPTS,
@@ -69,18 +71,33 @@ class OpenRouterSettings(BaseSettings):
             ) from None
 
 
-class GatewayResponse(Protocol):
-    """A response that returns parsed JSON and then discards provider data."""
+@dataclass(frozen=True, slots=True)
+class _DecodedProviderValue:
+    """A provider result already validated for its intended gateway operation."""
 
-    status_code: int
+    value: str
 
-    def json(self) -> object: ...
 
-    def discard(self) -> None: ...
+@dataclass(frozen=True, slots=True)
+class _ProviderProtocolFailure:
+    """A fixed, non-provider-derived protocol failure summary."""
+
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderTransportFailure:
+    """A status-only or ordinary transport failure summary."""
+
+
+type _DecodedProviderResult = (
+    _DecodedProviderValue | _ProviderProtocolFailure | _ProviderTransportFailure
+)
+type _ProviderPayloadDecoder = Callable[[object], _DecodedProviderResult]
 
 
 class GatewayHttpClient(Protocol):
-    """Injectable asynchronous HTTP boundary; production uses the stdlib client."""
+    """Return only decoded values or typed failures from the provider boundary."""
 
     async def post(
         self,
@@ -89,23 +106,14 @@ class GatewayHttpClient(Protocol):
         headers: Mapping[str, str],
         json: Mapping[str, object],
         timeout: float,
-    ) -> GatewayResponse: ...
+        decoder: _ProviderPayloadDecoder,
+    ) -> _DecodedProviderResult: ...
 
 
-class _StdlibResponse:
-    def __init__(self, status_code: int, body: bytes | None = None) -> None:
-        self.status_code = status_code
-        self._body = body
+class _BoundedReadableResponse(Protocol):
+    """The only successful stdlib response capability the decoder needs."""
 
-    def json(self) -> object:
-        body = self._body
-        self._body = None
-        if body is None:
-            raise ValueError("OpenRouter response body is unavailable")
-        return json.loads(body.decode("utf-8"))
-
-    def discard(self) -> None:
-        self._body = None
+    def read(self, amount: int | None = None) -> bytes: ...
 
 
 class _StdlibAsyncHttpClient:
@@ -118,13 +126,15 @@ class _StdlibAsyncHttpClient:
         headers: Mapping[str, str],
         json: Mapping[str, object],
         timeout: float,
-    ) -> GatewayResponse:
+        decoder: _ProviderPayloadDecoder,
+    ) -> _DecodedProviderResult:
         return await asyncio.to_thread(
             self._post_sync,
             url,
             headers=headers,
             payload=json,
             timeout=timeout,
+            decoder=decoder,
         )
 
     @staticmethod
@@ -134,20 +144,70 @@ class _StdlibAsyncHttpClient:
         headers: Mapping[str, str],
         payload: Mapping[str, object],
         timeout: float,
-    ) -> GatewayResponse:
-        request = Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=dict(headers),
-            method="POST",
-        )
+        decoder: _ProviderPayloadDecoder,
+    ) -> _DecodedProviderResult:
+        request_body: bytes | None = None
+        request_headers = dict(headers)
+        request: Request | None = None
         try:
+            request_body = json.dumps(payload).encode("utf-8")
+            request = Request(
+                url,
+                data=request_body,
+                headers=request_headers,
+                method="POST",
+            )
             with urlopen(request, timeout=timeout) as response:
-                return _StdlibResponse(response.status, response.read())
-        except HTTPError as error:
-            return _StdlibResponse(error.code)
-        except URLError:
-            raise GatewayTransportError("OpenRouter transport failed") from None
+                if not 200 <= response.status < 300:
+                    return _ProviderTransportFailure()
+                return _decode_stdlib_success_response(response, decoder)
+        except HTTPError:
+            # Deliberately do not read an HTTPError body: it may contain provider data.
+            return _ProviderTransportFailure()
+        except Exception:  # noqa: BLE001 - ordinary client failures are retryable
+            # Ordinary client failures (including interrupted reads) are retryable.
+            return _ProviderTransportFailure()
+        finally:
+            request = None
+            request_body = None
+            request_headers.clear()
+
+
+def _decode_stdlib_success_response(
+    response: _BoundedReadableResponse, decoder: _ProviderPayloadDecoder
+) -> _DecodedProviderResult:
+    """Bound, parse, validate, and clear one successful provider body in one scope."""
+
+    body = bytearray()
+    try:
+        try:
+            body.extend(response.read(OPENROUTER_MAX_RESPONSE_BYTES + 1))
+        except Exception:  # noqa: BLE001 - provider exceptions can retain body bytes
+            return _ProviderTransportFailure()
+        if len(body) > OPENROUTER_MAX_RESPONSE_BYTES:
+            return _ProviderProtocolFailure(
+                "OpenRouter response exceeded the body limit"
+            )
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:  # noqa: BLE001 - malformed/deep provider JSON is closed here
+            return _ProviderProtocolFailure("OpenRouter response was not valid JSON")
+        try:
+            result = decoder(payload)
+        except Exception:  # noqa: BLE001 - decoder failures are protocol failures
+            return _ProviderProtocolFailure("OpenRouter response was invalid")
+        if isinstance(
+            result,
+            (
+                _DecodedProviderValue,
+                _ProviderProtocolFailure,
+                _ProviderTransportFailure,
+            ),
+        ):
+            return result
+        return _ProviderProtocolFailure("OpenRouter response was invalid")
+    finally:
+        body.clear()
 
 
 class OpenRouterGateway:
@@ -198,32 +258,29 @@ class OpenRouterGateway:
     async def select_key(self, request: KeySelectionRequest) -> str:
         """Return one configured key or raise a closed gateway failure."""
 
-        response = await self._post(
+        result = await self._post(
             self._payload(
                 request,
                 (
                     "Return exactly one JSON object with one key named 'key'. "
                     "Its value must be one of allowed_keys. Return no prose."
                 ),
-            )
+            ),
+            self._key_decoder(request.allowed_keys),
         )
-        return self._parse_selected_key(response, request.allowed_keys)
+        return self._value_or_raise(result)
 
     async def summarize_persona(self, request: PersonaSummaryRequest) -> str:
         """Return a nonempty private persona summary or fail without a fallback."""
 
-        response = await self._post(
+        result = await self._post(
             self._payload(
                 request,
                 "Return a concise persona summary. Return no structured identifiers.",
-            )
+            ),
+            self._decode_persona_summary,
         )
-        content = self._assistant_content(response)
-        summary = content.strip() if content is not None else ""
-        content = None
-        if not summary:
-            raise GatewayProtocolError("OpenRouter returned an empty persona summary")
-        return summary
+        return self._value_or_raise(result)
 
     async def rank_aliases(self, request: MatchRankingRequest) -> tuple[str, ...]:
         """Rank safe local aliases without exposing durable profile identifiers."""
@@ -233,18 +290,17 @@ class OpenRouterGateway:
             raise GatewayProtocolError("match aliases must be distinct")
         ranked: list[str] = []
         while remaining:
-            response = await self._post(
+            result = await self._post(
                 self._payload(
                     MatchRankingRequest(candidates=tuple(remaining.values())),
                     (
                         "Return exactly one JSON object with one key named 'key'. "
                         "Its value must be an available alias or system.done. Return no prose."
                     ),
-                )
+                ),
+                self._key_decoder(frozenset(remaining) | {"system.done"}),
             )
-            key = self._parse_selected_key(
-                response, frozenset(remaining) | {"system.done"}
-            )
+            key = self._value_or_raise(result)
             if key == "system.done":
                 break
             ranked.append(key)
@@ -268,102 +324,112 @@ class OpenRouterGateway:
             ],
         }
 
-    async def _post(self, payload: Mapping[str, object]) -> GatewayResponse:
+    async def _post(
+        self, payload: Mapping[str, object], decoder: _ProviderPayloadDecoder
+    ) -> _DecodedProviderResult:
+        """Retry only safe decoded outcomes; raw responses do not leave this boundary."""
+
         headers = {
             "Authorization": f"Bearer {self._api_key.get_secret_value()}",
             "Content-Type": "application/json",
         }
-        for attempt in range(self._max_attempts):
-            transport_failed = False
-            try:
-                response = await self._client.post(
-                    _CHAT_COMPLETIONS_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=self._timeout_seconds,
-                )
-                if 200 <= response.status_code < 300:
-                    return response
-                response.discard()
-            except Exception:  # noqa: BLE001 - provider errors can retain response bytes
-                response = None
-                transport_failed = True
-            else:
-                response = None
-                transport_failed = True
-            if transport_failed:
-                if attempt + 1 == self._max_attempts:
-                    break
-                await asyncio.sleep(0)
-                continue
+        request_payload = payload
+        del payload
+        result: _DecodedProviderResult = _ProviderTransportFailure()
+        try:
+            for attempt in range(self._max_attempts):
+                try:
+                    result = await self._client.post(
+                        _CHAT_COMPLETIONS_URL,
+                        headers=headers,
+                        json=request_payload,
+                        timeout=self._timeout_seconds,
+                        decoder=decoder,
+                    )
+                except Exception:  # noqa: BLE001 - provider exceptions can retain bytes
+                    result = _ProviderTransportFailure()
+                if not isinstance(
+                    result,
+                    (
+                        _DecodedProviderValue,
+                        _ProviderProtocolFailure,
+                        _ProviderTransportFailure,
+                    ),
+                ):
+                    result = _ProviderTransportFailure()
+                if not isinstance(result, _ProviderTransportFailure):
+                    return result
+                if attempt + 1 < self._max_attempts:
+                    await asyncio.sleep(0)
+            return _ProviderTransportFailure()
+        finally:
+            headers.clear()
+            del request_payload
+
+    @staticmethod
+    def _value_or_raise(result: _DecodedProviderResult) -> str:
+        """Raise only after the response lifecycle returned a typed safe outcome."""
+
+        if isinstance(result, _DecodedProviderValue):
+            return result.value
+        if isinstance(result, _ProviderProtocolFailure):
+            raise GatewayProtocolError(result.message)
         raise GatewayTransportError("OpenRouter request exhausted")
 
     @staticmethod
-    def _parse_selected_key(
-        response: GatewayResponse, allowed_keys: frozenset[str]
-    ) -> str:
-        content = OpenRouterGateway._assistant_content(response)
-        parsed: object | None = None
-        candidate: object | None = None
-        selected_key: str | None = None
-        error_message = "OpenRouter response was not a key selection"
-        if content is not None:
+    def _key_decoder(allowed_keys: frozenset[str]) -> _ProviderPayloadDecoder:
+        def decode(payload: object) -> _DecodedProviderResult:
+            content = OpenRouterGateway._assistant_content(payload)
+            if content is None:
+                return _ProviderProtocolFailure(
+                    "OpenRouter response was not a key selection"
+                )
             try:
                 parsed = json.loads(content)
-            except (TypeError, ValueError):
-                pass
-            else:
-                if isinstance(parsed, dict) and set(parsed) == {"key"}:
-                    candidate = parsed["key"]
-                    if isinstance(candidate, str) and candidate in allowed_keys:
-                        selected_key = candidate
-                    else:
-                        error_message = "OpenRouter selected an invalid key"
-                else:
-                    error_message = "OpenRouter selected an invalid key"
-        content = None
-        parsed = None
-        candidate = None
-        if selected_key is None:
-            raise GatewayProtocolError(error_message)
-        return selected_key
+            except Exception:  # noqa: BLE001 - malformed/deep content is protocol only
+                return _ProviderProtocolFailure(
+                    "OpenRouter response was not a key selection"
+                )
+            if not isinstance(parsed, dict) or set(parsed) != {"key"}:
+                return _ProviderProtocolFailure("OpenRouter selected an invalid key")
+            key = parsed["key"]
+            if not isinstance(key, str) or key not in allowed_keys:
+                return _ProviderProtocolFailure("OpenRouter selected an invalid key")
+            return _DecodedProviderValue(key)
+
+        return decode
 
     @staticmethod
-    def _assistant_content(response: GatewayResponse) -> str | None:
-        payload = OpenRouterGateway._request_json(response)
-        if payload is None:
-            return None
+    def _decode_persona_summary(payload: object) -> _DecodedProviderResult:
+        content = OpenRouterGateway._assistant_content(payload)
+        if content is None:
+            return _ProviderProtocolFailure(
+                "OpenRouter returned an empty persona summary"
+            )
+        summary = content.strip()
+        if not summary:
+            return _ProviderProtocolFailure(
+                "OpenRouter returned an empty persona summary"
+            )
+        return _DecodedProviderValue(summary)
+
+    @staticmethod
+    def _assistant_content(payload: object) -> str | None:
         try:
+            if not isinstance(payload, Mapping):
+                return None
             choices = payload["choices"]
             if not isinstance(choices, list):
-                raise TypeError("choices must be a list")
+                return None
             choice = choices[0]
             if not isinstance(choice, Mapping):
-                raise TypeError("choice must be an object")
+                return None
             message = choice["message"]
             if not isinstance(message, Mapping):
-                raise TypeError("message must be an object")
+                return None
             content = message["content"]
             if not isinstance(content, str):
-                raise TypeError("content must be text")
+                return None
             return content
-        except (IndexError, KeyError, TypeError, ValueError):
+        except Exception:  # noqa: BLE001 - untrusted provider mappings must not escape
             return None
-
-    @staticmethod
-    def _request_json(response: GatewayResponse) -> Mapping[str, object] | None:
-        """Parse one provider envelope without retaining malformed raw response text."""
-
-        parse_failed = False
-        payload: object | None = None
-        try:
-            payload = response.json()
-        except Exception:  # noqa: BLE001 - provider errors can retain response bytes
-            parse_failed = True
-        try:
-            response.discard()
-        except Exception:  # noqa: BLE001 - provider errors can retain response bytes
-            parse_failed = True
-        if parse_failed or not isinstance(payload, Mapping):
-            return None
-        return payload

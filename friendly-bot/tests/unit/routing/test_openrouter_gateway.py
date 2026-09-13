@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -14,7 +15,10 @@ from urllib.error import HTTPError
 import pytest
 from pydantic import ValidationError
 
-from friendly_bot.hyperparameters import ROUTING_MAX_ATTEMPTS
+from friendly_bot.hyperparameters import (
+    OPENROUTER_MAX_RESPONSE_BYTES,
+    ROUTING_MAX_ATTEMPTS,
+)
 from friendly_bot.routing.contracts import (
     KeySelectionRequest,
     MatchPromptCandidate,
@@ -48,6 +52,14 @@ class FakeResponse:
     def discard(self) -> None:
         self.payload.clear()
 
+    def decode(self, decoder: Callable[[object], Any]) -> Any:
+        try:
+            if not 200 <= self.status_code < 300:
+                raise OSError("non-success response")
+            return decoder(deepcopy(self.payload))
+        finally:
+            self.discard()
+
 
 @dataclass
 class InvalidJsonEnvelopeResponse:
@@ -59,6 +71,10 @@ class InvalidJsonEnvelopeResponse:
 
     def discard(self) -> None:
         self.raw_response = ""
+
+    def decode(self, decoder: Callable[[object], Any]) -> Any:
+        self.discard()
+        return decoder(None)
 
 
 @dataclass
@@ -72,11 +88,33 @@ class IncompleteJsonResponse:
     def discard(self) -> None:
         self.raw_response = b""
 
+    def decode(self, decoder: Callable[[object], Any]) -> Any:
+        raise IncompleteRead(self.raw_response, expected=len(self.raw_response) + 1)
+
+
+@dataclass
+class DiscardFailingJsonResponse:
+    """A provider response whose cleanup leaves its raw body in place."""
+
+    raw_response: bytes
+    status_code: int = 200
+
+    def json(self) -> object:
+        return {"choices": [{"message": {"content": '{"key":"flow.a"}'}}]}
+
+    def discard(self) -> None:
+        raise OSError("discard failed")
+
+    def decode(self, decoder: Callable[[object], Any]) -> Any:
+        raise OSError("discard failed")
+
 
 @dataclass
 class RawStdlibResponse:
     raw_body: bytes
     status: int = 200
+    close_error: bool = False
+    read_limits: list[int | None] = field(default_factory=list)
 
     def __enter__(self) -> Self:
         return self
@@ -87,27 +125,39 @@ class RawStdlibResponse:
         exception: BaseException | None,
         traceback: object,
     ) -> bool:
+        if self.close_error:
+            raise OSError("discard failed")
         return False
 
-    def read(self) -> bytes:
-        return self.raw_body
+    def read(self, amount: int | None = None) -> bytes:
+        self.read_limits.append(amount)
+        return self.raw_body if amount is None else self.raw_body[:amount]
 
 
 @dataclass
 class FakeHttpxClient:
     responses: list[
-        FakeResponse | InvalidJsonEnvelopeResponse | IncompleteJsonResponse | Exception
+        FakeResponse
+        | InvalidJsonEnvelopeResponse
+        | IncompleteJsonResponse
+        | DiscardFailingJsonResponse
+        | Exception
     ]
     requests: list[dict[str, Any]] = field(default_factory=list)
 
     async def post(
         self, url: str, **kwargs: Any
-    ) -> FakeResponse | InvalidJsonEnvelopeResponse | IncompleteJsonResponse:
+    ) -> (
+        FakeResponse
+        | InvalidJsonEnvelopeResponse
+        | IncompleteJsonResponse
+        | DiscardFailingJsonResponse
+    ):
         self.requests.append({"url": url, **kwargs})
         outcome = self.responses.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return outcome.decode(kwargs["decoder"])
 
 
 def _gateway(client: FakeHttpxClient) -> OpenRouterGateway:
@@ -455,6 +505,7 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
     raw_partial = b"raw-provider-incomplete-read-sentinel"
     expected_attempts = ROUTING_MAX_ATTEMPTS
     attempts = 0
+    read_limits: list[int | None] = []
 
     class IncompleteReadResponse:
         status = 200
@@ -470,7 +521,8 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
         ) -> bool:
             return False
 
-        def read(self) -> bytes:
+        def read(self, amount: int | None = None) -> bytes:
+            read_limits.append(amount)
             raise IncompleteRead(raw_partial, expected=expected_attempts)
 
     def interrupted_urlopen(*args: object, **kwargs: object) -> IncompleteReadResponse:
@@ -491,6 +543,7 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
 
     raw_sentinel = raw_partial.decode()
     assert attempts == expected_attempts
+    assert read_limits == [OPENROUTER_MAX_RESPONSE_BYTES + 1] * expected_attempts
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert raw_sentinel not in str(raised.value)
@@ -531,11 +584,14 @@ async def test_gateway_does_not_retain_actual_malformed_stdlib_body_in_traceback
 
     raw_body = b'{"choices":"raw-provider-malformed-200-sentinel"}'
     attempts = 0
+    responses: list[RawStdlibResponse] = []
 
     def malformed_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
         nonlocal attempts
         attempts += 1
-        return RawStdlibResponse(raw_body)
+        response = RawStdlibResponse(raw_body)
+        responses.append(response)
+        return response
 
     monkeypatch.setattr(
         "friendly_bot.routing.openrouter_gateway.urlopen", malformed_urlopen
@@ -549,6 +605,7 @@ async def test_gateway_does_not_retain_actual_malformed_stdlib_body_in_traceback
         await operation(gateway)
 
     assert attempts == 1
+    assert responses[0].read_limits == [OPENROUTER_MAX_RESPONSE_BYTES + 1]
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
 
 
@@ -586,15 +643,28 @@ async def test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceba
     raw_body = b"raw-provider-http-error-sentinel"
     attempts = 0
 
+    class TrackingBytesIO(BytesIO):
+        def __init__(self, initial_bytes: bytes) -> None:
+            super().__init__(initial_bytes)
+            self.read_calls = 0
+
+        def read(self, size: int = -1) -> bytes:
+            self.read_calls += 1
+            return super().read(size)
+
+    error_bodies: list[TrackingBytesIO] = []
+
     def unavailable_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
         nonlocal attempts
         attempts += 1
+        error_body = TrackingBytesIO(raw_body)
+        error_bodies.append(error_body)
         raise HTTPError(
             "https://openrouter.ai/api/v1/chat/completions",
             503,
             "unavailable",
             None,
-            BytesIO(raw_body),
+            error_body,
         )
 
     monkeypatch.setattr(
@@ -609,6 +679,7 @@ async def test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceba
         await operation(gateway)
 
     assert attempts == ROUTING_MAX_ATTEMPTS
+    assert [body.read_calls for body in error_bodies] == [0] * ROUTING_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
 
 
@@ -640,16 +711,248 @@ async def test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceba
 async def test_gateway_normalizes_incomplete_json_without_traceback_retention(
     operation: Callable[[OpenRouterGateway], Awaitable[object]],
 ) -> None:
-    """A response JSON failure must become a detached closed protocol error."""
+    """An interrupted decoded response must become a detached transport error."""
 
     raw_body = b"raw-provider-json-incomplete-read-sentinel"
-    client = FakeHttpxClient([IncompleteJsonResponse(raw_body)])
+    client = FakeHttpxClient([IncompleteJsonResponse(raw_body)] * ROUTING_MAX_ATTEMPTS)
 
-    with pytest.raises(GatewayProtocolError) as raised:
+    with pytest.raises(GatewayTransportError) as raised:
         await operation(_gateway(client))
 
-    assert len(client.requests) == 1
+    assert len(client.requests) == ROUTING_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_does_not_retain_response_when_discard_fails(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+) -> None:
+    """A failed cleanup must not leave the raw response in an error frame."""
+
+    raw_body = b"raw-provider-discard-failure-sentinel"
+    client = FakeHttpxClient([DiscardFailingJsonResponse(raw_body)])
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await operation(_gateway(client))
+
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_closes_deep_stdlib_json_without_raw_traceback_retention(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deep JSON recursion is a closed protocol result after the body scope exits."""
+
+    raw_sentinel = b"raw-provider-deep-json-sentinel"
+    raw_body = (
+        b'["' + raw_sentinel + b'",' + (b"[" * 1200) + b"0" + (b"]" * 1200) + b"]"
+    )
+    attempts = 0
+
+    def recursive_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        nonlocal attempts
+        attempts += 1
+        return RawStdlibResponse(raw_body)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", recursive_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(gateway)
+
+    assert attempts == 1
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_closes_stdlib_discard_failure_without_raw_traceback(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A close failure after a successful read is retried without returning a body."""
+
+    raw_sentinel = b"raw-provider-discard-close-sentinel"
+    raw_body = (
+        b'{"choices":[{"message":{"content":"{\\"key\\":\\"flow.a\\"}"}}],'
+        b'"ignored":"' + raw_sentinel + b'"}'
+    )
+    attempts = 0
+
+    def discard_failing_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        nonlocal attempts
+        attempts += 1
+        return RawStdlibResponse(raw_body, close_error=True)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", discard_failing_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await operation(gateway)
+
+    assert attempts == ROUTING_MAX_ATTEMPTS
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_rejects_oversize_stdlib_body_after_one_bounded_read(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful bodies are read at most one byte beyond the configured limit."""
+
+    raw_sentinel = b"raw-provider-oversize-sentinel"
+    response = RawStdlibResponse(raw_sentinel + (b"x" * OPENROUTER_MAX_RESPONSE_BYTES))
+
+    def oversized_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        return response
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", oversized_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(gateway)
+
+    assert response.read_limits == [OPENROUTER_MAX_RESPONSE_BYTES + 1]
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel)
+
+
+async def test_gateway_propagates_cancellation_unchanged() -> None:
+    """Cancellation is not an ordinary provider failure and must remain visible."""
+
+    @dataclass
+    class CancellingClient:
+        calls: int = 0
+
+        async def post(self, url: str, **kwargs: Any) -> Any:
+            self.calls += 1
+            raise asyncio.CancelledError()
+
+    client = CancellingClient()
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        client=client,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+
+    assert client.calls == 1
 
 
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
