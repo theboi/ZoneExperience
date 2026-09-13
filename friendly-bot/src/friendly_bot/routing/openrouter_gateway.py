@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from friendly_bot.hyperparameters import (
@@ -25,10 +24,21 @@ from friendly_bot.routing.contracts import (
 )
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION = (
+    "disabled-globally-or-friendly-bot-key-excluded"
+)
+type OpenRouterInputOutputLoggingAttestation = Literal[
+    False,
+    "disabled-globally-or-friendly-bot-key-excluded",
+]
 
 
 class GatewayError(RuntimeError):
     """A closed failure at the external model boundary."""
+
+
+class GatewayPrivacyConfigurationError(GatewayError):
+    """The local runtime lacks the required OpenRouter privacy attestation."""
 
 
 class GatewayTransportError(GatewayError):
@@ -40,20 +50,23 @@ class GatewayProtocolError(GatewayError):
 
 
 class OpenRouterSettings(BaseSettings):
-    """Read the sole provider credential from the process environment."""
+    """Read the provider credential and non-secret privacy attestation."""
 
     model_config = SettingsConfigDict(env_prefix="", extra="forbid")
 
-    openrouter_api_key: SecretStr
+    openrouter_api_key: SecretStr | None = None
+    friendly_bot_openrouter_input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False
 
     @classmethod
     def from_environment(cls) -> OpenRouterSettings:
-        """Load the credential only from the process environment."""
+        """Load R03's environment-only configuration without surfacing values."""
 
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if api_key is None:
-            raise ValueError("OPENROUTER_API_KEY is required")
-        return cls(openrouter_api_key=SecretStr(api_key))
+        try:
+            return cls()
+        except ValidationError:
+            raise GatewayPrivacyConfigurationError(
+                "OpenRouter configuration is invalid"
+            ) from None
 
 
 class GatewayResponse(Protocol):
@@ -138,11 +151,18 @@ class OpenRouterGateway:
         client: GatewayHttpClient | None = None,
         timeout_seconds: float = OPENROUTER_TIMEOUT_SECONDS,
         max_attempts: int = ROUTING_MAX_ATTEMPTS,
+        input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least one")
+        if input_output_logging_attestation != (
+            OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION
+        ):
+            raise GatewayPrivacyConfigurationError(
+                "OpenRouter Input & Output Logging attestation is required"
+            )
         self._api_key = (
             api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         )
@@ -152,9 +172,19 @@ class OpenRouterGateway:
 
     @classmethod
     def from_environment(cls) -> OpenRouterGateway:
-        """Construct the production gateway from the environment-only settings."""
+        """Construct only when an operator explicitly attests provider logging safety."""
 
-        return cls(api_key=OpenRouterSettings.from_environment().openrouter_api_key)
+        settings = OpenRouterSettings.from_environment()
+        if settings.openrouter_api_key is None:
+            raise GatewayPrivacyConfigurationError(
+                "OpenRouter configuration is invalid"
+            )
+        return cls(
+            api_key=settings.openrouter_api_key,
+            input_output_logging_attestation=(
+                settings.friendly_bot_openrouter_input_output_logging_attestation
+            ),
+        )
 
     async def select_key(self, request: KeySelectionRequest) -> str:
         """Return one configured key or raise a closed gateway failure."""
@@ -218,7 +248,6 @@ class OpenRouterGateway:
         return {
             "model": OPENROUTER_MODEL,
             "provider": {"zdr": True, "data_collection": "deny"},
-            "logprobs": False,
             "messages": [
                 {"role": "system", "content": instruction},
                 {
@@ -241,20 +270,18 @@ class OpenRouterGateway:
                     json=payload,
                     timeout=self._timeout_seconds,
                 )
-            except (GatewayTransportError, OSError) as error:
+            except (GatewayTransportError, OSError):
                 if attempt + 1 == self._max_attempts:
-                    raise GatewayTransportError(
-                        "OpenRouter transport exhausted"
-                    ) from error
+                    break
                 await asyncio.sleep(0)
                 continue
             if not 200 <= response.status_code < 300:
                 if attempt + 1 == self._max_attempts:
-                    raise GatewayTransportError("OpenRouter response exhausted")
+                    break
                 await asyncio.sleep(0)
                 continue
             return response
-        raise GatewayTransportError("OpenRouter transport exhausted")
+        raise GatewayTransportError("OpenRouter request exhausted")
 
     @staticmethod
     def _parse_selected_key(
