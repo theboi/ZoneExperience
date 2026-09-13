@@ -287,18 +287,19 @@ class OpenRouterGateway:
     def _parse_selected_key(
         response: GatewayResponse, allowed_keys: frozenset[str]
     ) -> str:
+        parse_failed = object()
         try:
-            parsed = json.loads(OpenRouterGateway._assistant_content(response))
+            parsed: object = json.loads(OpenRouterGateway._assistant_content(response))
         except (
             IndexError,
             KeyError,
             TypeError,
             ValueError,
             json.JSONDecodeError,
-        ) as error:
-            raise GatewayProtocolError(
-                "OpenRouter response was not a key selection"
-            ) from error
+        ):
+            parsed = parse_failed
+        if parsed is parse_failed:
+            raise GatewayProtocolError("OpenRouter response was not a key selection")
         if (
             not isinstance(parsed, dict)
             or set(parsed) != {"key"}

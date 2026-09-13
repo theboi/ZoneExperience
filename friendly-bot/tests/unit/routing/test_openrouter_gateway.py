@@ -240,6 +240,32 @@ async def test_gateway_fails_closed_for_non_single_whitelisted_key(
         )
 
 
+async def test_gateway_does_not_attach_raw_malformed_response_to_protocol_error() -> (
+    None
+):
+    """Malformed provider text must not survive on the closed protocol error."""
+
+    raw_response = "raw-provider-response-sentinel-not-json"
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {"choices": [{"message": {"content": raw_response}}]},
+            )
+        ]
+    )
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await _gateway(client).select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert raw_response not in str(raised.value)
+    assert all(raw_response not in str(argument) for argument in raised.value.args)
+
+
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
     """A separate summary path must not weaken OpenRouter privacy controls."""
 
