@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Response-sanitization repair committed; source re-review pending and not approved; operational privacy blocked pending account-level OpenRouter Observability proof; G2 not passed |
+| Status | Source privacy approved; execution source work complete; operational privacy blocked pending account-level OpenRouter Observability proof; G2 not passed |
 | Date | 2026-09-13 |
 | Owner | R03 |
 | Authority inputs | Product specification, architecture (`ARCH-004`, `ARCH-006`, `ARCH-008`, `ARCH-012`), approved MVP design, Zone X fixture, frozen blueprint, and corrected F01 planning commit `a920d2d` |
