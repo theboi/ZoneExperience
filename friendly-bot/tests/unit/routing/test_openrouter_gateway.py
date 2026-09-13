@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from http.client import IncompleteRead
@@ -31,6 +31,8 @@ from friendly_bot.routing.openrouter_gateway import (
     GatewayProtocolError,
     GatewayTransportError,
     OpenRouterGateway,
+    _DecodedProviderValue,
+    _ProviderProtocolFailure,
 )
 
 _OBSERVABILITY_ATTESTATION = "disabled-globally-or-friendly-bot-key-excluded"
@@ -153,7 +155,15 @@ class FakeHttpxClient:
         | IncompleteJsonResponse
         | DiscardFailingJsonResponse
     ):
-        self.requests.append({"url": url, **kwargs})
+        self.requests.append(
+            {
+                "url": url,
+                "headers": dict(kwargs["headers"]),
+                "json": deepcopy(kwargs["json"]),
+                "timeout": kwargs["timeout"],
+                "decoder": kwargs["decoder"],
+            }
+        )
         outcome = self.responses.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -541,14 +551,9 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
     with pytest.raises(GatewayTransportError) as raised:
         await operation(gateway)
 
-    raw_sentinel = raw_partial.decode()
     assert attempts == expected_attempts
     assert read_limits == [OPENROUTER_MAX_RESPONSE_BYTES + 1] * expected_attempts
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert raw_sentinel not in str(raised.value)
-    assert all(raw_sentinel not in str(argument) for argument in raised.value.args)
-    assert vars(raised.value) == {}
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_partial)
 
 
 @pytest.mark.parametrize(
@@ -829,6 +834,54 @@ async def test_gateway_closes_deep_stdlib_json_without_raw_traceback_retention(
             id="selection",
         ),
         pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_closes_deep_assistant_json_without_raw_traceback_retention(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selection JSON recursion is normalized after the stdlib body has been cleared."""
+
+    raw_sentinel = "raw-provider-deep-assistant-sentinel"
+    deep_content = '["' + raw_sentinel + '",' + ("[" * 1200) + "0" + ("]" * 1200) + "]"
+    raw_body = json.dumps(
+        {"choices": [{"message": {"content": deep_content}}]}
+    ).encode()
+
+    def recursive_content_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        return RawStdlibResponse(raw_body)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", recursive_content_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(gateway)
+
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel.encode())
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
             lambda gateway: gateway.summarize_persona(
                 PersonaSummaryRequest(messages=["hello"])
             ),
@@ -953,6 +1006,121 @@ async def test_gateway_propagates_cancellation_unchanged() -> None:
         )
 
     assert client.calls == 1
+
+
+async def test_gateway_cancellation_keeps_stdlib_worker_request_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller cleanup cannot erase a request a cancelled stdlib worker still needs."""
+
+    snapshots: list[tuple[dict[str, str], Mapping[str, object]]] = []
+    started = asyncio.Event()
+
+    async def suspended_to_thread(
+        function: Callable[..., object], *args: object, **kwargs: object
+    ) -> object:
+        del function, args
+        headers = kwargs["headers"]
+        payload = kwargs["payload"]
+        assert isinstance(headers, dict)
+        assert isinstance(payload, dict)
+        snapshots.append((headers, payload))
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("cancelled worker unexpectedly resumed")
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.asyncio.to_thread", suspended_to_thread
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+    task = asyncio.create_task(
+        gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+    )
+
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert snapshots == [
+        (
+            {"Authorization": "Bearer test-only", "Content-Type": "application/json"},
+            {
+                "model": "qwen/qwen3.7-flash",
+                "provider": {"zdr": True, "data_collection": "deny"},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return exactly one JSON object with one key named 'key'. "
+                            "Its value must be one of allowed_keys. Return no prose."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            '{"allowed_keys": ["flow.a"], "user_name": "", '
+                            '"persona": "", "messages": ["hello"], '
+                            '"reply_body": null, "candidates": []}'
+                        ),
+                    },
+                ],
+            },
+        )
+    ]
+
+
+async def test_gateway_rejects_forged_client_results_without_provider_text() -> None:
+    """Injected clients cannot turn raw provider text into a gateway error or key."""
+
+    @dataclass
+    class OneShotResultClient:
+        result: object
+
+        async def post(self, url: str, **kwargs: Any) -> object:
+            result = self.result
+            self.result = None
+            return result
+
+    raw_sentinel = "raw-provider-forged-client-sentinel"
+
+    class ForgedProtocolFailure(_ProviderProtocolFailure):
+        pass
+
+    forged_protocol_failure = ForgedProtocolFailure(object())
+    forged_protocol_failure.__dict__["raw_provider_text"] = raw_sentinel
+    protocol_client = OneShotResultClient(forged_protocol_failure)
+    protocol_gateway = OpenRouterGateway(
+        api_key="test-only",
+        client=protocol_client,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await protocol_gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel.encode())
+
+    value_client = OneShotResultClient(_DecodedProviderValue(raw_sentinel, object()))
+    value_gateway = OpenRouterGateway(
+        api_key="test-only",
+        client=value_client,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await value_gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel.encode())
 
 
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
@@ -1092,3 +1260,33 @@ async def test_gateway_closes_without_attaching_raw_transport_data_after_retry_e
     assert not _traceback_gateway_locals_hold_sentinel(
         raised.value, b"transport-sentinel"
     )
+
+
+async def test_gateway_clears_outbound_payload_after_transport_exhaustion() -> None:
+    """A retaining transport cannot keep a prompt once the gateway has failed."""
+
+    @dataclass
+    class RetainingTransportClient:
+        headers: list[Mapping[str, str]] = field(default_factory=list)
+        payloads: list[Mapping[str, object]] = field(default_factory=list)
+
+        async def post(self, url: str, **kwargs: Any) -> object:
+            self.headers.append(kwargs["headers"])
+            self.payloads.append(kwargs["json"])
+            return object()
+
+    client = RetainingTransportClient()
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        client=client,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError):
+        await gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["private prompt"])
+        )
+
+    assert len(client.payloads) == ROUTING_MAX_ATTEMPTS
+    assert [dict(headers) for headers in client.headers] == [{}] * ROUTING_MAX_ATTEMPTS
+    assert [dict(payload) for payload in client.payloads] == [{}] * ROUTING_MAX_ATTEMPTS
