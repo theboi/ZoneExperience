@@ -326,6 +326,32 @@ async def test_committed_attempt_sends_once_and_restart_does_not_replay_sent_wor
     ] == [(1, "sent")]
 
 
+async def test_restarted_worker_never_replays_an_ambiguous_send(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """An unknown Telegram result must not return to a later worker's retry queue."""
+
+    delivery_id = await _enqueue(uow_factory, key="outbox:restart-uncertain")
+    gateway = RecordingGateway(TelegramResponseUncertain("telegram_timeout"))
+
+    assert await OutboundDeliveryWorker(
+        uow_factory, gateway, clock=lambda: NOW
+    ).run_once()
+    assert not await OutboundDeliveryWorker(
+        uow_factory, gateway, clock=lambda: NOW + timedelta(hours=1)
+    ).run_once()
+
+    assert gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:restart-uncertain")
+    ]
+    assert (await _delivery(session_factory, delivery_id)).status == "uncertain"
+    assert [
+        (attempt.attempt_number, attempt.outcome)
+        for attempt in await _attempts(session_factory, delivery_id)
+    ] == [(1, "uncertain")]
+
+
 @pytest.mark.parametrize(
     ("outcome", "status", "retry_at", "safe_error"),
     [

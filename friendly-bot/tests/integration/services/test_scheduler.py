@@ -4,27 +4,42 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy import Enum, MetaData
+from sqlalchemy import Enum, MetaData, select
 from sqlalchemy.dialects.postgresql import CreateEnumType, dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
+from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
+    FlowScopeKind,
     OperationalRole,
+    OutboundDelivery,
     Service,
     ServiceAttendance,
     ServiceAudience,
+    ServiceTimestamp,
     User,
 )
+from friendly_bot.persistence.repositories import (
+    NewOutboundDelivery,
+    ServiceTimestampRecord,
+)
 from friendly_bot.persistence.uow import UnitOfWork
-from friendly_bot.services.scheduler import AudienceResolver
+from friendly_bot.services.scheduler import AudienceResolver, ServiceDeliveryScheduler
+from friendly_bot.telegram.models import (
+    OutboundTelegramMessage,
+    TelegramSendConfirmed,
+    TelegramSendOutcome,
+)
+from friendly_bot.telegram.outbox import OutboundDeliveryWorker
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 _SESSION_FACTORY = async_sessionmaker[AsyncSession]
@@ -95,6 +110,45 @@ def uow_factory(
     """Create a real F01 UoW for each audience-resolution read."""
 
     return lambda: UnitOfWork(session_factory)
+
+
+@dataclass
+class RecordingTimestampRoots:
+    """I04's port shape, retaining independent current-parent facts for the assertion."""
+
+    current_parent_keys: dict[UUID, set[str]] = field(default_factory=dict)
+    calls: list[tuple[UUID, str]] = field(default_factory=list)
+
+    async def open_for_recipient(
+        self,
+        uow: UnitOfWork,
+        timestamp: ServiceTimestampRecord,
+        user_id: UUID,
+        *,
+        now: datetime,
+    ) -> NewOutboundDelivery:
+        del uow
+        self.current_parent_keys.setdefault(user_id, set()).add(timestamp.root_flow_key)
+        self.calls.append((user_id, timestamp.root_flow_key))
+        return NewOutboundDelivery(
+            idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
+            user_id=user_id,
+            telegram_chat_id=73,
+            kind="message",
+            payload={"text": "Service timestamp"},
+            eligible_at=now,
+        )
+
+
+@dataclass
+class RecordingDeliveryGateway:
+    """Record only the typed request crossing the direct Telegram boundary."""
+
+    requests: list[OutboundTelegramMessage] = field(default_factory=list)
+
+    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
+        self.requests.append(request)
+        return TelegramSendConfirmed(919)
 
 
 async def test_authoritative_audiences_apply_role_inheritance_without_admin_grants(
@@ -179,3 +233,105 @@ async def test_authoritative_audiences_apply_role_inheritance_without_admin_gran
     assert set(
         await resolver.resolve(ServiceAudience.ALL_SERVICE_ATTENDEES, service_id)
     ) == {nbnc_id, server_id, leader_id, staff_id}
+
+
+async def test_service_start_timestamp_keeps_pending_onboarding_branch_open(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """The scheduler only composes the I04 port; it does not replace an onboarding root."""
+
+    service_id = uuid4()
+    user_id = uuid4()
+    timestamp_id = uuid4()
+    timestamp_root = "service.task8.timestamp.service_questions"
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                Service(
+                    id=service_id,
+                    key="task8-service-start",
+                    name="Task 8 service start",
+                    timezone="UTC",
+                    highkey=True,
+                    doors_open_at=NOW - timedelta(hours=1),
+                    doors_close_at=NOW + timedelta(hours=1),
+                    service_starts_at=NOW,
+                    service_ends_at=NOW + timedelta(hours=1),
+                    interaction_ends_at=NOW + timedelta(hours=2),
+                ),
+                User(id=user_id, telegram_user_id=73, role=OperationalRole.NBNC),
+            ]
+        )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.task8.timestamp"},
+                flow_key_index={timestamp_root: ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    async with session_factory.begin() as session:
+        session.add(
+            ServiceTimestamp(
+                id=timestamp_id,
+                service_id=service_id,
+                key="service-start",
+                occurs_at=NOW,
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key=timestamp_root,
+            )
+        )
+
+    roots = RecordingTimestampRoots(
+        current_parent_keys={user_id: {"onboarding.name_capture"}}
+    )
+    scheduler = ServiceDeliveryScheduler(
+        uow_factory, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+    )
+    delivery_gateway = RecordingDeliveryGateway()
+
+    first = await scheduler.run_once(now=NOW)
+    assert await OutboundDeliveryWorker(
+        uow_factory, delivery_gateway, clock=lambda: NOW
+    ).run_once()
+
+    restarted = ServiceDeliveryScheduler(
+        uow_factory, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+    )
+    second = await restarted.run_once(now=NOW)
+    assert not await OutboundDeliveryWorker(
+        uow_factory, delivery_gateway, clock=lambda: NOW + timedelta(minutes=1)
+    ).run_once()
+
+    async with session_factory() as session:
+        deliveries = list(
+            await session.scalars(
+                select(OutboundDelivery).where(
+                    OutboundDelivery.idempotency_key
+                    == f"task8:timestamp:{timestamp_id}:{user_id}"
+                )
+            )
+        )
+
+    assert first.claimed_delivery_count == 1
+    assert first.enqueued_delivery_count == 1
+    assert second.claimed_delivery_count == 0
+    assert second.enqueued_delivery_count == 0
+    assert roots.current_parent_keys[user_id] == {
+        "onboarding.name_capture",
+        timestamp_root,
+    }
+    assert roots.calls == [(user_id, timestamp_root)]
+    assert len(deliveries) == 1
+    assert deliveries[0].status == "sent"
+    assert delivery_gateway.requests == [
+        OutboundTelegramMessage(
+            73,
+            "Service timestamp",
+            f"task8:timestamp:{timestamp_id}:{user_id}",
+        )
+    ]
