@@ -59,8 +59,15 @@ class TelegramRuntimeLock:
     ) -> Self:
         """Open one dedicated session and acquire the fixed singleton lock once."""
 
+        factory_task = asyncio.ensure_future(connection_factory())
         try:
-            connection = await connection_factory()
+            connection = await asyncio.shield(factory_task)
+        except asyncio.CancelledError:
+            cleanup_task = asyncio.create_task(
+                _close_factory_result_after_cancellation(factory_task)
+            )
+            await asyncio.shield(cleanup_task)
+            raise
         except Exception as error:
             raise TelegramRuntimeLockLostError(
                 "runtime_lock_connection_lost"
@@ -89,7 +96,12 @@ class TelegramRuntimeLock:
         return cls(connection)
 
     async def __aenter__(self) -> Self:
-        await self.ensure_healthy()
+        try:
+            await self.ensure_healthy()
+        except BaseException:
+            with suppress(Exception):
+                await self.aclose()
+            raise
         return self
 
     async def __aexit__(
@@ -151,8 +163,14 @@ async def _close_after_failed_acquisition(
 ) -> None:
     """Release a failed acquisition's session before reporting its safe outcome."""
 
-    if not connection.is_closed():
+    if connection.is_closed():
+        return
+    try:
         await connection.close()
+    except asyncio.CancelledError:
+        with suppress(Exception):
+            await _close_after_cancellation(connection)
+        raise
 
 
 async def _close_after_cancellation(connection: TelegramRuntimeConnection) -> None:
@@ -166,3 +184,16 @@ async def _close_after_cancellation(connection: TelegramRuntimeConnection) -> No
     except asyncio.CancelledError:
         await asyncio.shield(close_task)
         raise
+
+
+async def _close_factory_result_after_cancellation(
+    factory_task: asyncio.Future[TelegramRuntimeConnection],
+) -> None:
+    """Close an eventual factory result after its caller has been cancelled."""
+
+    try:
+        with suppress(Exception):
+            connection = await asyncio.shield(factory_task)
+            await _close_after_cancellation(connection)
+    except asyncio.CancelledError:
+        return
