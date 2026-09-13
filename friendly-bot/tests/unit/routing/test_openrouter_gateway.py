@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from http.client import IncompleteRead
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Self
 from urllib.error import HTTPError
 
@@ -326,6 +327,30 @@ def test_gateway_environment_rejects_missing_or_inexact_observability_attestatio
 
     with pytest.raises(GatewayError):
         OpenRouterGateway.from_environment()
+
+
+def test_openrouter_settings_reads_key_and_attestation_from_project_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv(
+        "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION", raising=False
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "OPENROUTER_API_KEY=dotenv-openrouter-key\n"
+        "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION="
+        "disabled-globally-or-friendly-bot-key-excluded\n"
+    )
+
+    settings = OpenRouterSettings.from_environment()
+
+    assert settings.openrouter_api_key is not None
+    assert settings.openrouter_api_key.get_secret_value() == "dotenv-openrouter-key"
+    assert (
+        settings.friendly_bot_openrouter_input_output_logging_attestation
+        == _OBSERVABILITY_ATTESTATION
+    )
 
 
 def test_gateway_environment_does_not_retain_invalid_attestation_value(

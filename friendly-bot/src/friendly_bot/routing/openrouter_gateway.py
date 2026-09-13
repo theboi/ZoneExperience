@@ -54,7 +54,7 @@ class GatewayProtocolError(GatewayError):
 class OpenRouterSettings(BaseSettings):
     """Read the provider credential and non-secret privacy attestation."""
 
-    model_config = SettingsConfigDict(env_prefix="", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="", extra="forbid", env_file=".env")
 
     openrouter_api_key: SecretStr | None = None
     friendly_bot_openrouter_input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False
