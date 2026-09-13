@@ -34,12 +34,6 @@ from friendly_bot.persistence.repositories import (
 )
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.services.scheduler import AudienceResolver, ServiceDeliveryScheduler
-from friendly_bot.telegram.models import (
-    OutboundTelegramMessage,
-    TelegramSendConfirmed,
-    TelegramSendOutcome,
-)
-from friendly_bot.telegram.outbox import OutboundDeliveryWorker
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 _SESSION_FACTORY = async_sessionmaker[AsyncSession]
@@ -114,10 +108,11 @@ def uow_factory(
 
 @dataclass
 class RecordingTimestampRoots:
-    """I04's port shape, retaining independent current-parent facts for the assertion."""
+    """Record only the exact I04 preparer inputs that T02 supplies."""
 
-    current_parent_keys: dict[UUID, set[str]] = field(default_factory=dict)
-    calls: list[tuple[UUID, str]] = field(default_factory=list)
+    calls: list[
+        tuple[UnitOfWork, ServiceTimestampRecord, UUID, datetime, NewOutboundDelivery]
+    ] = field(default_factory=list)
 
     async def open_for_recipient(
         self,
@@ -127,10 +122,7 @@ class RecordingTimestampRoots:
         *,
         now: datetime,
     ) -> NewOutboundDelivery:
-        del uow
-        self.current_parent_keys.setdefault(user_id, set()).add(timestamp.root_flow_key)
-        self.calls.append((user_id, timestamp.root_flow_key))
-        return NewOutboundDelivery(
+        delivery = NewOutboundDelivery(
             idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
             user_id=user_id,
             telegram_chat_id=73,
@@ -138,17 +130,21 @@ class RecordingTimestampRoots:
             payload={"text": "Service timestamp"},
             eligible_at=now,
         )
+        self.calls.append((uow, timestamp, user_id, now, delivery))
+        return delivery
 
 
 @dataclass
-class RecordingDeliveryGateway:
-    """Record only the typed request crossing the direct Telegram boundary."""
+class RecordingUnitOfWorkFactory:
+    """Expose the exact scheduler UoWs passed through the preparer port."""
 
-    requests: list[OutboundTelegramMessage] = field(default_factory=list)
+    session_factory: _SESSION_FACTORY
+    opened: list[UnitOfWork] = field(default_factory=list)
 
-    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
-        self.requests.append(request)
-        return TelegramSendConfirmed(919)
+    def __call__(self) -> UnitOfWork:
+        unit_of_work = UnitOfWork(self.session_factory)
+        self.opened.append(unit_of_work)
+        return unit_of_work
 
 
 async def test_authoritative_audiences_apply_role_inheritance_without_admin_grants(
@@ -235,11 +231,11 @@ async def test_authoritative_audiences_apply_role_inheritance_without_admin_gran
     ) == {nbnc_id, server_id, leader_id, staff_id}
 
 
-async def test_service_start_timestamp_keeps_pending_onboarding_branch_open(
+async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_preparer_once(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
-    """The scheduler only composes the I04 port; it does not replace an onboarding root."""
+    """The second scheduler loses the durable claim and cannot invoke I04's port."""
 
     service_id = uuid4()
     user_id = uuid4()
@@ -286,26 +282,21 @@ async def test_service_start_timestamp_keeps_pending_onboarding_branch_open(
             )
         )
 
-    roots = RecordingTimestampRoots(
-        current_parent_keys={user_id: {"onboarding.name_capture"}}
-    )
+    roots = RecordingTimestampRoots()
+    scheduler_uows = RecordingUnitOfWorkFactory(session_factory)
     scheduler = ServiceDeliveryScheduler(
-        uow_factory, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots
     )
-    delivery_gateway = RecordingDeliveryGateway()
 
     first = await scheduler.run_once(now=NOW)
-    assert await OutboundDeliveryWorker(
-        uow_factory, delivery_gateway, clock=lambda: NOW
-    ).run_once()
-
-    restarted = ServiceDeliveryScheduler(
-        uow_factory, AudienceResolver(uow_factory, clock=lambda: NOW), roots
-    )
-    second = await restarted.run_once(now=NOW)
-    assert not await OutboundDeliveryWorker(
-        uow_factory, delivery_gateway, clock=lambda: NOW + timedelta(minutes=1)
-    ).run_once()
+    assert len(roots.calls) == 1
+    (
+        prepared_uow,
+        prepared_timestamp,
+        prepared_user_id,
+        prepared_now,
+        prepared_delivery,
+    ) = roots.calls[0]
 
     async with session_factory() as session:
         deliveries = list(
@@ -317,21 +308,34 @@ async def test_service_start_timestamp_keeps_pending_onboarding_branch_open(
             )
         )
 
+    restarted = ServiceDeliveryScheduler(
+        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+    )
+    second = await restarted.run_once(now=NOW)
+
     assert first.claimed_delivery_count == 1
     assert first.enqueued_delivery_count == 1
     assert second.claimed_delivery_count == 0
     assert second.enqueued_delivery_count == 0
-    assert roots.current_parent_keys[user_id] == {
-        "onboarding.name_capture",
-        timestamp_root,
-    }
-    assert roots.calls == [(user_id, timestamp_root)]
+    assert prepared_uow is scheduler_uows.opened[1]
+    assert prepared_timestamp.id == timestamp_id
+    assert prepared_timestamp.service_id == service_id
+    assert prepared_timestamp.root_flow_key == timestamp_root
+    assert prepared_user_id == user_id
+    assert prepared_now == NOW
+    assert prepared_delivery == NewOutboundDelivery(
+        idempotency_key=f"task8:timestamp:{timestamp_id}:{user_id}",
+        user_id=user_id,
+        telegram_chat_id=73,
+        kind="message",
+        payload={"text": "Service timestamp"},
+        eligible_at=NOW,
+    )
+    assert len(roots.calls) == 1
     assert len(deliveries) == 1
-    assert deliveries[0].status == "sent"
-    assert delivery_gateway.requests == [
-        OutboundTelegramMessage(
-            73,
-            "Service timestamp",
-            f"task8:timestamp:{timestamp_id}:{user_id}",
-        )
-    ]
+    assert deliveries[0].status == "pending"
+    assert deliveries[0].user_id == prepared_delivery.user_id
+    assert deliveries[0].telegram_chat_id == prepared_delivery.telegram_chat_id
+    assert deliveries[0].kind == prepared_delivery.kind
+    assert deliveries[0].payload == prepared_delivery.payload
+    assert deliveries[0].eligible_at == prepared_delivery.eligible_at
