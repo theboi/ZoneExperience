@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from types import TracebackType
 from typing import Final, Protocol, Self
 
@@ -68,6 +70,10 @@ class TelegramRuntimeLock:
             result = await connection.fetchval(
                 _TRY_LOCK_SQL, TELEGRAM_RUNTIME_ADVISORY_LOCK_KEY
             )
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await _close_after_cancellation(connection)
+            raise
         except Exception as error:
             await _close_after_failed_acquisition(connection)
             raise TelegramRuntimeLockLostError(
@@ -103,6 +109,9 @@ class TelegramRuntimeLock:
             raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
         try:
             result = await connection.fetchval(_HEALTH_SQL)
+        except asyncio.CancelledError:
+            self._lost = True
+            raise
         except Exception as error:
             self._lost = True
             raise TelegramRuntimeLockLostError(
@@ -117,12 +126,16 @@ class TelegramRuntimeLock:
 
         connection = self._connection
         self._connection = None
+        self._lost = True
         if connection is None or connection.is_closed():
             return
         try:
             await connection.close()
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await _close_after_cancellation(connection)
+            raise
         except Exception as error:
-            self._lost = True
             raise TelegramRuntimeLockLostError(
                 "runtime_lock_connection_lost"
             ) from error
@@ -140,3 +153,16 @@ async def _close_after_failed_acquisition(
 
     if not connection.is_closed():
         await connection.close()
+
+
+async def _close_after_cancellation(connection: TelegramRuntimeConnection) -> None:
+    """Finish connection cleanup despite a second cancellation during shutdown."""
+
+    if connection.is_closed():
+        return
+    close_task = asyncio.create_task(connection.close())
+    try:
+        await asyncio.shield(close_task)
+    except asyncio.CancelledError:
+        await asyncio.shield(close_task)
+        raise
