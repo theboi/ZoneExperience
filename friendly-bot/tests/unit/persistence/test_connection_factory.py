@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import PostgresDsn
 
-from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
+from friendly_bot.persistence import DirectPostgresConnectionFactory
 
 
 async def test_factory_opens_a_fresh_direct_asyncpg_connection_per_call(

@@ -10,7 +10,7 @@ import asyncpg
 import pytest
 from pydantic import PostgresDsn
 
-from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
+from friendly_bot.persistence import DirectPostgresConnectionFactory
 from friendly_bot.telegram.runtime_lock import (
     TelegramRuntimeAlreadyRunningError,
     TelegramRuntimeLock,
