@@ -10,9 +10,10 @@ from typing import Literal, Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from friendly_bot.config.settings import PROJECT_DOTENV_FILE
 from friendly_bot.hyperparameters import (
     OPENROUTER_MAX_RESPONSE_BYTES,
     OPENROUTER_MODEL,
@@ -54,10 +55,23 @@ class GatewayProtocolError(GatewayError):
 class OpenRouterSettings(BaseSettings):
     """Read the provider credential and non-secret privacy attestation."""
 
-    model_config = SettingsConfigDict(env_prefix="", extra="forbid", env_file=".env")
+    model_config = SettingsConfigDict(
+        env_prefix="", extra="ignore", env_file=PROJECT_DOTENV_FILE
+    )
 
     openrouter_api_key: SecretStr | None = None
     friendly_bot_openrouter_input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False
+
+    @field_validator(
+        "friendly_bot_openrouter_input_output_logging_attestation", mode="before"
+    )
+    @classmethod
+    def parse_false_attestation_value(cls, value: object) -> object:
+        """Keep the template's disabled string distinct from affirmative consent."""
+
+        if isinstance(value, str) and value == "false":
+            return False
+        return value
 
     @classmethod
     def from_environment(cls) -> OpenRouterSettings:

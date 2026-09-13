@@ -329,21 +329,21 @@ def test_gateway_environment_rejects_missing_or_inexact_observability_attestatio
         OpenRouterGateway.from_environment()
 
 
-def test_openrouter_settings_reads_key_and_attestation_from_project_dotenv(
+def test_openrouter_settings_reads_key_and_attestation_from_explicit_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv(
         "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION", raising=False
     )
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text(
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text(
         "OPENROUTER_API_KEY=dotenv-openrouter-key\n"
         "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION="
         "disabled-globally-or-friendly-bot-key-excluded\n"
     )
 
-    settings = OpenRouterSettings.from_environment()
+    settings = OpenRouterSettings(_env_file=dotenv_file)
 
     assert settings.openrouter_api_key is not None
     assert settings.openrouter_api_key.get_secret_value() == "dotenv-openrouter-key"
