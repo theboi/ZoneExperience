@@ -19,13 +19,18 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     ConversationMessage,
+    OutboundDelivery,
     ProcessedTelegramUpdate,
 )
+from friendly_bot.persistence.repositories import NewOutboundDelivery
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.telegram.models import (
     IncomingTelegramUpdate,
+    TelegramApiError,
+    TelegramApiFailure,
     TelegramChat,
     TelegramMessage,
+    TelegramResponseUncertain,
     TelegramUpdates,
     TelegramUser,
 )
@@ -112,6 +117,7 @@ class RecordingDispatcher:
 
     dispatched_message_ids: list[int] = field(default_factory=list)
     fail: bool = False
+    enqueue_delivery_before_failure: bool = False
 
     async def dispatch(
         self,
@@ -120,8 +126,17 @@ class RecordingDispatcher:
         incoming: TelegramMessage,
         unit_of_work: UnitOfWork,
     ) -> None:
-        del user_id, unit_of_work
         if self.fail:
+            if self.enqueue_delivery_before_failure:
+                await unit_of_work.deliveries.enqueue(
+                    NewOutboundDelivery(
+                        idempotency_key=f"poller-failed-dispatch-{incoming.message_id}",
+                        user_id=user_id,
+                        telegram_chat_id=incoming.chat.id,
+                        kind="test.fixed_reply",
+                        payload={"template": "fixed"},
+                    )
+                )
             raise IngressFailure("dispatch failed")
         self.dispatched_message_ids.append(incoming.message_id)
 
@@ -130,15 +145,15 @@ class RecordingDispatcher:
 class StaticTelegramGateway:
     """Return one complete typed batch and retain only requested offsets."""
 
-    updates: TelegramUpdates
+    result: TelegramUpdates | TelegramApiFailure
     requested_offsets: list[int] = field(default_factory=list)
 
     async def get_updates(
         self, *, offset: int, timeout_seconds: int
-    ) -> TelegramUpdates:
+    ) -> TelegramUpdates | TelegramApiFailure:
         del timeout_seconds
         self.requested_offsets.append(offset)
-        return self.updates
+        return self.result
 
 
 def _message_update(
@@ -200,6 +215,11 @@ async def _processed_update_count(session_factory: _SESSION_FACTORY) -> int:
         return len(list(await session.scalars(select(ProcessedTelegramUpdate))))
 
 
+async def _outbound_delivery_count(session_factory: _SESSION_FACTORY) -> int:
+    async with session_factory() as session:
+        return len(list(await session.scalars(select(OutboundDelivery))))
+
+
 async def test_committed_duplicate_after_restart_is_a_noop_and_offset_is_monotonic(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
@@ -220,13 +240,16 @@ async def test_committed_duplicate_after_restart_is_a_noop_and_offset_is_monoton
     assert dispatcher.dispatched_message_ids == [71]
 
 
-async def test_dispatch_failure_rolls_back_claim_message_and_cursor(
+async def test_dispatch_failure_rolls_back_claim_message_delivery_and_cursor(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
     """Committing before dispatch would make a failed update permanently skipped."""
 
-    ingress = TelegramIngress(uow_factory, RecordingDispatcher(fail=True))
+    ingress = TelegramIngress(
+        uow_factory,
+        RecordingDispatcher(fail=True, enqueue_delivery_before_failure=True),
+    )
 
     with pytest.raises(IngressFailure, match="^dispatch failed$"):
         await ingress.process(_message_update(9), received_at=NOW)
@@ -234,6 +257,7 @@ async def test_dispatch_failure_rolls_back_claim_message_and_cursor(
     assert await _polling_offset(uow_factory) == 0
     assert await _processed_update_count(session_factory) == 0
     assert await _conversation_rows(session_factory) == []
+    assert await _outbound_delivery_count(session_factory) == 0
 
 
 async def test_poller_sorts_a_returned_batch_before_dispatching_and_advancing_cursor(
@@ -260,6 +284,39 @@ async def test_poller_sorts_a_returned_batch_before_dispatching_and_advancing_cu
     assert await _polling_offset(uow_factory) == 20
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TelegramApiError(502),
+        TelegramResponseUncertain("telegram_response_malformed"),
+    ],
+)
+async def test_poller_gateway_failure_does_not_claim_or_advance(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+    failure: TelegramApiFailure,
+) -> None:
+    """Treating a failed poll as an empty batch could silently drop Telegram input."""
+
+    gateway = StaticTelegramGateway(failure)
+    poller = TelegramPoller(
+        gateway,
+        TelegramIngress(uow_factory, RecordingDispatcher()),
+        uow_factory,
+        timeout_seconds=25,
+    )
+
+    result = await poller.run_once(now=NOW)
+
+    assert gateway.requested_offsets == [0]
+    assert result.requested_offset == 0
+    assert result.processed_update_ids == ()
+    assert result.gateway_failure == failure
+    assert await _polling_offset(uow_factory) == 0
+    assert await _processed_update_count(session_factory) == 0
+    assert await _conversation_rows(session_factory) == []
+
+
 async def test_callback_input_persists_normalized_callback_and_reply_without_raw_payload(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
@@ -277,6 +334,7 @@ async def test_callback_input_persists_normalized_callback_and_reply_without_raw
 
 
 async def test_unsupported_update_is_claimed_and_advances_without_dispatching(
+    session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
     """Leaving unsupported updates unclaimed would cause an endless polling loop."""
@@ -288,4 +346,14 @@ async def test_unsupported_update_is_claimed_and_advances_without_dispatching(
 
     assert result.disposition == "ignored"
     assert dispatcher.dispatched_message_ids == []
+    assert await _processed_update_count(session_factory) == 1
+    assert await _polling_offset(uow_factory) == 84
+
+    replay = await TelegramIngress(uow_factory, dispatcher).process(
+        IncomingTelegramUpdate(update_id=83, message=None), received_at=NOW
+    )
+
+    assert replay.disposition == "duplicate"
+    assert dispatcher.dispatched_message_ids == []
+    assert await _processed_update_count(session_factory) == 1
     assert await _polling_offset(uow_factory) == 84
