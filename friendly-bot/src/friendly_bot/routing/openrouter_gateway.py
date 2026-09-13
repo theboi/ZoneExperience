@@ -311,10 +311,8 @@ class OpenRouterGateway:
 
     @staticmethod
     def _assistant_content(response: GatewayResponse) -> str:
+        payload = OpenRouterGateway._request_json(response)
         try:
-            payload = response.json()
-            if not isinstance(payload, Mapping):
-                raise TypeError("response must be an object")
             choices = payload["choices"]
             if not isinstance(choices, list):
                 raise TypeError("choices must be a list")
@@ -332,3 +330,16 @@ class OpenRouterGateway:
             raise GatewayProtocolError(
                 "OpenRouter response was not assistant text"
             ) from error
+
+    @staticmethod
+    def _request_json(response: GatewayResponse) -> Mapping[str, object]:
+        """Parse one provider envelope without retaining malformed raw response text."""
+
+        parse_failed = object()
+        try:
+            payload: object = response.json()
+        except (TypeError, ValueError):
+            payload = parse_failed
+        if payload is parse_failed or not isinstance(payload, Mapping):
+            raise GatewayProtocolError("OpenRouter response was not an object")
+        return payload

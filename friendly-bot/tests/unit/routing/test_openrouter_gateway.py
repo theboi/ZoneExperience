@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,11 +43,22 @@ class FakeResponse:
 
 
 @dataclass
+class InvalidJsonEnvelopeResponse:
+    raw_response: str
+    status_code: int = 200
+
+    def json(self) -> object:
+        raise json.JSONDecodeError("invalid envelope", self.raw_response, 0)
+
+
+@dataclass
 class FakeHttpxClient:
-    responses: list[FakeResponse | Exception]
+    responses: list[FakeResponse | InvalidJsonEnvelopeResponse | Exception]
     requests: list[dict[str, Any]] = field(default_factory=list)
 
-    async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+    async def post(
+        self, url: str, **kwargs: Any
+    ) -> FakeResponse | InvalidJsonEnvelopeResponse:
         self.requests.append({"url": url, **kwargs})
         outcome = self.responses.pop(0)
         if isinstance(outcome, Exception):
@@ -264,6 +276,48 @@ async def test_gateway_does_not_attach_raw_malformed_response_to_protocol_error(
     assert raised.value.__context__ is None
     assert raw_response not in str(raised.value)
     assert all(raw_response not in str(argument) for argument in raised.value.args)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_does_not_attach_raw_malformed_envelope_to_any_operation(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+) -> None:
+    """Invalid envelope JSON must not cross the shared response boundary."""
+
+    raw_envelope = "raw-provider-envelope-sentinel-not-json"
+    client = FakeHttpxClient([InvalidJsonEnvelopeResponse(raw_envelope)])
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(_gateway(client))
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert raw_envelope not in str(raised.value)
+    assert all(raw_envelope not in str(argument) for argument in raised.value.args)
 
 
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
