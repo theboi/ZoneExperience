@@ -1,0 +1,45 @@
+"""Strict Telegram Bot API boundary for Friendly Bot."""
+
+from friendly_bot.telegram.client import TelegramApiClient
+from friendly_bot.telegram.models import (
+    IncomingTelegramUpdate,
+    OutboundTelegramMessage,
+    TelegramApiError,
+    TelegramApiFailure,
+    TelegramChat,
+    TelegramMessage,
+    TelegramResponseUncertain,
+    TelegramSendConfirmed,
+    TelegramSendOutcome,
+    TelegramSendRejected,
+    TelegramSendRetry,
+    TelegramSendUncertain,
+    TelegramUpdates,
+    TelegramUser,
+    TelegramWebhookCleared,
+    TelegramWebhookInfo,
+    normalize_command,
+    parse_update,
+)
+
+__all__ = [
+    "IncomingTelegramUpdate",
+    "OutboundTelegramMessage",
+    "TelegramApiClient",
+    "TelegramApiError",
+    "TelegramApiFailure",
+    "TelegramChat",
+    "TelegramMessage",
+    "TelegramResponseUncertain",
+    "TelegramSendConfirmed",
+    "TelegramSendOutcome",
+    "TelegramSendRejected",
+    "TelegramSendRetry",
+    "TelegramSendUncertain",
+    "TelegramUpdates",
+    "TelegramUser",
+    "TelegramWebhookCleared",
+    "TelegramWebhookInfo",
+    "normalize_command",
+    "parse_update",
+]
