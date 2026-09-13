@@ -54,6 +54,7 @@ type LoginAttachmentKind = Literal["attached", "occupied", "not_found"]
 type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
 DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
 _NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL = datetime(1970, 1, 1, tzinfo=UTC)
+SERVICE_INTERACTION_END_RELEASE_REASON = "service_interaction_ended"
 
 
 class DeliveryClaimLostError(RuntimeError):
@@ -123,6 +124,14 @@ class AttendanceRecord:
 class AttendanceStartResult:
     attendance: AttendanceRecord
     ended_previous: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceBoundSelectionExpiry:
+    """The durable users and selection count expired for one service boundary."""
+
+    expired_selection_count: int
+    affected_user_ids: frozenset[UUID]
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +375,8 @@ class MatchRepository(Protocol):
         self, request_id: UUID, profile_id: UUID, *, reason: str, now: datetime
     ) -> None: ...
 
+    async def release_service_bound(self, service_id: UUID, *, at: datetime) -> int: ...
+
 
 class OpenSelectionRepository(Protocol):
     async def list_for_user(
@@ -376,7 +387,9 @@ class OpenSelectionRepository(Protocol):
         self, transition: SelectionTransition | CheckpointReturnTransition
     ) -> None: ...
 
-    async def expire_service_bound(self, service_id: UUID, *, at: datetime) -> int: ...
+    async def expire_service_bound(
+        self, service_id: UUID, *, at: datetime
+    ) -> ServiceBoundSelectionExpiry: ...
 
 
 class DeliveryRepository(Protocol):
@@ -1349,6 +1362,52 @@ class SqlAlchemyMatchRepository:
             .on_conflict_do_nothing()
         )
 
+    async def release_service_bound(self, service_id: UUID, *, at: datetime) -> int:
+        """Release only active capacity assigned through requests for one ended service."""
+
+        assignments = list(
+            await self._session.scalars(
+                select(HumanMatchAssignment)
+                .join(
+                    HumanMatchRequest,
+                    HumanMatchRequest.id == HumanMatchAssignment.request_id,
+                )
+                .where(
+                    HumanMatchRequest.service_id == service_id,
+                    HumanMatchAssignment.released_at.is_(None),
+                )
+                .with_for_update()
+            )
+        )
+        for assignment in assignments:
+            assignment.released_at = at
+            assignment.release_reason = SERVICE_INTERACTION_END_RELEASE_REASON
+            reservation = await self._session.scalar(
+                select(CapacityReservation)
+                .where(
+                    CapacityReservation.id == assignment.capacity_reservation_id,
+                    CapacityReservation.released_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if reservation is None:
+                continue
+            reservation.released_at = at
+            released_profile_id = await self._session.scalar(
+                update(OperationalProfile)
+                .where(
+                    OperationalProfile.id == reservation.operational_profile_id,
+                    OperationalProfile.reserved_capacity > 0,
+                )
+                .values(reserved_capacity=OperationalProfile.reserved_capacity - 1)
+                .returning(OperationalProfile.id)
+            )
+            if released_profile_id is None:
+                raise RuntimeError(
+                    "active capacity reservation has no reserved capacity"
+                )
+        return len(assignments)
+
 
 class SqlAlchemyOpenSelectionRepository:
     def __init__(
@@ -1435,25 +1494,24 @@ class SqlAlchemyOpenSelectionRepository:
                     )
                 await self._upsert(selection)
 
-    async def expire_service_bound(self, service_id: UUID, *, at: datetime) -> int:
-        selection_ids = list(
+    async def expire_service_bound(
+        self, service_id: UUID, *, at: datetime
+    ) -> ServiceBoundSelectionExpiry:
+        affected_user_ids = list(
             await self._session.scalars(
-                select(OpenFlowSelection.id).where(
+                update(OpenFlowSelection)
+                .where(
                     OpenFlowSelection.service_id == service_id,
                     OpenFlowSelection.expires_at.is_(None),
                 )
+                .values(expires_at=at, is_current=False)
+                .returning(OpenFlowSelection.user_id)
             )
         )
-        if not selection_ids:
-            return 0
-        await self._session.execute(
-            update(OpenFlowSelection)
-            .where(
-                OpenFlowSelection.id.in_(selection_ids),
-            )
-            .values(expires_at=at, is_current=False)
+        return ServiceBoundSelectionExpiry(
+            expired_selection_count=len(affected_user_ids),
+            affected_user_ids=frozenset(affected_user_ids),
         )
-        return len(selection_ids)
 
     async def _source_for(
         self, transition: SelectionTransition | CheckpointReturnTransition

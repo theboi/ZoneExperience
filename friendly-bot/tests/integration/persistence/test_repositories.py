@@ -24,7 +24,10 @@ from friendly_bot.domain.state import (
 )
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
+    CapacityReservation,
     FlowScopeKind,
+    HumanMatchAssignment,
+    HumanMatchExclusion,
     HumanMatchRequest,
     OpenFlowSelection,
     OperationalProfile,
@@ -446,6 +449,221 @@ async def test_match_reservation_can_rematch_after_releasing_a_prior_assignment(
     assert first is not None
     assert retried is not None
     assert retried.responder_profile_id == second_profile_id
+
+
+async def test_service_expiry_releases_only_its_active_match_capacity_once(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A service end must neither exclude nor release another service's matches."""
+
+    expired_service_id = await _seed_service(session_factory, key="task6_expired")
+    unrelated_service_id = await _seed_service(session_factory, key="task6_unrelated")
+    requester_id = await _seed_user(session_factory)
+    target_profile_ids = [
+        await _seed_profile(
+            session_factory,
+            user_id=await _seed_user(session_factory, role=OperationalRole.SERVER),
+            name=f"task6-target-{position}",
+        )
+        for position in range(2)
+    ]
+    unrelated_profile_id = await _seed_profile(
+        session_factory,
+        user_id=await _seed_user(session_factory, role=OperationalRole.SERVER),
+        name="task6-unrelated",
+    )
+    unscoped_profile_id = await _seed_profile(
+        session_factory,
+        user_id=await _seed_user(session_factory, role=OperationalRole.SERVER),
+        name="task6-unscoped",
+    )
+    target_request_ids = [
+        await _seed_request(
+            session_factory,
+            requester_user_id=requester_id,
+            service_id=expired_service_id,
+        )
+        for _ in target_profile_ids
+    ]
+    unrelated_request_id = await _seed_request(
+        session_factory,
+        requester_user_id=requester_id,
+        service_id=unrelated_service_id,
+    )
+    unscoped_request_id = await _seed_request(
+        session_factory,
+        requester_user_id=requester_id,
+        service_id=None,
+    )
+    for request_id, profile_id in zip(target_request_ids, target_profile_ids):
+        async with uow_factory() as uow:
+            assert (
+                await uow.matches.reserve_ranked(request_id, [profile_id], now=NOW)
+            ) is not None
+    async with uow_factory() as uow:
+        assert (
+            await uow.matches.reserve_ranked(
+                unrelated_request_id, [unrelated_profile_id], now=NOW
+            )
+        ) is not None
+        assert (
+            await uow.matches.reserve_ranked(
+                unscoped_request_id, [unscoped_profile_id], now=NOW
+            )
+        ) is not None
+
+    async with uow_factory() as uow:
+        released = await uow.matches.release_service_bound(expired_service_id, at=NOW)
+    async with uow_factory() as uow:
+        released_again = await uow.matches.release_service_bound(
+            expired_service_id, at=NOW + timedelta(minutes=1)
+        )
+
+    async with session_factory() as session:
+        assignments = {
+            assignment.request_id: assignment
+            for assignment in await session.scalars(select(HumanMatchAssignment))
+        }
+        reservations = {
+            reservation.request_id: reservation
+            for reservation in await session.scalars(select(CapacityReservation))
+        }
+        profiles = {
+            profile.id: profile
+            for profile in await session.scalars(select(OperationalProfile))
+        }
+        exclusions = list(await session.scalars(select(HumanMatchExclusion)))
+
+    assert released == 2
+    assert released_again == 0
+    for request_id in target_request_ids:
+        assert assignments[request_id].released_at == NOW
+        assert assignments[request_id].release_reason == "service_interaction_ended"
+        assert reservations[request_id].released_at == NOW
+    assert assignments[unrelated_request_id].released_at is None
+    assert assignments[unscoped_request_id].released_at is None
+    assert reservations[unrelated_request_id].released_at is None
+    assert reservations[unscoped_request_id].released_at is None
+    assert all(
+        profiles[profile_id].reserved_capacity == 0 for profile_id in target_profile_ids
+    )
+    assert profiles[unrelated_profile_id].reserved_capacity == 1
+    assert profiles[unscoped_profile_id].reserved_capacity == 1
+    assert exclusions == []
+
+
+async def test_service_expiry_returns_unique_affected_users_without_touching_other_branches(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A count-only expiry result would leave I04 unable to return the right users."""
+
+    expired_service_id = await _seed_service(session_factory, key="task6_selection")
+    unrelated_service_id = await _seed_service(
+        session_factory, key="task6_selection_unrelated"
+    )
+    first_user_id = await _seed_user(session_factory)
+    second_user_id = await _seed_user(session_factory)
+    async with uow_factory() as uow:
+        expired_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.expired"},
+                flow_key_index={"service.expired": ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=expired_service_id,
+            published_by_user_id=None,
+        )
+        unrelated_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.unrelated"},
+                flow_key_index={"service.unrelated": ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=unrelated_service_id,
+            published_by_user_id=None,
+        )
+    expired_selections = (
+        OpenSelectionState(
+            id=uuid4(),
+            user_id=first_user_id,
+            flow_version_id=expired_version.id,
+            parent_flow_key="service.expired.first",
+            service_id=expired_service_id,
+            is_current=True,
+            is_global_interruptive=False,
+            ancestor_flow_keys=("service.expired", "service.expired.first"),
+            checkpoint_flow_keys=("service.expired",),
+            opened_at=NOW,
+            last_focused_at=NOW,
+        ),
+        OpenSelectionState(
+            id=uuid4(),
+            user_id=first_user_id,
+            flow_version_id=expired_version.id,
+            parent_flow_key="service.expired.second",
+            service_id=expired_service_id,
+            is_current=True,
+            is_global_interruptive=False,
+            ancestor_flow_keys=("service.expired", "service.expired.second"),
+            checkpoint_flow_keys=("service.expired",),
+            opened_at=NOW,
+            last_focused_at=NOW,
+        ),
+        OpenSelectionState(
+            id=uuid4(),
+            user_id=second_user_id,
+            flow_version_id=expired_version.id,
+            parent_flow_key="service.expired.third",
+            service_id=expired_service_id,
+            is_current=True,
+            is_global_interruptive=False,
+            ancestor_flow_keys=("service.expired", "service.expired.third"),
+            checkpoint_flow_keys=("service.expired",),
+            opened_at=NOW,
+            last_focused_at=NOW,
+        ),
+    )
+    unrelated_selection = OpenSelectionState(
+        id=uuid4(),
+        user_id=first_user_id,
+        flow_version_id=unrelated_version.id,
+        parent_flow_key="service.unrelated.first",
+        service_id=unrelated_service_id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.unrelated", "service.unrelated.first"),
+        checkpoint_flow_keys=("service.unrelated",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    for selection in (*expired_selections, unrelated_selection):
+        await _seed_selection(session_factory, selection)
+
+    async with uow_factory() as uow:
+        expiry = await uow.open_selections.expire_service_bound(
+            expired_service_id, at=NOW
+        )
+    async with uow_factory() as uow:
+        repeated_expiry = await uow.open_selections.expire_service_bound(
+            expired_service_id, at=NOW + timedelta(minutes=1)
+        )
+    async with session_factory() as session:
+        rows = {
+            selection.id: selection
+            for selection in await session.scalars(select(OpenFlowSelection))
+        }
+
+    assert expiry.expired_selection_count == 3
+    assert expiry.affected_user_ids == frozenset({first_user_id, second_user_id})
+    assert repeated_expiry.expired_selection_count == 0
+    assert repeated_expiry.affected_user_ids == frozenset()
+    for selection in expired_selections:
+        assert rows[selection.id].expires_at == NOW
+        assert rows[selection.id].is_current is False
+    assert rows[unrelated_selection.id].expires_at is None
+    assert rows[unrelated_selection.id].is_current is True
 
 
 async def test_open_selection_apply_persists_transition_rows_without_actions(
