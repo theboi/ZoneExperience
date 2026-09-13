@@ -263,6 +263,7 @@ class OpenRouterGateway:
             "Content-Type": "application/json",
         }
         for attempt in range(self._max_attempts):
+            transport_failed = False
             try:
                 response = await self._client.post(
                     _CHAT_COMPLETIONS_URL,
@@ -270,17 +271,17 @@ class OpenRouterGateway:
                     json=payload,
                     timeout=self._timeout_seconds,
                 )
-            except (GatewayTransportError, OSError):
+                if 200 <= response.status_code < 300:
+                    return response
+            except Exception:  # noqa: BLE001 - provider errors can retain response bytes
+                transport_failed = True
+            else:
+                transport_failed = True
+            if transport_failed:
                 if attempt + 1 == self._max_attempts:
                     break
                 await asyncio.sleep(0)
                 continue
-            if not 200 <= response.status_code < 300:
-                if attempt + 1 == self._max_attempts:
-                    break
-                await asyncio.sleep(0)
-                continue
-            return response
         raise GatewayTransportError("OpenRouter request exhausted")
 
     @staticmethod

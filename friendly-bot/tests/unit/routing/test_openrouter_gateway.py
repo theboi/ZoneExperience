@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from http.client import IncompleteRead
+from typing import Any, Self
 
 import pytest
 from pydantic import ValidationError
@@ -318,6 +319,83 @@ async def test_gateway_does_not_attach_raw_malformed_envelope_to_any_operation(
     assert raised.value.__context__ is None
     assert raw_envelope not in str(raised.value)
     assert all(raw_envelope not in str(argument) for argument in raised.value.args)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operation(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interrupted stdlib body reads must retry and not leak provider bytes."""
+
+    raw_partial = b"raw-provider-incomplete-read-sentinel"
+    expected_attempts = ROUTING_MAX_ATTEMPTS
+    attempts = 0
+
+    class IncompleteReadResponse:
+        status = 200
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(
+            self,
+            exception_type: type[BaseException] | None,
+            exception: BaseException | None,
+            traceback: object,
+        ) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            raise IncompleteRead(raw_partial, expected=expected_attempts)
+
+    def interrupted_urlopen(*args: object, **kwargs: object) -> IncompleteReadResponse:
+        nonlocal attempts
+        attempts += 1
+        return IncompleteReadResponse()
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", interrupted_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await operation(gateway)
+
+    raw_sentinel = raw_partial.decode()
+    assert attempts == expected_attempts
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert raw_sentinel not in str(raised.value)
+    assert all(raw_sentinel not in str(argument) for argument in raised.value.args)
+    assert vars(raised.value) == {}
 
 
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
