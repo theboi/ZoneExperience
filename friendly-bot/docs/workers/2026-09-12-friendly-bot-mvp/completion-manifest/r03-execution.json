@@ -16,17 +16,19 @@
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
   "focused_evidence": {
     "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "After reconciling the response-sanitization completion commit with origin/main: exit 0; 83 passed, 1 skipped in 1.59s; Ruff check reported All checks passed; Ruff format reported 60 files already formatted; mypy found no issues in 30 source files."
+    "result": "Final configuration-context repair verification: exit 0; 85 passed, 1 skipped; Ruff check and format check clean; mypy found no issues in 30 source files."
   },
   "privacy_negative_tests": [
     "tests/unit/routing/test_openrouter_gateway.py::test_every_prompt_dto_rejects_common_structured_identifier_aliases",
     "tests/unit/routing/test_openrouter_gateway.py::test_request_requires_policy_and_excludes_identifier_sentinels",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_serializes_only_safe_persona_prompt_content",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_serializes_only_safe_match_prompt_content",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_environment_does_not_retain_invalid_attestation_value",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_closes_without_attaching_raw_transport_data_after_retry_exhaustion",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_attach_raw_malformed_response_to_protocol_error",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_attach_raw_malformed_envelope_to_any_operation",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_detaches_interrupted_stdlib_response_body_from_any_operation",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_normalizes_stdlib_timeout_to_static_transport_error",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_retain_actual_malformed_stdlib_body_in_traceback",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceback",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_normalizes_incomplete_json_without_traceback_retention",
@@ -44,7 +46,9 @@
     "retry_exhaustion": "The added non-2xx and transport fake-client cases prove exactly ROUTING_MAX_ATTEMPTS calls and a typed closed error without raw request or response attachment.",
     "malformed_success_response": "Before the repair, the raw malformed-response regression test failed because GatewayProtocolError had a JSONDecodeError cause. The repair raises outside the parsing exception scope; the test proves no cause, context, message, or argument retains the raw sentinel.",
     "malformed_envelope": "Before the envelope repair, selection, persona, and matching each chained a JSONDecodeError from response.json(). The centralized envelope guard raises the typed protocol error outside that exception scope; all three public operations prove no cause, context, message, or argument retains the raw sentinel.",
+    "environment_validation_context": "Before the configuration-context repair, the invalid-attestation regression failed because OpenRouterSettings.from_environment constructed GatewayPrivacyConfigurationError inside its ValidationError handler, retaining the invalid input in __context__. The repair exits that handler before raising the static error; the regression proves its message, arguments, cause, context, and normal inspected attributes contain no input.",
     "interrupted_stdlib_body": "Before the transport-boundary repair, the new actual-stdlib-path IncompleteRead regression failed for selection, persona, and matching because http.client.IncompleteRead escaped response.read() with partial provider bytes. The centralized ordinary-Exception retry flag lets the final GatewayTransportError be raised after the catch scope; the restored regression passes all three operations with exact bounded retries and no sentinel in cause, context, message, arguments, or stored attributes.",
+    "stdlib_timeout": "The actual stdlib TimeoutError path retries exactly ROUTING_MAX_ATTEMPTS and produces the same static GatewayTransportError with no timeout detail in message, arguments, cause, context, attributes, or gateway traceback locals.",
     "response_lifecycle_traceback": "Before the response-lifecycle repair, 9 actual-boundary cases failed: malformed 200 bodies remained in returned stdlib responses, HTTPError 503 handling unnecessarily read and retained error bodies, and response.json() IncompleteRead escaped. The repair was superseded by the bounded decoded-result lifecycle.",
     "bounded_decoded_result_lifecycle": "Before the bounded decoded-result repair, the focused response-discard regression failed 3 times because each public operation raised while its gateway traceback frame still reached a raw-bearing response. The new client protocol returns only decoded operation values or typed static failures. Restored cases pass for selection, persona, and matching; actual stdlib tests cover malformed/deep JSON, unread HTTPError bodies, IncompleteRead, discard/close failure, and oversize bodies, and cancellation propagates unchanged.",
     "outbound_lifecycle_cleanup": "The added retaining-client regression failed before the completion repair because `_post` only dropped its local payload reference, leaving the client-held outbound prompt populated after retry exhaustion. The minimal repair clears that caller-owned payload and headers. A follow-up cancellation regression then failed because the stdlib worker shared that payload; the adapter now takes a worker snapshot and clears it after its own lifecycle."
@@ -52,8 +56,8 @@
   "review": {
     "identifier": "r03-privacy-review-repair-2026-09-13",
     "ruling": "OpenRouter Input & Output Logging is an account-level Observability setting or requires per-key exclusion. logprobs controls returned token probabilities and is not logging control.",
-    "result": "Implemented the fail-closed attestation guard, corrected the logging claim, expanded boundary tests, and retained the external account-evidence blocker.",
-    "source_privacy_re_review": "response-sanitization-repair-committed-re-review-pending-not-approved"
+    "result": "Implemented the fail-closed attestation guard, corrected the logging claim, expanded boundary tests, repaired the environment-validation exception context, and retained the external account-evidence blocker.",
+    "source_privacy_re_review": "source-privacy-repairs-committed-re-review-pending-not-approved"
   },
   "operational_privacy": {
     "environment_setting": "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION",
@@ -70,7 +74,7 @@
     "success": "A 2xx stdlib body is read at most limit plus one bytes, rejected if oversize, parsed and operation-validated in the same low-level scope, and the local bytearray is cleared before the safe outcome returns.",
     "ordinary_failures": "IncompleteRead, malformed/deep JSON, decoder failures, and discard/close failures become static protocol or retryable transport outcomes after the raw scope exits; BaseException and cancellation are not caught.",
     "outbound_cleanup": "The caller-owned headers and payload are cleared before the final safe outcome; a stdlib worker receives an isolated snapshot and clears it after its own lifecycle so cancellation does not dispatch an empty payload.",
-    "public_error_boundary": "GatewayError is constructed only after the lifecycle returns a safe outcome. Its message, args, cause, context, and attributes contain only static safe summaries; the gateway does not log these errors.",
+    "public_error_boundary": "GatewayError is constructed only after the lifecycle returns a safe outcome, and an invalid local configuration error is constructed only after its ValidationError handler exits. Its message, args, cause, context, and attributes contain only static safe summaries; the gateway does not log these errors.",
     "scope_limit": "This is not a universal assertion that arbitrary live Python frame inspection cannot find transient self, request, prompt, or credential references during normal execution. It guarantees the normal returned-response and raised-gateway-error boundary for raw provider response bytes."
   },
   "remote_reachability": {

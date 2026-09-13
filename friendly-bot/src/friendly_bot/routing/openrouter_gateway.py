@@ -66,9 +66,8 @@ class OpenRouterSettings(BaseSettings):
         try:
             return cls()
         except ValidationError:
-            raise GatewayPrivacyConfigurationError(
-                "OpenRouter configuration is invalid"
-            ) from None
+            pass
+        raise GatewayPrivacyConfigurationError("OpenRouter configuration is invalid")
 
 
 @dataclass(frozen=True, slots=True)

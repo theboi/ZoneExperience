@@ -28,9 +28,11 @@ from friendly_bot.routing.contracts import (
 )
 from friendly_bot.routing.openrouter_gateway import (
     GatewayError,
+    GatewayPrivacyConfigurationError,
     GatewayProtocolError,
     GatewayTransportError,
     OpenRouterGateway,
+    OpenRouterSettings,
     _DecodedProviderValue,
     _ProviderProtocolFailure,
 )
@@ -326,6 +328,29 @@ def test_gateway_environment_rejects_missing_or_inexact_observability_attestatio
         OpenRouterGateway.from_environment()
 
 
+def test_gateway_environment_does_not_retain_invalid_attestation_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid configuration must cross the public boundary as a static error."""
+
+    invalid_attestation = "invalid-attestation-sentinel-r03"
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION",
+        invalid_attestation,
+    )
+
+    with pytest.raises(GatewayPrivacyConfigurationError) as raised:
+        OpenRouterSettings.from_environment()
+
+    error = raised.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert invalid_attestation not in str(error)
+    assert all(invalid_attestation not in str(argument) for argument in error.args)
+    assert vars(error) == {}
+
+
 @pytest.mark.parametrize(
     "forbidden",
     [
@@ -554,6 +579,36 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
     assert attempts == expected_attempts
     assert read_limits == [OPENROUTER_MAX_RESPONSE_BYTES + 1] * expected_attempts
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_partial)
+
+
+async def test_gateway_normalizes_stdlib_timeout_to_static_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real stdlib socket timeout must not escape the static error boundary."""
+
+    timeout_detail = "socket-timeout-sentinel-r03"
+    attempts = 0
+
+    def timed_out_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        nonlocal attempts
+        attempts += 1
+        raise TimeoutError(timeout_detail)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", timed_out_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await gateway.select_key(
+            KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+        )
+
+    assert attempts == ROUTING_MAX_ATTEMPTS
+    _assert_closed_error_has_no_provider_bytes(raised.value, timeout_detail.encode())
 
 
 @pytest.mark.parametrize(
