@@ -16,7 +16,7 @@
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
   "focused_evidence": {
     "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "After the response-sanitization completion commit: exit 0; 83 passed, 1 skipped in 1.02s; Ruff check reported All checks passed; Ruff format reported 53 files already formatted; mypy found no issues in 27 source files."
+    "result": "After reconciling the response-sanitization completion commit with origin/main: exit 0; 83 passed, 1 skipped in 1.59s; Ruff check reported All checks passed; Ruff format reported 60 files already formatted; mypy found no issues in 30 source files."
   },
   "privacy_negative_tests": [
     "tests/unit/routing/test_openrouter_gateway.py::test_every_prompt_dto_rejects_common_structured_identifier_aliases",
