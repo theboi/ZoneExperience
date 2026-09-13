@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 from uuid import UUID, uuid4
@@ -43,6 +43,7 @@ class _DeliveryResolution:
     disposition: DeliveryDisposition
     safe_error: str | None
     retry_at: datetime | None = None
+    pause_until: datetime | None = None
     confirmed_telegram_message_id: int | None = None
 
 
@@ -68,7 +69,6 @@ class OutboundDeliveryWorker:
         if claim is None or claim.claim_token is None:
             return False
 
-        request = _telegram_request_from(claim.message, claim.idempotency_key)
         try:
             async with self._unit_of_work_factory() as start_uow:
                 attempt = await start_uow.deliveries.start_attempt(
@@ -80,10 +80,19 @@ class OutboundDeliveryWorker:
         except DeliveryClaimLostError:
             return False
 
+        request = _telegram_request_from(claim.message, claim.idempotency_key)
+        if request is None:
+            await self._finish(
+                claim.id,
+                attempt,
+                _DeliveryResolution("rejected", "telegram_message_unsupported"),
+            )
+            return True
+
         try:
             outcome = await self._gateway.send(request)
         except asyncio.CancelledError:
-            await self._finish(
+            await self._finish_after_cancellation(
                 claim.id,
                 attempt,
                 _DeliveryResolution("uncertain", "telegram_send_cancelled"),
@@ -122,16 +131,39 @@ class OutboundDeliveryWorker:
                 safe_error=resolution.safe_error,
                 confirmed_telegram_message_id=resolution.confirmed_telegram_message_id,
             )
+            if resolution.pause_until is not None:
+                await finish_uow.deliveries.extend_telegram_pause(
+                    pause_until=resolution.pause_until
+                )
+
+    async def _finish_after_cancellation(
+        self,
+        delivery_id: UUID,
+        attempt: DeliveryAttemptRecord,
+        resolution: _DeliveryResolution,
+    ) -> None:
+        """Keep uncertainty finalization alive if shutdown cancels us again."""
+
+        finalization = asyncio.create_task(
+            self._finish(delivery_id, attempt, resolution)
+        )
+        try:
+            await asyncio.shield(finalization)
+        except asyncio.CancelledError:
+            finalization.add_done_callback(_consume_background_result)
+            raise
 
 
 def _telegram_request_from(
     message: OutboundDeliveryMessage, idempotency_key: str
-) -> OutboundTelegramMessage:
+) -> OutboundTelegramMessage | None:
     """Map an immutable provider-neutral F01 message only after its claim commits."""
 
+    if message.kind != "message" or set(message.payload) != {"text"}:
+        return None
     text = message.payload.get("text")
     if type(text) is not str or not text:
-        raise ValueError("outbound delivery text must be a nonempty string")
+        return None
     return OutboundTelegramMessage(
         chat_id=message.chat_id,
         text=text,
@@ -160,10 +192,14 @@ def _classify_outcome(
         if outcome.error_code == 429:
             if outcome.retry_after_seconds is None:
                 return _DeliveryResolution("uncertain", "telegram_response_malformed")
-            return _retry_or_reject(
-                attempt_number,
-                now + timedelta(seconds=outcome.retry_after_seconds),
-                "telegram_rate_limited",
+            pause_until = now + timedelta(seconds=outcome.retry_after_seconds)
+            return replace(
+                _retry_or_reject(
+                    attempt_number,
+                    pause_until,
+                    "telegram_rate_limited",
+                ),
+                pause_until=pause_until,
             )
         if 500 <= outcome.error_code <= 599:
             backoff_index = min(attempt_number - 1, len(_RETRY_BACKOFF_SECONDS) - 1)
@@ -187,3 +223,10 @@ def _retry_or_reject(
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _consume_background_result(finalization: asyncio.Task[None]) -> None:
+    """Observe a detached finalization failure without retaining a task warning."""
+
+    if not finalization.cancelled():
+        finalization.exception()

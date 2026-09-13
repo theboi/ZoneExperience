@@ -41,6 +41,7 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
+    TelegramOutboundPause,
     TelegramPollState,
     TimestampDeliveryClaim,
     User,
@@ -52,6 +53,7 @@ from friendly_bot.persistence.models import (
 type LoginAttachmentResult = Literal["attached", "occupied", "not_found"]
 type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
 DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
+_NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class DeliveryClaimLostError(RuntimeError):
@@ -381,6 +383,8 @@ class DeliveryRepository(Protocol):
     async def claim_next_safe(
         self, *, now: datetime, lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE
     ) -> OutboundDeliveryRecord | None: ...
+
+    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime: ...
 
     async def renew_claim(
         self,
@@ -1540,6 +1544,9 @@ class SqlAlchemyDeliveryRepository:
         """Atomically lease due work or an expired unstarted lease, never a send."""
 
         _validate_lease_duration(lease_duration)
+        pause = await self._locked_telegram_outbound_pause()
+        if pause.pause_until > now:
+            return None
 
         row = await self._session.scalar(
             select(OutboundDelivery)
@@ -1566,6 +1573,13 @@ class SqlAlchemyDeliveryRepository:
         row.claim_token = uuid4()
         row.claim_expires_at = now + lease_duration
         return _delivery_record(row)
+
+    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime:
+        """Extend the singleton Telegram pause without allowing it to move backward."""
+
+        pause = await self._locked_telegram_outbound_pause()
+        pause.pause_until = max(pause.pause_until, pause_until)
+        return pause.pause_until
 
     async def renew_claim(
         self,
@@ -1683,6 +1697,26 @@ class SqlAlchemyDeliveryRepository:
             delivery.sent_at = now
         if confirmed_telegram_message_id is not None:
             delivery.confirmed_telegram_message_id = confirmed_telegram_message_id
+
+    async def _locked_telegram_outbound_pause(self) -> TelegramOutboundPause:
+        """Materialize and lock the one row that serializes outbound claims."""
+
+        await self._session.execute(
+            pg_insert(TelegramOutboundPause)
+            .values(
+                singleton_id=1,
+                pause_until=_NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL,
+            )
+            .on_conflict_do_nothing(index_elements=[TelegramOutboundPause.singleton_id])
+        )
+        pause = await self._session.scalar(
+            select(TelegramOutboundPause)
+            .where(TelegramOutboundPause.singleton_id == 1)
+            .with_for_update()
+        )
+        if pause is None:
+            raise RuntimeError("Telegram outbound pause could not be initialized")
+        return pause
 
 
 class SqlAlchemyDiagnosticRepository:

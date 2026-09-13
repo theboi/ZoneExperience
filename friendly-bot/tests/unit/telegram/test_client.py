@@ -133,17 +133,16 @@ async def test_send_marks_a_transport_failure_uncertain() -> None:
     await client.aclose()
 
 
-async def test_send_marks_cancellation_during_the_network_call_uncertain() -> None:
-    """Cancellation after send start cannot prove that Telegram did not deliver."""
+async def test_send_propagates_cancellation_to_the_durable_outbox_owner() -> None:
+    """Only the outbox worker can persist an uncertain result before shutdown exits."""
 
     async def telegram(_request: httpx.Request) -> httpx.Response:
         raise asyncio.CancelledError()
 
     client = _client(httpx.MockTransport(telegram))
 
-    assert await client.send(_outbound()) == TelegramResponseUncertain(
-        "telegram_transport_error"
-    )
+    with pytest.raises(asyncio.CancelledError):
+        await client.send(_outbound())
     await client.aclose()
 
 

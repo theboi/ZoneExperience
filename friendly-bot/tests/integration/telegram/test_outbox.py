@@ -113,6 +113,18 @@ class RecordingGateway:
         return self.outcome
 
 
+@dataclass
+class SequencedGateway:
+    """Return typed outcomes in durable claim order without retaining responses."""
+
+    outcomes: list[TelegramSendOutcome]
+    requests: list[OutboundTelegramMessage] = field(default_factory=list)
+
+    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
+        self.requests.append(request)
+        return self.outcomes.pop(0)
+
+
 async def _enqueue(
     factory: Callable[[], UnitOfWork], *, key: str = "outbox:one"
 ) -> UUID:
@@ -151,6 +163,33 @@ async def _attempts(
                 .order_by(OutboundDeliveryAttempt.attempt_number)
             )
         )
+
+
+async def _finish_two_retry_attempts(
+    factory: Callable[[], UnitOfWork], delivery_id: UUID
+) -> None:
+    """Make the next worker send a finite-limit terminal rate-limit attempt."""
+
+    for _ in range(2):
+        async with factory() as uow:
+            claim = await uow.deliveries.claim_next_safe(now=NOW)
+            assert claim is not None
+            assert claim.id == delivery_id
+            assert claim.claim_token is not None
+            attempt = await uow.deliveries.start_attempt(
+                claim.id,
+                uuid4(),
+                claim_token=claim.claim_token,
+                started_at=NOW,
+            )
+            await uow.deliveries.finish_attempt(
+                claim.id,
+                attempt.id,
+                "retry",
+                now=NOW,
+                retry_at=NOW,
+                safe_error="telegram_temporary_error",
+            )
 
 
 async def test_committed_attempt_sends_once_and_restart_does_not_replay_sent_work(
@@ -229,3 +268,36 @@ async def test_typed_outcome_is_durably_classified_without_ambiguous_replay(
     assert stored.eligible_at == (retry_at or NOW)
     attempts = await _attempts(session_factory, delivery_id)
     assert attempts[0].safe_error == safe_error
+
+
+async def test_rate_limit_pause_blocks_a_second_due_delivery_until_its_exact_expiry(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """An account-wide 429 pause must gate even another ready recipient delivery."""
+
+    first_delivery_id = await _enqueue(uow_factory, key="outbox:rate-limit-first")
+    await _finish_two_retry_attempts(uow_factory, first_delivery_id)
+    second_delivery_id = await _enqueue(uow_factory, key="outbox:rate-limit-second")
+    gateway = SequencedGateway([TelegramSendRetry(429, 60), TelegramSendConfirmed(920)])
+
+    assert await OutboundDeliveryWorker(
+        uow_factory, gateway, clock=lambda: NOW
+    ).run_once()
+    assert (await _delivery(session_factory, first_delivery_id)).status == "rejected"
+
+    assert not await OutboundDeliveryWorker(
+        uow_factory, gateway, clock=lambda: NOW + timedelta(seconds=59)
+    ).run_once()
+    assert gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:rate-limit-first")
+    ]
+
+    assert await OutboundDeliveryWorker(
+        uow_factory, gateway, clock=lambda: NOW + timedelta(seconds=60)
+    ).run_once()
+    assert gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:rate-limit-first"),
+        OutboundTelegramMessage(73, "Welcome", "outbox:rate-limit-second"),
+    ]
+    assert (await _delivery(session_factory, second_delivery_id)).status == "sent"

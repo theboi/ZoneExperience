@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, TracebackType
 from typing import Self
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
+from pydantic import SecretStr
 
 from friendly_bot.persistence.repositories import (
     DeliveryAttemptRecord,
@@ -18,6 +20,7 @@ from friendly_bot.persistence.repositories import (
     OutboundDeliveryMessage,
     OutboundDeliveryRecord,
 )
+from friendly_bot.telegram.client import TelegramApiClient
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
     TelegramResponseUncertain,
@@ -56,8 +59,12 @@ class RecordingDeliveries:
     attempt_number: int = 1
     start_error: DeliveryClaimLostError | None = None
     finish_calls: list[dict[str, object]] = field(default_factory=list)
+    pause_untils: list[datetime] = field(default_factory=list)
     claimed_at: list[datetime] = field(default_factory=list)
     started: bool = False
+    finish_started: asyncio.Event | None = None
+    finish_release: asyncio.Event | None = None
+    finish_completed: asyncio.Event | None = None
 
     async def claim_next_safe(self, *, now: datetime) -> OutboundDeliveryRecord | None:
         self.claimed_at.append(now)
@@ -96,6 +103,10 @@ class RecordingDeliveries:
         safe_error: str | None = None,
         confirmed_telegram_message_id: int | None = None,
     ) -> None:
+        if self.finish_started is not None:
+            self.finish_started.set()
+        if self.finish_release is not None:
+            await self.finish_release.wait()
         self.finish_calls.append(
             {
                 "delivery_id": delivery_id,
@@ -107,6 +118,12 @@ class RecordingDeliveries:
                 "confirmed_telegram_message_id": confirmed_telegram_message_id,
             }
         )
+        if self.finish_completed is not None:
+            self.finish_completed.set()
+
+    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime:
+        self.pause_untils.append(pause_until)
+        return pause_until
 
 
 @dataclass
@@ -264,6 +281,55 @@ async def test_retry_limit_makes_a_definite_failure_terminal() -> None:
     assert finish["safe_error"] == "telegram_retry_limit_exhausted"
 
 
+async def test_rate_limit_extends_the_account_wide_pause_even_when_retry_exhausts() -> (
+    None
+):
+    """A terminal rate-limited delivery must still prevent another immediate send."""
+
+    deliveries = RecordingDeliveries(_claim(), attempt_number=3)
+    factory = RecordingUnitOfWorkFactory(deliveries)
+
+    assert await OutboundDeliveryWorker(
+        factory, RecordingGateway(TelegramSendRetry(429, 17)), clock=lambda: NOW
+    ).run_once()
+
+    assert deliveries.finish_calls[0]["outcome"] == "rejected"
+    assert deliveries.pause_untils == [NOW + timedelta(seconds=17)]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        OutboundDeliveryMessage(
+            chat_id=73,
+            kind="unsupported",
+            payload=MappingProxyType({"text": "Welcome"}),
+        ),
+        OutboundDeliveryMessage(
+            chat_id=73,
+            kind="message",
+            payload=MappingProxyType({"text": "Welcome", "buttons": ()}),
+        ),
+    ],
+)
+async def test_unsupported_provider_message_is_rejected_before_the_network_call(
+    message: OutboundDeliveryMessage,
+) -> None:
+    """Silently dropping a payload field would change the durable user-visible work."""
+
+    claim = replace(_claim(), message=message)
+    deliveries = RecordingDeliveries(claim)
+    factory = RecordingUnitOfWorkFactory(deliveries)
+    gateway = RecordingGateway(TelegramSendConfirmed(901))
+
+    assert await OutboundDeliveryWorker(factory, gateway, clock=lambda: NOW).run_once()
+
+    assert gateway.requests == []
+    assert factory.commits == ["claim", "start", "finish"]
+    assert deliveries.finish_calls[0]["outcome"] == "rejected"
+    assert deliveries.finish_calls[0]["safe_error"] == "telegram_message_unsupported"
+
+
 async def test_cancelled_send_is_persisted_uncertain_before_cancellation_reraises() -> (
     None
 ):
@@ -282,3 +348,61 @@ async def test_cancelled_send_is_persisted_uncertain_before_cancellation_reraise
     assert factory.commits == ["claim", "start", "finish"]
     assert deliveries.finish_calls[0]["outcome"] == "uncertain"
     assert deliveries.finish_calls[0]["safe_error"] == "telegram_send_cancelled"
+
+
+async def test_second_cancellation_does_not_interrupt_uncertain_finalization() -> None:
+    """A shutdown race must leave the detached uncertain-attempt finalization running."""
+
+    finish_started = asyncio.Event()
+    finish_release = asyncio.Event()
+    finish_completed = asyncio.Event()
+    deliveries = RecordingDeliveries(
+        _claim(),
+        finish_started=finish_started,
+        finish_release=finish_release,
+        finish_completed=finish_completed,
+    )
+    factory = RecordingUnitOfWorkFactory(deliveries)
+    task = asyncio.create_task(
+        OutboundDeliveryWorker(
+            factory,
+            RecordingGateway(asyncio.CancelledError()),
+            clock=lambda: NOW,
+        ).run_once()
+    )
+
+    await finish_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    finish_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await asyncio.wait_for(finish_completed.wait(), timeout=1)
+    assert factory.commits == ["claim", "start", "finish"]
+    assert deliveries.finish_calls[0]["outcome"] == "uncertain"
+
+
+async def test_client_cancellation_is_finalized_uncertain_by_the_outbox_worker() -> (
+    None
+):
+    """The actual client must let the worker persist uncertainty before shutdown exits."""
+
+    async def cancel_send(_request: httpx.Request) -> httpx.Response:
+        raise asyncio.CancelledError()
+
+    client = TelegramApiClient(
+        SecretStr("test-token"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(cancel_send)),
+    )
+    deliveries = RecordingDeliveries(_claim())
+    factory = RecordingUnitOfWorkFactory(deliveries)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await OutboundDeliveryWorker(factory, client, clock=lambda: NOW).run_once()
+    finally:
+        await client.aclose()
+
+    assert factory.commits == ["claim", "start", "finish"]
+    assert deliveries.finish_calls[0]["outcome"] == "uncertain"

@@ -9,6 +9,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -43,6 +44,7 @@ F01_TABLES = {
     "service_attendances",
     "service_timestamps",
     "services",
+    "telegram_outbound_pauses",
     "telegram_poll_state",
     "timestamp_delivery_claims",
     "user_processing_locks",
@@ -176,7 +178,7 @@ def _schema_snapshot(sync_connection: Any) -> dict[str, Any]:
             table_name: {
                 column["name"]: column for column in inspector.get_columns(table_name)
             }
-            for table_name in F01_TABLES
+            for table_name in F01_TABLES & tables
         },
         "foreign_keys": {
             table_name: {
@@ -187,21 +189,21 @@ def _schema_snapshot(sync_connection: Any) -> dict[str, Any]:
                 )
                 for foreign_key in inspector.get_foreign_keys(table_name)
             }
-            for table_name in F01_TABLES
+            for table_name in F01_TABLES & tables
         },
         "checks": {
             table_name: {
                 check["name"]: check["sqltext"]
                 for check in inspector.get_check_constraints(table_name)
             }
-            for table_name in F01_TABLES
+            for table_name in F01_TABLES & tables
         },
         "unique_constraints": {
             table_name: {
                 constraint["name"]: tuple(constraint["column_names"])
                 for constraint in inspector.get_unique_constraints(table_name)
             }
-            for table_name in F01_TABLES
+            for table_name in F01_TABLES & tables
         },
         "enums": {
             enum["name"]: tuple(enum["labels"]) for enum in inspector.get_enums()
@@ -278,6 +280,7 @@ async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
 
     assert "eligible_at" not in before_upgrade["columns"]["outbound_deliveries"]
     assert "claim_token" not in before_upgrade["columns"]["outbound_deliveries"]
+    assert "telegram_outbound_pauses" not in before_upgrade["tables"]
     assert (
         "correlation_id" not in before_upgrade["columns"]["outbound_delivery_attempts"]
     )
@@ -296,10 +299,26 @@ async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
     assert delivery_columns["eligible_at"]["nullable"] is False
     assert "confirmed_telegram_message_id" in delivery_columns
     assert attempt_columns["correlation_id"]["nullable"] is False
+    pause_columns = after_upgrade["columns"]["telegram_outbound_pauses"]
+    assert set(pause_columns) == {"singleton_id", "pause_until"}
+    assert pause_columns["pause_until"]["nullable"] is False
     assert {
         "ix_outbound_deliveries_due",
         "ix_outbound_deliveries_expired_claim",
     } <= set(after_upgrade["index_definitions"])
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            pause_row = (
+                await connection.execute(
+                    text(
+                        "SELECT singleton_id, pause_until FROM telegram_outbound_pauses"
+                    )
+                )
+            ).one()
+    finally:
+        await engine.dispose()
+    assert pause_row == (1, datetime(1970, 1, 1, tzinfo=UTC))
 
     _run_alembic(migrated_database.database_url, "downgrade", "0001_foundation")
     engine = create_async_engine(migrated_database.database_url)
@@ -311,6 +330,7 @@ async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
 
     assert "eligible_at" not in after_downgrade["columns"]["outbound_deliveries"]
     assert "claim_token" not in after_downgrade["columns"]["outbound_deliveries"]
+    assert "telegram_outbound_pauses" not in after_downgrade["tables"]
     assert (
         "correlation_id" not in after_downgrade["columns"]["outbound_delivery_attempts"]
     )
@@ -368,6 +388,9 @@ async def test_alembic_head_preserves_foreign_keys_and_named_constraints(
     }
     assert actual["checks"]["telegram_poll_state"] == {
         "ck_telegram_poll_state_singleton": "singleton_id = 1"
+    }
+    assert actual["checks"]["telegram_outbound_pauses"] == {
+        "ck_telegram_outbound_pauses_singleton": "singleton_id = 1"
     }
     expected_named_unique_constraints = {
         table_name: {

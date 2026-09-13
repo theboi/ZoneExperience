@@ -476,6 +476,22 @@ class TelegramPollState(Base):
     )
 
 
+class TelegramOutboundPause(Base):
+    """The one durable pause that gates account-wide outbound Telegram claims."""
+
+    __tablename__ = "telegram_outbound_pauses"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_telegram_outbound_pauses_singleton"
+        ),
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pause_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class ProcessedTelegramUpdate(Base):
     """A claimed incoming Telegram update, keyed by Telegram's update identifier."""
 
