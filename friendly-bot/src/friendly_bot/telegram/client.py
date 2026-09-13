@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Mapping
@@ -169,7 +170,7 @@ class TelegramApiClient:
     ) -> httpx.Response | TelegramResponseUncertain:
         try:
             return await self._client.post(self._endpoint(method), json=payload)
-        except (httpx.TimeoutException, httpx.TransportError):
+        except (asyncio.CancelledError, httpx.TimeoutException, httpx.TransportError):
             return TelegramResponseUncertain("telegram_transport_error")
 
 

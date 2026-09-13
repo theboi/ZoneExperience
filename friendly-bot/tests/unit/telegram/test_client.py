@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -125,6 +126,20 @@ async def test_send_marks_a_transport_failure_uncertain() -> None:
             lambda _request: (_ for _ in ()).throw(httpx.ConnectError("offline"))
         )
     )
+
+    assert await client.send(_outbound()) == TelegramResponseUncertain(
+        "telegram_transport_error"
+    )
+    await client.aclose()
+
+
+async def test_send_marks_cancellation_during_the_network_call_uncertain() -> None:
+    """Cancellation after send start cannot prove that Telegram did not deliver."""
+
+    async def telegram(_request: httpx.Request) -> httpx.Response:
+        raise asyncio.CancelledError()
+
+    client = _client(httpx.MockTransport(telegram))
 
     assert await client.send(_outbound()) == TelegramResponseUncertain(
         "telegram_transport_error"
