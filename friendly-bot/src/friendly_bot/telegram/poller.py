@@ -100,7 +100,7 @@ class TelegramIngress:
             await unit_of_work.lock_user(user.id)
             await unit_of_work.conversations.record_incoming(
                 user_id=user.id,
-                source_message_id=message.message_id,
+                source_message_id=_source_event_id(update, message),
                 body=_normalized_body(message),
                 replied_to_body=message.reply_text,
                 occurred_at=message.sent_at,
@@ -175,3 +175,11 @@ def _normalized_body(message: TelegramMessage) -> str:
     if message.text is not None:
         return message.text
     raise ValueError("Telegram message has no supported normalized body")
+
+
+def _source_event_id(update: IncomingTelegramUpdate, message: TelegramMessage) -> int:
+    """Keep each callback press distinct when Telegram reuses its message ID."""
+
+    if message.callback_data is not None:
+        return update.update_id
+    return message.message_id

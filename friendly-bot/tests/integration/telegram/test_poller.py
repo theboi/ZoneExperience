@@ -177,17 +177,22 @@ def _message_update(
     )
 
 
-def _callback_update(update_id: int) -> IncomingTelegramUpdate:
+def _callback_update(
+    update_id: int,
+    *,
+    message_id: int = 92,
+    callback_data: str = "zone_x.attendance.here",
+) -> IncomingTelegramUpdate:
     return IncomingTelegramUpdate(
         update_id=update_id,
         message=TelegramMessage(
-            message_id=92,
+            message_id=message_id,
             sent_at=NOW,
             chat=TelegramChat(id=41, kind="private"),
             sender=TelegramUser(id=73),
             text="Prompt shown to the user",
             reply_text="Earlier question",
-            callback_data="zone_x.attendance.here",
+            callback_data=callback_data,
         ),
     )
 
@@ -331,6 +336,32 @@ async def test_callback_input_persists_normalized_callback_and_reply_without_raw
     assert row.body == "zone_x.attendance.here"
     assert row.replied_to_body == "Earlier question"
     assert not hasattr(row, "raw_payload")
+
+
+async def test_distinct_callback_presses_on_one_message_are_both_recorded(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Using the shared message ID would silently collapse a second button press."""
+
+    dispatcher = RecordingDispatcher()
+    ingress = TelegramIngress(uow_factory, dispatcher)
+
+    await ingress.process(
+        _callback_update(51, message_id=92, callback_data="zone_x.attendance.here"),
+        received_at=NOW,
+    )
+    await ingress.process(
+        _callback_update(52, message_id=92, callback_data="zone_x.attendance.late"),
+        received_at=NOW,
+    )
+
+    assert [row.body for row in await _conversation_rows(session_factory)] == [
+        "zone_x.attendance.here",
+        "zone_x.attendance.late",
+    ]
+    assert dispatcher.dispatched_message_ids == [92, 92]
+    assert await _processed_update_count(session_factory) == 2
 
 
 async def test_unsupported_update_is_claimed_and_advances_without_dispatching(
