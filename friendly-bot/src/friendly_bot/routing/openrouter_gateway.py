@@ -70,11 +70,13 @@ class OpenRouterSettings(BaseSettings):
 
 
 class GatewayResponse(Protocol):
-    """The narrow response surface used by the gateway and its test fakes."""
+    """A response that returns parsed JSON and then discards provider data."""
 
     status_code: int
 
     def json(self) -> object: ...
+
+    def discard(self) -> None: ...
 
 
 class GatewayHttpClient(Protocol):
@@ -91,12 +93,19 @@ class GatewayHttpClient(Protocol):
 
 
 class _StdlibResponse:
-    def __init__(self, status_code: int, body: bytes) -> None:
+    def __init__(self, status_code: int, body: bytes | None = None) -> None:
         self.status_code = status_code
         self._body = body
 
     def json(self) -> object:
-        return json.loads(self._body.decode("utf-8"))
+        body = self._body
+        self._body = None
+        if body is None:
+            raise ValueError("OpenRouter response body is unavailable")
+        return json.loads(body.decode("utf-8"))
+
+    def discard(self) -> None:
+        self._body = None
 
 
 class _StdlibAsyncHttpClient:
@@ -136,9 +145,9 @@ class _StdlibAsyncHttpClient:
             with urlopen(request, timeout=timeout) as response:
                 return _StdlibResponse(response.status, response.read())
         except HTTPError as error:
-            return _StdlibResponse(error.code, error.read())
-        except URLError as error:
-            raise GatewayTransportError("OpenRouter transport failed") from error
+            return _StdlibResponse(error.code)
+        except URLError:
+            raise GatewayTransportError("OpenRouter transport failed") from None
 
 
 class OpenRouterGateway:
@@ -209,7 +218,9 @@ class OpenRouterGateway:
                 "Return a concise persona summary. Return no structured identifiers.",
             )
         )
-        summary = self._assistant_content(response).strip()
+        content = self._assistant_content(response)
+        summary = content.strip() if content is not None else ""
+        content = None
         if not summary:
             raise GatewayProtocolError("OpenRouter returned an empty persona summary")
         return summary
@@ -273,9 +284,12 @@ class OpenRouterGateway:
                 )
                 if 200 <= response.status_code < 300:
                     return response
+                response.discard()
             except Exception:  # noqa: BLE001 - provider errors can retain response bytes
+                response = None
                 transport_failed = True
             else:
+                response = None
                 transport_failed = True
             if transport_failed:
                 if attempt + 1 == self._max_attempts:
@@ -288,31 +302,37 @@ class OpenRouterGateway:
     def _parse_selected_key(
         response: GatewayResponse, allowed_keys: frozenset[str]
     ) -> str:
-        parse_failed = object()
-        try:
-            parsed: object = json.loads(OpenRouterGateway._assistant_content(response))
-        except (
-            IndexError,
-            KeyError,
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-        ):
-            parsed = parse_failed
-        if parsed is parse_failed:
-            raise GatewayProtocolError("OpenRouter response was not a key selection")
-        if (
-            not isinstance(parsed, dict)
-            or set(parsed) != {"key"}
-            or not isinstance(parsed["key"], str)
-            or parsed["key"] not in allowed_keys
-        ):
-            raise GatewayProtocolError("OpenRouter selected an invalid key")
-        return parsed["key"]
+        content = OpenRouterGateway._assistant_content(response)
+        parsed: object | None = None
+        candidate: object | None = None
+        selected_key: str | None = None
+        error_message = "OpenRouter response was not a key selection"
+        if content is not None:
+            try:
+                parsed = json.loads(content)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if isinstance(parsed, dict) and set(parsed) == {"key"}:
+                    candidate = parsed["key"]
+                    if isinstance(candidate, str) and candidate in allowed_keys:
+                        selected_key = candidate
+                    else:
+                        error_message = "OpenRouter selected an invalid key"
+                else:
+                    error_message = "OpenRouter selected an invalid key"
+        content = None
+        parsed = None
+        candidate = None
+        if selected_key is None:
+            raise GatewayProtocolError(error_message)
+        return selected_key
 
     @staticmethod
-    def _assistant_content(response: GatewayResponse) -> str:
+    def _assistant_content(response: GatewayResponse) -> str | None:
         payload = OpenRouterGateway._request_json(response)
+        if payload is None:
+            return None
         try:
             choices = payload["choices"]
             if not isinstance(choices, list):
@@ -327,20 +347,23 @@ class OpenRouterGateway:
             if not isinstance(content, str):
                 raise TypeError("content must be text")
             return content
-        except (IndexError, KeyError, TypeError, ValueError) as error:
-            raise GatewayProtocolError(
-                "OpenRouter response was not assistant text"
-            ) from error
+        except (IndexError, KeyError, TypeError, ValueError):
+            return None
 
     @staticmethod
-    def _request_json(response: GatewayResponse) -> Mapping[str, object]:
+    def _request_json(response: GatewayResponse) -> Mapping[str, object] | None:
         """Parse one provider envelope without retaining malformed raw response text."""
 
-        parse_failed = object()
+        parse_failed = False
+        payload: object | None = None
         try:
-            payload: object = response.json()
-        except (TypeError, ValueError):
-            payload = parse_failed
-        if payload is parse_failed or not isinstance(payload, Mapping):
-            raise GatewayProtocolError("OpenRouter response was not an object")
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - provider errors can retain response bytes
+            parse_failed = True
+        try:
+            response.discard()
+        except Exception:  # noqa: BLE001 - provider errors can retain response bytes
+            parse_failed = True
+        if parse_failed or not isinstance(payload, Mapping):
+            return None
         return payload

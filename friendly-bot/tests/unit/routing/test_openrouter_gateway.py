@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from http.client import IncompleteRead
+from io import BytesIO
 from typing import Any, Self
+from urllib.error import HTTPError
 
 import pytest
 from pydantic import ValidationError
@@ -40,7 +43,10 @@ class FakeResponse:
     payload: dict[str, Any]
 
     def json(self) -> dict[str, Any]:
-        return self.payload
+        return deepcopy(self.payload)
+
+    def discard(self) -> None:
+        self.payload.clear()
 
 
 @dataclass
@@ -51,15 +57,52 @@ class InvalidJsonEnvelopeResponse:
     def json(self) -> object:
         raise json.JSONDecodeError("invalid envelope", self.raw_response, 0)
 
+    def discard(self) -> None:
+        self.raw_response = ""
+
+
+@dataclass
+class IncompleteJsonResponse:
+    raw_response: bytes
+    status_code: int = 200
+
+    def json(self) -> object:
+        raise IncompleteRead(self.raw_response, expected=len(self.raw_response) + 1)
+
+    def discard(self) -> None:
+        self.raw_response = b""
+
+
+@dataclass
+class RawStdlibResponse:
+    raw_body: bytes
+    status: int = 200
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: object,
+    ) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self.raw_body
+
 
 @dataclass
 class FakeHttpxClient:
-    responses: list[FakeResponse | InvalidJsonEnvelopeResponse | Exception]
+    responses: list[
+        FakeResponse | InvalidJsonEnvelopeResponse | IncompleteJsonResponse | Exception
+    ]
     requests: list[dict[str, Any]] = field(default_factory=list)
 
     async def post(
         self, url: str, **kwargs: Any
-    ) -> FakeResponse | InvalidJsonEnvelopeResponse:
+    ) -> FakeResponse | InvalidJsonEnvelopeResponse | IncompleteJsonResponse:
         self.requests.append({"url": url, **kwargs})
         outcome = self.responses.pop(0)
         if isinstance(outcome, Exception):
@@ -73,6 +116,63 @@ def _gateway(client: FakeHttpxClient) -> OpenRouterGateway:
         client=client,
         input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
     )
+
+
+def _traceback_gateway_locals_hold_sentinel(
+    error: BaseException, raw_sentinel: bytes
+) -> bool:
+    """Inspect only the raised error's gateway frames, never test-frame locals."""
+
+    seen: set[int] = set()
+    traceback = error.__traceback__
+    while traceback is not None:
+        frame = traceback.tb_frame
+        if frame.f_code.co_filename.endswith(
+            "friendly_bot/routing/openrouter_gateway.py"
+        ) and _value_holds_sentinel(frame.f_locals, raw_sentinel, seen):
+            return True
+        traceback = traceback.tb_next
+    return False
+
+
+def _value_holds_sentinel(value: object, raw_sentinel: bytes, seen: set[int]) -> bool:
+    """Traverse provider-response locals without searching the ambient test graph."""
+
+    if isinstance(value, (bytes, bytearray)):
+        return raw_sentinel in value
+    if isinstance(value, str):
+        return raw_sentinel.decode() in value
+    if value is None or isinstance(value, (bool, float, int)):
+        return False
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    if isinstance(value, dict):
+        return any(
+            _value_holds_sentinel(item, raw_sentinel, seen)
+            for pair in value.items()
+            for item in pair
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_value_holds_sentinel(item, raw_sentinel, seen) for item in value)
+    try:
+        attributes = vars(value)
+    except TypeError:
+        return False
+    return _value_holds_sentinel(attributes, raw_sentinel, seen)
+
+
+def _assert_closed_error_has_no_provider_bytes(
+    error: GatewayError, raw_sentinel: bytes
+) -> None:
+    raw_text = raw_sentinel.decode()
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert raw_text not in str(error)
+    assert all(raw_text not in str(argument) for argument in error.args)
+    assert vars(error) == {}
+    assert not _traceback_gateway_locals_hold_sentinel(error, raw_sentinel)
 
 
 @pytest.mark.parametrize(
@@ -398,6 +498,160 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
     assert vars(raised.value) == {}
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_does_not_retain_actual_malformed_stdlib_body_in_traceback(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed successful stdlib body must leave no raw bytes on protocol errors."""
+
+    raw_body = b'{"choices":"raw-provider-malformed-200-sentinel"}'
+    attempts = 0
+
+    def malformed_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        nonlocal attempts
+        attempts += 1
+        return RawStdlibResponse(raw_body)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", malformed_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(gateway)
+
+    assert attempts == 1
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceback(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-2xx HTTPError body is unused and must not cross the retry boundary."""
+
+    raw_body = b"raw-provider-http-error-sentinel"
+    attempts = 0
+
+    def unavailable_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        nonlocal attempts
+        attempts += 1
+        raise HTTPError(
+            "https://openrouter.ai/api/v1/chat/completions",
+            503,
+            "unavailable",
+            None,
+            BytesIO(raw_body),
+        )
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", unavailable_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with pytest.raises(GatewayTransportError) as raised:
+        await operation(gateway)
+
+    assert attempts == ROUTING_MAX_ATTEMPTS
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(
+            lambda gateway: gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            ),
+            id="selection",
+        ),
+        pytest.param(
+            lambda gateway: gateway.summarize_persona(
+                PersonaSummaryRequest(messages=["hello"])
+            ),
+            id="persona",
+        ),
+        pytest.param(
+            lambda gateway: gateway.rank_aliases(
+                MatchRankingRequest(
+                    candidates=[MatchPromptCandidate(alias="candidate-0")]
+                )
+            ),
+            id="matching",
+        ),
+    ],
+)
+async def test_gateway_normalizes_incomplete_json_without_traceback_retention(
+    operation: Callable[[OpenRouterGateway], Awaitable[object]],
+) -> None:
+    """A response JSON failure must become a detached closed protocol error."""
+
+    raw_body = b"raw-provider-json-incomplete-read-sentinel"
+    client = FakeHttpxClient([IncompleteJsonResponse(raw_body)])
+
+    with pytest.raises(GatewayProtocolError) as raised:
+        await operation(_gateway(client))
+
+    assert len(client.requests) == 1
+    _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
+
+
 async def test_persona_summary_uses_the_same_private_provider_policy() -> None:
     """A separate summary path must not weaken OpenRouter privacy controls."""
 
@@ -529,3 +783,9 @@ async def test_gateway_closes_without_attaching_raw_transport_data_after_retry_e
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert vars(raised.value) == {}
+    assert not _traceback_gateway_locals_hold_sentinel(
+        raised.value, b"response-sentinel-503"
+    )
+    assert not _traceback_gateway_locals_hold_sentinel(
+        raised.value, b"transport-sentinel"
+    )
