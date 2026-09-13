@@ -298,26 +298,33 @@ async def test_rate_limit_extends_the_account_wide_pause_even_when_retry_exhaust
 
 
 @pytest.mark.parametrize(
-    "message",
+    "claim",
     [
-        OutboundDeliveryMessage(
-            chat_id=73,
-            kind="unsupported",
-            payload=MappingProxyType({"text": "Welcome"}),
+        replace(
+            _claim(),
+            message=OutboundDeliveryMessage(
+                chat_id=73,
+                kind="unsupported",
+                payload=MappingProxyType({"text": "Welcome"}),
+            ),
         ),
-        OutboundDeliveryMessage(
-            chat_id=73,
-            kind="message",
-            payload=MappingProxyType({"text": "Welcome", "buttons": ["Continue"]}),
+        replace(
+            _claim(),
+            message=OutboundDeliveryMessage(
+                chat_id=73,
+                kind="message",
+                payload=MappingProxyType({"text": "Welcome", "buttons": ["Continue"]}),
+            ),
         ),
+        replace(_claim(), message=replace(_claim().message, chat_id=0)),
+        replace(_claim(), idempotency_key=""),
     ],
 )
-async def test_unsupported_provider_message_is_rejected_before_the_network_call(
-    message: OutboundDeliveryMessage,
+async def test_invalid_provider_message_is_rejected_before_the_network_call(
+    claim: OutboundDeliveryRecord,
 ) -> None:
-    """Silently dropping a payload field would change the durable user-visible work."""
+    """Invalid F01 message data must not strand a started delivery without a result."""
 
-    claim = replace(_claim(), message=message)
     deliveries = RecordingDeliveries(claim)
     factory = RecordingUnitOfWorkFactory(deliveries)
     gateway = RecordingGateway(TelegramSendConfirmed(901))

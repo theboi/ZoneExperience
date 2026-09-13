@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import TracebackType
+from typing import Self
 from uuid import UUID, uuid4
 
 import asyncpg  # type: ignore[import-untyped]
@@ -18,7 +20,10 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import OutboundDelivery, OutboundDeliveryAttempt
-from friendly_bot.persistence.repositories import NewOutboundDelivery
+from friendly_bot.persistence.repositories import (
+    DeliveryRepository,
+    NewOutboundDelivery,
+)
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
@@ -123,6 +128,54 @@ class SequencedGateway:
     async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
         self.requests.append(request)
         return self.outcomes.pop(0)
+
+
+class _AfterClaimUnitOfWork:
+    """Run one real PostgreSQL interleaving after the worker's claim commits."""
+
+    def __init__(
+        self,
+        unit_of_work: UnitOfWork,
+        after_claim: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._after_claim = after_claim
+
+    @property
+    def deliveries(self) -> DeliveryRepository:
+        return self._unit_of_work.deliveries
+
+    async def __aenter__(self) -> Self:
+        await self._unit_of_work.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self._unit_of_work.__aexit__(exc_type, exc, traceback)
+        if exc_type is None and self._after_claim is not None:
+            await self._after_claim()
+
+
+class _RateLimitInterleavingFactory:
+    """Use real F01 UoWs while injecting one finished 429 between worker phases."""
+
+    def __init__(
+        self,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+        after_claim: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._unit_of_work_factory = unit_of_work_factory
+        self._after_claim = after_claim
+        self._first = True
+
+    def __call__(self) -> _AfterClaimUnitOfWork:
+        after_claim = self._after_claim if self._first else None
+        self._first = False
+        return _AfterClaimUnitOfWork(self._unit_of_work_factory(), after_claim)
 
 
 async def _enqueue(
@@ -301,3 +354,51 @@ async def test_rate_limit_pause_blocks_a_second_due_delivery_until_its_exact_exp
         OutboundTelegramMessage(73, "Welcome", "outbox:rate-limit-second"),
     ]
     assert (await _delivery(session_factory, second_delivery_id)).status == "sent"
+
+
+async def test_rate_limit_between_claim_and_start_fences_the_pre_pause_claim(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A claimed B must not send after A commits a 429 pause before B starts."""
+
+    first_delivery_id = await _enqueue(uow_factory, key="outbox:interleaved-first")
+    async with uow_factory() as uow:
+        first_claim = await uow.deliveries.claim_next_safe(now=NOW)
+    assert first_claim is not None
+    assert first_claim.id == first_delivery_id
+    assert first_claim.claim_token is not None
+    first_claim_token = first_claim.claim_token
+    second_delivery_id = await _enqueue(uow_factory, key="outbox:interleaved-second")
+
+    async def finish_first_rate_limited() -> None:
+        async with uow_factory() as uow:
+            attempt = await uow.deliveries.start_attempt(
+                first_claim.id,
+                uuid4(),
+                claim_token=first_claim_token,
+                started_at=NOW,
+            )
+            await uow.deliveries.finish_attempt(
+                first_claim.id,
+                attempt.id,
+                "retry",
+                now=NOW,
+                retry_at=NOW + timedelta(seconds=60),
+                safe_error="telegram_rate_limited",
+            )
+            await uow.deliveries.extend_telegram_pause(
+                pause_until=NOW + timedelta(seconds=60)
+            )
+
+    gateway = RecordingGateway(TelegramSendConfirmed(921))
+    worker = OutboundDeliveryWorker(
+        _RateLimitInterleavingFactory(uow_factory, finish_first_rate_limited),
+        gateway,
+        clock=lambda: NOW,
+    )
+
+    assert not await worker.run_once()
+    assert gateway.requests == []
+    assert (await _delivery(session_factory, second_delivery_id)).status == "claimed"
+    assert await _attempts(session_factory, second_delivery_id) == []

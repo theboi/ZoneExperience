@@ -220,7 +220,14 @@ def _telegram_request_from(
 ) -> OutboundTelegramMessage | None:
     """Map an immutable provider-neutral F01 message only after its claim commits."""
 
-    if message.kind != "message" or set(message.payload) != {"text"}:
+    if (
+        message.kind != "message"
+        or set(message.payload) != {"text"}
+        or type(message.chat_id) is not int
+        or message.chat_id <= 0
+        or type(idempotency_key) is not str
+        or not idempotency_key
+    ):
         return None
     text = message.payload.get("text")
     if type(text) is not str or not text:

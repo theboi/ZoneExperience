@@ -1616,6 +1616,9 @@ class SqlAlchemyDeliveryRepository:
         claim_token: UUID,
         started_at: datetime,
     ) -> DeliveryAttemptRecord:
+        pause = await self._locked_telegram_outbound_pause()
+        if pause.pause_until > started_at:
+            raise DeliveryClaimLostError("outbound delivery claim was paused")
         delivery = await self._session.scalar(
             select(OutboundDelivery)
             .where(OutboundDelivery.id == delivery_id)
