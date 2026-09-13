@@ -69,9 +69,14 @@ class OpenRouterSettings(BaseSettings):
     def parse_false_attestation_value(cls, value: object) -> object:
         """Keep the template's disabled string distinct from affirmative consent."""
 
-        if isinstance(value, str) and value == "false":
+        if value is False:
             return False
-        return value
+        if isinstance(value, str):
+            if value == "false":
+                return False
+            if value == OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION:
+                return value
+        raise ValueError("OpenRouter logging attestation is invalid")
 
     @classmethod
     def from_environment(cls) -> OpenRouterSettings:

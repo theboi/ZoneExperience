@@ -315,6 +315,7 @@ def test_gateway_environment_rejects_missing_or_inexact_observability_attestatio
 ) -> None:
     """Only the exact non-secret operator attestation may enable a live gateway."""
 
+    monkeypatch.setitem(OpenRouterSettings.model_config, "env_file", None)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only")
     if attestation is None:
         monkeypatch.delenv(
@@ -327,6 +328,16 @@ def test_gateway_environment_rejects_missing_or_inexact_observability_attestatio
 
     with pytest.raises(GatewayError):
         OpenRouterGateway.from_environment()
+
+
+@pytest.mark.parametrize("attestation", [0, 0.0, True, "False", "true"])
+def test_openrouter_settings_rejects_false_lookalikes(attestation: object) -> None:
+    """Only the exact dotenv text `false` may represent disabled logging."""
+
+    with pytest.raises(ValidationError):
+        OpenRouterSettings.model_validate(
+            {"friendly_bot_openrouter_input_output_logging_attestation": attestation}
+        )
 
 
 def test_openrouter_settings_reads_key_and_attestation_from_explicit_dotenv(
