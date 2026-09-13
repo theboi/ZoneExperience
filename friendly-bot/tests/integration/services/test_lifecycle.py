@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy import Enum, MetaData, select
+from sqlalchemy import Enum, MetaData, select, text
 from sqlalchemy.dialects.postgresql import CreateEnumType, dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -19,12 +19,14 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState, SelectionTransition
+from friendly_bot.matching.service import MatchingService
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     CapacityReservation,
     ConversationMessage,
     FlowScopeKind,
     HumanMatchAssignment,
+    HumanMatchExclusion,
     HumanMatchRequest,
     OpenFlowSelection,
     OperationalProfile,
@@ -38,6 +40,7 @@ from friendly_bot.persistence.repositories import (
     ServiceRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.routing.contracts import MatchRankingRequest
 from friendly_bot.services.lifecycle import ServiceLifecycleService
 
 NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -176,10 +179,76 @@ class _ClosureBarrierUow:
         await self._uow.__aexit__(*args)
 
 
+class _BackendProbeUow:
+    """Expose a real F01 UoW and publish the writer's PostgreSQL backend id."""
+
+    def __init__(
+        self,
+        factory: Callable[[], UnitOfWork],
+        backend_pid: asyncio.Future[int],
+    ) -> None:
+        self._factory = factory
+        self._backend_pid = backend_pid
+        self._uow: UnitOfWork | None = None
+
+    async def __aenter__(self) -> Self:
+        self._uow = self._factory()
+        await self._uow.__aenter__()
+        session = self._uow._required_session()
+        backend_pid = await session.scalar(text("SELECT pg_backend_pid()"))
+        if backend_pid is None:
+            raise RuntimeError("writer PostgreSQL backend was not available")
+        self._backend_pid.set_result(int(backend_pid))
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._uow is None:
+            raise RuntimeError("rematch probe unit of work is not active")
+        await self._uow.__aexit__(*args)
+
+    async def lock_user(self, user_id: UUID) -> None:
+        if self._uow is None:
+            raise RuntimeError("rematch probe unit of work is not active")
+        await self._uow.lock_user(user_id)
+
+    def __getattr__(self, name: str) -> object:
+        if self._uow is None:
+            raise RuntimeError("backend probe unit of work is not active")
+        return getattr(self._uow, name)
+
+
+class _FirstCandidateRanker:
+    """Make the real R03 rematch choose its first durable eligible candidate."""
+
+    async def rank_aliases(self, request: MatchRankingRequest) -> list[str]:
+        return [request.candidates[0].alias]
+
+
+async def _wait_for_postgres_lock(
+    session_factory: _SESSION_FACTORY, backend_pid: int
+) -> None:
+    """Prove the writer is waiting on the held service row, not scheduling."""
+
+    async with session_factory() as observer:
+        for _ in range(100):
+            wait_event_type = await observer.scalar(
+                text(
+                    "SELECT wait_event_type FROM pg_stat_activity "
+                    "WHERE pid = :backend_pid"
+                ),
+                {"backend_pid": backend_pid},
+            )
+            if wait_event_type == "Lock":
+                return
+            await asyncio.sleep(0.01)
+    raise AssertionError("rematch writer did not wait on the service row lock")
+
+
 async def _assert_lifecycle_closure_fences_writer(
+    session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
     service: Service,
-    writer: Callable[[asyncio.Event], Awaitable[None]],
+    writer: Callable[[Callable[[], _BackendProbeUow]], Awaitable[None]],
 ) -> None:
     """Run a real lifecycle transaction that holds the claimed service row as a barrier."""
 
@@ -192,11 +261,14 @@ async def _assert_lifecycle_closure_fences_writer(
         lifecycle.end_interactions([_service_record(service)], now=NOW)
     )
     await asyncio.wait_for(claimed.wait(), timeout=1)
-    writer_ready = asyncio.Event()
-    writer_task = asyncio.create_task(writer(writer_ready))
-    await asyncio.wait_for(writer_ready.wait(), timeout=1)
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.05)
+    backend_pid = asyncio.get_running_loop().create_future()
+    writer_task = asyncio.create_task(
+        writer(lambda: _BackendProbeUow(uow_factory, backend_pid))
+    )
+    await _wait_for_postgres_lock(
+        session_factory,
+        await asyncio.wait_for(backend_pid, timeout=1),
+    )
     release.set()
     await lifecycle_task
     with pytest.raises(ServiceInteractionClosedError):
@@ -512,12 +584,13 @@ async def test_lifecycle_closure_fences_a_waiting_service_match_reservation(
             ]
         )
 
-    async def writer(ready: asyncio.Event) -> None:
-        async with uow_factory() as uow:
-            ready.set()
+    async def writer(writer_uow_factory: Callable[[], _BackendProbeUow]) -> None:
+        async with writer_uow_factory() as uow:
             await uow.matches.reserve_ranked(request_id, [profile_id], now=NOW)
 
-    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    await _assert_lifecycle_closure_fences_writer(
+        session_factory, uow_factory, service, writer
+    )
     async with session_factory() as session:
         profile = await session.get(OperationalProfile, profile_id)
         reservations = list(await session.scalars(select(CapacityReservation)))
@@ -525,6 +598,162 @@ async def test_lifecycle_closure_fences_a_waiting_service_match_reservation(
     assert profile is not None
     assert profile.reserved_capacity == 0
     assert reservations == []
+
+
+async def test_lifecycle_closure_fences_an_existing_assignment_rematch(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A rematch must block on the service fence before releasing its assignment."""
+
+    service = Service(
+        id=uuid4(),
+        key="task6-race-rematch",
+        name="Race rematch",
+        timezone="UTC",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=2),
+        doors_close_at=NOW - timedelta(hours=1),
+        service_starts_at=NOW - timedelta(hours=2),
+        service_ends_at=NOW - timedelta(hours=1),
+        interaction_ends_at=NOW,
+    )
+    requester_id = uuid4()
+    assigned_user_id = uuid4()
+    fallback_user_id = uuid4()
+    assigned_profile_id = uuid4()
+    fallback_profile_id = uuid4()
+    request_id = uuid4()
+    reservation_id = uuid4()
+    assignment_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                service,
+                User(id=requester_id, role=OperationalRole.NBNC),
+                User(id=assigned_user_id, role=OperationalRole.SERVER),
+                User(id=fallback_user_id, role=OperationalRole.SERVER),
+                OperationalProfile(
+                    id=assigned_profile_id,
+                    user_id=assigned_user_id,
+                    normalized_name="task6-race-rematch-assigned",
+                    dob=NOW.date(),
+                    interests=["music"],
+                    cg_name=None,
+                    capacity=1,
+                    reserved_capacity=1,
+                ),
+                OperationalProfile(
+                    id=fallback_profile_id,
+                    user_id=fallback_user_id,
+                    normalized_name="task6-race-rematch-fallback",
+                    dob=NOW.date(),
+                    interests=["music"],
+                    cg_name=None,
+                    capacity=1,
+                    reserved_capacity=0,
+                ),
+                HumanMatchRequest(
+                    id=request_id,
+                    requester_user_id=requester_id,
+                    service_id=service.id,
+                    kind="normal",
+                    status="pending",
+                    created_at=NOW - timedelta(minutes=1),
+                ),
+                CapacityReservation(
+                    id=reservation_id,
+                    operational_profile_id=assigned_profile_id,
+                    request_id=request_id,
+                    reserved_at=NOW - timedelta(minutes=1),
+                ),
+                HumanMatchAssignment(
+                    id=assignment_id,
+                    request_id=request_id,
+                    responder_profile_id=assigned_profile_id,
+                    capacity_reservation_id=reservation_id,
+                    assigned_at=NOW - timedelta(minutes=1),
+                ),
+                ServiceAttendance(
+                    id=uuid4(),
+                    service_id=service.id,
+                    user_id=fallback_user_id,
+                    attendee_kind="server",
+                    started_at=NOW - timedelta(minutes=1),
+                ),
+            ]
+        )
+
+    claimed = asyncio.Event()
+    release = asyncio.Event()
+    lifecycle = ServiceLifecycleService(
+        lambda: _ClosureBarrierUow(uow_factory, claimed, release)
+    )
+    lifecycle_task = asyncio.create_task(
+        lifecycle.end_interactions([_service_record(service)], now=NOW)
+    )
+    await asyncio.wait_for(claimed.wait(), timeout=1)
+
+    backend_pid = asyncio.get_running_loop().create_future()
+    rematch = MatchingService(
+        lambda: _BackendProbeUow(uow_factory, backend_pid),
+        _FirstCandidateRanker(),
+        lambda _: requester_id,
+    )
+    rematch_task = asyncio.create_task(
+        rematch.rematch_normal(
+            request_id,
+            assigned_profile_id,
+            service.id,
+            now=NOW,
+        )
+    )
+    await _wait_for_postgres_lock(
+        session_factory, await asyncio.wait_for(backend_pid, timeout=1)
+    )
+
+    release.set()
+    await asyncio.wait_for(lifecycle_task, timeout=2)
+    with pytest.raises(ServiceInteractionClosedError):
+        await rematch_task
+
+    async with session_factory() as session:
+        assignments = list(
+            await session.scalars(
+                select(HumanMatchAssignment).where(
+                    HumanMatchAssignment.request_id == request_id
+                )
+            )
+        )
+        reservations = list(
+            await session.scalars(
+                select(CapacityReservation).where(
+                    CapacityReservation.request_id == request_id
+                )
+            )
+        )
+        exclusions = list(
+            await session.scalars(
+                select(HumanMatchExclusion).where(
+                    HumanMatchExclusion.request_id == request_id
+                )
+            )
+        )
+        assigned_profile = await session.get(OperationalProfile, assigned_profile_id)
+        fallback_profile = await session.get(OperationalProfile, fallback_profile_id)
+
+    assert len(assignments) == 1
+    assert assignments[0].id == assignment_id
+    assert assignments[0].released_at == NOW
+    assert assignments[0].release_reason == "service_interaction_ended"
+    assert len(reservations) == 1
+    assert reservations[0].id == reservation_id
+    assert reservations[0].released_at == NOW
+    assert exclusions == []
+    assert assigned_profile is not None
+    assert assigned_profile.reserved_capacity == 0
+    assert fallback_profile is not None
+    assert fallback_profile.reserved_capacity == 0
 
 
 async def test_lifecycle_closure_fences_a_waiting_service_selection_apply(
@@ -616,13 +845,14 @@ async def test_lifecycle_closure_fences_a_waiting_service_selection_apply(
         generic_leaf_return_suppressed=False,
     )
 
-    async def writer(ready: asyncio.Event) -> None:
-        async with uow_factory() as uow:
+    async def writer(writer_uow_factory: Callable[[], _BackendProbeUow]) -> None:
+        async with writer_uow_factory() as uow:
             await uow.lock_user(user_id)
-            ready.set()
             await uow.open_selections.apply(transition, at=NOW)
 
-    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    await _assert_lifecycle_closure_fences_writer(
+        session_factory, uow_factory, service, writer
+    )
     async with session_factory() as session:
         selections = list(await session.scalars(select(OpenFlowSelection)))
 
@@ -656,9 +886,8 @@ async def test_lifecycle_closure_fences_a_waiting_attendance_start(
             ]
         )
 
-    async def writer(ready: asyncio.Event) -> None:
-        async with uow_factory() as uow:
-            ready.set()
+    async def writer(writer_uow_factory: Callable[[], _BackendProbeUow]) -> None:
+        async with writer_uow_factory() as uow:
             await uow.attendances.start_or_switch(
                 user_id,
                 service.id,
@@ -666,7 +895,9 @@ async def test_lifecycle_closure_fences_a_waiting_attendance_start(
                 started_at=NOW - timedelta(minutes=1),
             )
 
-    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    await _assert_lifecycle_closure_fences_writer(
+        session_factory, uow_factory, service, writer
+    )
     async with session_factory() as session:
         attendance = await session.scalar(
             select(ServiceAttendance).where(ServiceAttendance.user_id == user_id)

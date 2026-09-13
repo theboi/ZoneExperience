@@ -543,14 +543,50 @@ async def _lock_open_service(
 ) -> Service:
     """Fence service-bound mutations behind durable interaction closure state."""
 
+    service = await _lock_service(session, service_id)
+    if service.interaction_closed_at is not None or at >= service.interaction_ends_at:
+        raise ServiceInteractionClosedError(service_id)
+    return service
+
+
+async def _lock_service(session: AsyncSession, service_id: UUID) -> Service:
+    """Lock one service row without rejecting the lifecycle's own closed work."""
+
     service = await session.scalar(
         select(Service).where(Service.id == service_id).with_for_update()
     )
     if service is None:
         raise LookupError("service was not found")
-    if service.interaction_closed_at is not None or at >= service.interaction_ends_at:
-        raise ServiceInteractionClosedError(service_id)
     return service
+
+
+async def _locked_match_request(
+    session: AsyncSession, request_id: UUID, *, now: datetime
+) -> HumanMatchRequest:
+    """Take service then request locks before any service-bound match mutation."""
+
+    service_scope = (
+        await session.execute(
+            select(HumanMatchRequest.service_id).where(
+                HumanMatchRequest.id == request_id
+            )
+        )
+    ).one_or_none()
+    if service_scope is None:
+        raise LookupError("human match request was not found")
+    service_id = service_scope.tuple()[0]
+    if service_id is not None:
+        await _lock_open_service(session, service_id, at=now)
+    request = await session.scalar(
+        select(HumanMatchRequest)
+        .where(HumanMatchRequest.id == request_id)
+        .with_for_update()
+    )
+    if request is None:
+        raise LookupError("human match request was not found")
+    if request.service_id != service_id:
+        raise RuntimeError("human match request service scope changed")
+    return request
 
 
 def _attendance_record(row: ServiceAttendance) -> AttendanceRecord:
@@ -1281,15 +1317,7 @@ class SqlAlchemyMatchRepository:
     async def reserve_ranked(
         self, request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime
     ) -> MatchAssignmentRecord | None:
-        request = await self._session.scalar(
-            select(HumanMatchRequest)
-            .where(HumanMatchRequest.id == request_id)
-            .with_for_update()
-        )
-        if request is None:
-            raise LookupError("human match request was not found")
-        if request.service_id is not None:
-            await _lock_open_service(self._session, request.service_id, at=now)
+        await _locked_match_request(self._session, request_id, now=now)
         active_assignment = await self._session.scalar(
             select(HumanMatchAssignment)
             .where(
@@ -1371,6 +1399,7 @@ class SqlAlchemyMatchRepository:
     async def release_and_exclude(
         self, request_id: UUID, profile_id: UUID, *, reason: str, now: datetime
     ) -> None:
+        await _locked_match_request(self._session, request_id, now=now)
         assignment = await self._session.scalar(
             select(HumanMatchAssignment)
             .where(
@@ -1414,15 +1443,31 @@ class SqlAlchemyMatchRepository:
     async def release_service_bound(self, service_id: UUID, *, at: datetime) -> int:
         """Release only active capacity assigned through requests for one ended service."""
 
+        await _lock_service(self._session, service_id)
+        active_assignment_exists = exists(
+            select(HumanMatchAssignment.id).where(
+                HumanMatchAssignment.request_id == HumanMatchRequest.id,
+                HumanMatchAssignment.released_at.is_(None),
+            )
+        )
+        requests = list(
+            await self._session.scalars(
+                select(HumanMatchRequest)
+                .where(
+                    HumanMatchRequest.service_id == service_id,
+                    active_assignment_exists,
+                )
+                .with_for_update()
+            )
+        )
+        request_ids = [request.id for request in requests]
+        if not request_ids:
+            return 0
         assignments = list(
             await self._session.scalars(
                 select(HumanMatchAssignment)
-                .join(
-                    HumanMatchRequest,
-                    HumanMatchRequest.id == HumanMatchAssignment.request_id,
-                )
                 .where(
-                    HumanMatchRequest.service_id == service_id,
+                    HumanMatchAssignment.request_id.in_(request_ids),
                     HumanMatchAssignment.released_at.is_(None),
                 )
                 .with_for_update()
