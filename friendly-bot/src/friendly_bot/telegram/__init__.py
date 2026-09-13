@@ -21,6 +21,12 @@ from friendly_bot.telegram.models import (
     normalize_command,
     parse_update,
 )
+from friendly_bot.telegram.preflight import TelegramPreflight, TelegramPreflightError
+from friendly_bot.telegram.runtime_lock import (
+    TelegramRuntimeAlreadyRunningError,
+    TelegramRuntimeLock,
+    TelegramRuntimeLockLostError,
+)
 
 __all__ = [
     "IncomingTelegramUpdate",
@@ -30,7 +36,12 @@ __all__ = [
     "TelegramApiFailure",
     "TelegramChat",
     "TelegramMessage",
+    "TelegramPreflight",
+    "TelegramPreflightError",
     "TelegramResponseUncertain",
+    "TelegramRuntimeAlreadyRunningError",
+    "TelegramRuntimeLock",
+    "TelegramRuntimeLockLostError",
     "TelegramSendConfirmed",
     "TelegramSendOutcome",
     "TelegramSendRejected",
