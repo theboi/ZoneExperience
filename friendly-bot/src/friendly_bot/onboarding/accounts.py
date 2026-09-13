@@ -59,13 +59,16 @@ class OperationalAccountService:
             if profile is None:
                 return LoginResult("not_found")
             attached = await uow.operational_logins.attach(profile.id, user.id, at=now)
-            if attached == "occupied":
+            if attached.kind == "occupied":
                 return LoginResult("occupied")
-            if attached == "not_found":
+            if attached.kind == "not_found":
                 return LoginResult("not_found")
             return LoginResult(
                 "attached",
-                opens_interest_capture=user.role in _OPERATIONAL_ROLES,
+                opens_interest_capture=(
+                    attached.is_first_ever_attachment
+                    and user.role in _OPERATIONAL_ROLES
+                ),
             )
 
     async def manage(self, telegram_user_id: int, *, now: datetime) -> LoginResult:

@@ -182,6 +182,31 @@ async def test_first_login_for_every_operational_role_opens_interest_capture(
     assert result.opens_interest_capture is True
 
 
+async def test_logout_then_reattach_does_not_reopen_interest_capture(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A reattached profile already has durable login history, so capture is not first-login work."""
+
+    await _seed_profile(
+        session_factory,
+        normalized_name="returning-server",
+        role=OperationalRole.SERVER,
+        telegram_user_id=18,
+    )
+    accounts = OperationalAccountService(uow_factory)
+
+    first = await accounts.login(18, "returning-server", DOB, now=NOW)
+    await accounts.logout(18, now=NOW + timedelta(minutes=1))
+    reattached = await accounts.login(
+        18, "returning-server", DOB, now=NOW + timedelta(minutes=2)
+    )
+
+    assert first.opens_interest_capture is True
+    assert reattached.kind == "attached"
+    assert reattached.opens_interest_capture is False
+
+
 async def test_manage_exposes_interest_editor_without_mutating_prefilled_interests(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],

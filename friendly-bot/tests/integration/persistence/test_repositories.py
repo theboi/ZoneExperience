@@ -260,22 +260,56 @@ async def test_user_and_operational_login_records_never_expose_a_profile_role(
     second_user_id = await _seed_user(session_factory, telegram_user_id=202)
 
     async with uow_factory() as uow:
-        assert (
-            await uow.operational_logins.attach(profile_id, first_user_id, at=NOW)
-            == "attached"
+        first_attachment = await uow.operational_logins.attach(
+            profile_id, first_user_id, at=NOW
         )
-        assert (
-            await uow.operational_logins.attach(profile_id, second_user_id, at=NOW)
-            == "occupied"
+        occupied_attachment = await uow.operational_logins.attach(
+            profile_id, second_user_id, at=NOW
         )
         user = await uow.users.require_by_telegram_id(101)
         profile = await uow.operational_profiles.find_by_login_identity(
             "jordan", date(1990, 1, 1)
         )
 
+    assert first_attachment.kind == "attached"
+    assert first_attachment.is_first_ever_attachment is True
+    assert occupied_attachment.kind == "occupied"
+    assert occupied_attachment.is_first_ever_attachment is False
     assert user.role is OperationalRole.NBNC
     assert profile is not None
     assert not hasattr(profile, "role")
+
+
+async def test_reattached_profile_reports_noninitial_history(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Deriving first-login state from active occupancy would reopen it after logout."""
+
+    profile_user_id = await _seed_user(session_factory)
+    profile_id = await _seed_profile(
+        session_factory, user_id=profile_user_id, name="returning"
+    )
+    telegram_user_id = await _seed_user(session_factory, telegram_user_id=303)
+
+    async with uow_factory() as uow:
+        first_attachment = await uow.operational_logins.attach(
+            profile_id, telegram_user_id, at=NOW
+        )
+    async with uow_factory() as uow:
+        detached = await uow.operational_logins.detach_for_user(
+            telegram_user_id, at=NOW + timedelta(minutes=1)
+        )
+    async with uow_factory() as uow:
+        reattached = await uow.operational_logins.attach(
+            profile_id, telegram_user_id, at=NOW + timedelta(minutes=2)
+        )
+
+    assert first_attachment.kind == "attached"
+    assert first_attachment.is_first_ever_attachment is True
+    assert detached is not None
+    assert reattached.kind == "attached"
+    assert reattached.is_first_ever_attachment is False
 
 
 async def test_attendance_switch_ends_previous_active_service(

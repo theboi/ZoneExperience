@@ -50,7 +50,7 @@ from friendly_bot.persistence.models import (
     DiagnosticRecord as DiagnosticModel,
 )
 
-type LoginAttachmentResult = Literal["attached", "occupied", "not_found"]
+type LoginAttachmentKind = Literal["attached", "occupied", "not_found"]
 type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
 DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
 _NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL = datetime(1970, 1, 1, tzinfo=UTC)
@@ -89,6 +89,14 @@ class OperationalLoginRecord:
     user_id: UUID
     attached_at: datetime
     detached_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class LoginAttachmentResult:
+    """The safe outcome of one exclusive operational-profile attachment."""
+
+    kind: LoginAttachmentKind
+    is_first_ever_attachment: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -731,8 +739,8 @@ class SqlAlchemyOperationalLoginRepository:
             select(User.id).where(User.id == user_id)
         )
         if profile_exists is None or user_exists is None:
-            return "not_found"
-        row = await self._session.scalar(
+            return LoginAttachmentResult("not_found")
+        attachment_id = await self._session.scalar(
             pg_insert(OperationalLogin)
             .values(
                 operational_profile_id=profile_id,
@@ -742,7 +750,19 @@ class SqlAlchemyOperationalLoginRepository:
             .on_conflict_do_nothing()
             .returning(OperationalLogin.id)
         )
-        return "attached" if row is not None else "occupied"
+        if attachment_id is None:
+            return LoginAttachmentResult("occupied")
+        has_prior_attachment = await self._session.scalar(
+            select(
+                exists().where(
+                    OperationalLogin.operational_profile_id == profile_id,
+                    OperationalLogin.id != attachment_id,
+                )
+            )
+        )
+        return LoginAttachmentResult(
+            "attached", is_first_ever_attachment=not bool(has_prior_attachment)
+        )
 
     async def detach_for_user(
         self, user_id: UUID, *, at: datetime
