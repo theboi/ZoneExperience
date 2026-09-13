@@ -308,7 +308,7 @@ async def test_rate_limit_extends_the_account_wide_pause_even_when_retry_exhaust
         OutboundDeliveryMessage(
             chat_id=73,
             kind="message",
-            payload=MappingProxyType({"text": "Welcome", "buttons": ()}),
+            payload=MappingProxyType({"text": "Welcome", "buttons": ["Continue"]}),
         ),
     ],
 )

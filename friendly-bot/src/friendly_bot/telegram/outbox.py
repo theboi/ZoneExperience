@@ -6,7 +6,8 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Protocol
+from types import TracebackType
+from typing import Literal, Protocol, Self
 from uuid import UUID, uuid4
 
 import httpx
@@ -14,9 +15,10 @@ import httpx
 from friendly_bot.persistence.repositories import (
     DeliveryAttemptRecord,
     DeliveryClaimLostError,
+    DeliveryOutcome,
     OutboundDeliveryMessage,
+    OutboundDeliveryRecord,
 )
-from friendly_bot.persistence.uow import UnitOfWorkFactory
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
     TelegramResponseUncertain,
@@ -38,6 +40,65 @@ class TelegramDeliveryGateway(Protocol):
         """Attempt exactly one typed Telegram message delivery."""
 
 
+class TelegramDeliveryOperations(Protocol):
+    """The exact durable delivery operations consumed by this worker."""
+
+    async def claim_next_safe(self, *, now: datetime) -> OutboundDeliveryRecord | None:
+        """Commit a safe durable delivery claim, if one is available."""
+
+    async def start_attempt(
+        self,
+        delivery_id: UUID,
+        correlation_id: UUID,
+        *,
+        claim_token: UUID,
+        started_at: datetime,
+    ) -> DeliveryAttemptRecord:
+        """Commit a token-fenced send attempt before the network boundary."""
+
+    async def finish_attempt(
+        self,
+        delivery_id: UUID,
+        attempt_id: UUID,
+        outcome: DeliveryOutcome,
+        *,
+        now: datetime,
+        retry_at: datetime | None = None,
+        safe_error: str | None = None,
+        confirmed_telegram_message_id: int | None = None,
+    ) -> None:
+        """Persist a terminal or retryable attempt result."""
+
+    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime:
+        """Extend the durable account-wide Telegram rate-limit pause."""
+
+
+class TelegramDeliveryUnitOfWork(Protocol):
+    """The transaction shape required for one outbox delivery phase."""
+
+    @property
+    def deliveries(self) -> TelegramDeliveryOperations:
+        """Expose only the delivery repository methods this worker needs."""
+
+    async def __aenter__(self) -> Self:
+        """Enter the transaction boundary."""
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Commit on success or roll back on an exception."""
+
+
+class TelegramDeliveryUnitOfWorkFactory(Protocol):
+    """Create a fresh delivery transaction for each worker phase."""
+
+    def __call__(self) -> TelegramDeliveryUnitOfWork:
+        """Return an unopened transaction boundary."""
+
+
 @dataclass(frozen=True, slots=True)
 class _DeliveryResolution:
     disposition: DeliveryDisposition
@@ -52,7 +113,7 @@ class OutboundDeliveryWorker:
 
     def __init__(
         self,
-        unit_of_work_factory: UnitOfWorkFactory,
+        unit_of_work_factory: TelegramDeliveryUnitOfWorkFactory,
         gateway: TelegramDeliveryGateway,
         *,
         clock: Callable[[], datetime] | None = None,
