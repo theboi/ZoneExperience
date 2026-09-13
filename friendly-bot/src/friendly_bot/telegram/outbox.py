@@ -167,11 +167,12 @@ class OutboundDeliveryWorker:
             )
             return True
 
-        await self._finish(
-            claim.id,
-            attempt,
-            _classify_outcome(outcome, attempt.attempt_number, self._clock()),
-        )
+        resolution = _classify_outcome(outcome, attempt.attempt_number, self._clock())
+        try:
+            await self._finish(claim.id, attempt, resolution)
+        except asyncio.CancelledError:
+            await self._finish_after_cancellation(claim.id, attempt, resolution)
+            raise
         return True
 
     async def _finish(
@@ -203,7 +204,7 @@ class OutboundDeliveryWorker:
         attempt: DeliveryAttemptRecord,
         resolution: _DeliveryResolution,
     ) -> None:
-        """Keep uncertainty finalization alive if shutdown cancels us again."""
+        """Keep finalization alive if shutdown cancels us again."""
 
         finalization = asyncio.create_task(
             self._finish(delivery_id, attempt, resolution)

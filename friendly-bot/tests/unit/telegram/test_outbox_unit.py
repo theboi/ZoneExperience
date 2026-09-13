@@ -153,7 +153,7 @@ class RecordingUnitOfWorkFactory:
     def __init__(self, deliveries: RecordingDeliveries) -> None:
         self.deliveries = deliveries
         self.commits: list[str] = []
-        self._labels = iter(("claim", "start", "finish"))
+        self._labels = iter(("claim", "start", "finish", "finish_after_cancellation"))
 
     def __call__(self) -> RecordingUnitOfWork:
         return RecordingUnitOfWork(next(self._labels), self.deliveries, self.commits)
@@ -389,6 +389,44 @@ async def test_second_cancellation_does_not_interrupt_uncertain_finalization() -
     await asyncio.wait_for(finish_completed.wait(), timeout=1)
     assert factory.commits == ["claim", "start", "finish"]
     assert deliveries.finish_calls[0]["outcome"] == "uncertain"
+
+
+async def test_cancellation_after_a_returned_send_durably_finishes_its_outcome() -> (
+    None
+):
+    """A known send result must not leave its committed attempt sending on shutdown."""
+
+    finish_started = asyncio.Event()
+    finish_release = asyncio.Event()
+    finish_completed = asyncio.Event()
+    deliveries = RecordingDeliveries(
+        _claim(),
+        finish_started=finish_started,
+        finish_release=finish_release,
+        finish_completed=finish_completed,
+    )
+    factory = RecordingUnitOfWorkFactory(deliveries)
+    task = asyncio.create_task(
+        OutboundDeliveryWorker(
+            factory,
+            RecordingGateway(TelegramSendRetry(503)),
+            clock=lambda: NOW,
+        ).run_once()
+    )
+
+    await finish_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    finish_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await asyncio.wait_for(finish_completed.wait(), timeout=1)
+    assert factory.commits == ["claim", "start", "finish_after_cancellation"]
+    assert deliveries.finish_calls[0]["outcome"] == "retry"
+    assert deliveries.finish_calls[0]["retry_at"] == NOW + timedelta(seconds=5)
+    assert deliveries.finish_calls[0]["safe_error"] == "telegram_temporary_error"
 
 
 async def test_client_cancellation_is_finalized_uncertain_by_the_outbox_worker() -> (

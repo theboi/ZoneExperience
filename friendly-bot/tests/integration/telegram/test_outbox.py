@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -178,6 +179,60 @@ class _RateLimitInterleavingFactory:
         return _AfterClaimUnitOfWork(self._unit_of_work_factory(), after_claim)
 
 
+class _FinishGateUnitOfWork(UnitOfWork):
+    """Hold exactly one finish transaction open after its typed outcome is recorded."""
+
+    def __init__(
+        self,
+        session_factory: _SESSION_FACTORY,
+        finish_started: asyncio.Event,
+        finish_release: asyncio.Event,
+    ) -> None:
+        super().__init__(session_factory)
+        self._finish_started = finish_started
+        self._finish_release = finish_release
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if exc_type is None:
+            self._finish_started.set()
+            try:
+                await self._finish_release.wait()
+            except BaseException as cancellation:
+                await super().__aexit__(
+                    type(cancellation), cancellation, cancellation.__traceback__
+                )
+                raise
+        await super().__aexit__(exc_type, exc, traceback)
+
+
+class _FinishGateFactory:
+    """Gate only the first finish UoW, then let cancellation recovery commit normally."""
+
+    def __init__(
+        self,
+        session_factory: _SESSION_FACTORY,
+        finish_started: asyncio.Event,
+        finish_release: asyncio.Event,
+    ) -> None:
+        self._session_factory = session_factory
+        self._finish_started = finish_started
+        self._finish_release = finish_release
+        self._calls = 0
+
+    def __call__(self) -> UnitOfWork:
+        self._calls += 1
+        if self._calls == 3:
+            return _FinishGateUnitOfWork(
+                self._session_factory, self._finish_started, self._finish_release
+            )
+        return UnitOfWork(self._session_factory)
+
+
 async def _enqueue(
     factory: Callable[[], UnitOfWork], *, key: str = "outbox:one"
 ) -> UUID:
@@ -321,6 +376,42 @@ async def test_typed_outcome_is_durably_classified_without_ambiguous_replay(
     assert stored.eligible_at == (retry_at or NOW)
     attempts = await _attempts(session_factory, delivery_id)
     assert attempts[0].safe_error == safe_error
+
+
+async def test_cancellation_after_a_returned_send_commits_the_known_outcome(
+    session_factory: _SESSION_FACTORY,
+) -> None:
+    """A cancelled finalization must not leave a known send result as replayable work."""
+
+    finish_started = asyncio.Event()
+    finish_release = asyncio.Event()
+    delivery_id = await _enqueue(
+        lambda: UnitOfWork(session_factory), key="outbox:cancelled-finalization"
+    )
+    factory = _FinishGateFactory(session_factory, finish_started, finish_release)
+    gateway = RecordingGateway(TelegramSendRetry(503))
+    task = asyncio.create_task(
+        OutboundDeliveryWorker(factory, gateway, clock=lambda: NOW).run_once()
+    )
+
+    await finish_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    finish_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:cancelled-finalization")
+    ]
+    stored = await _delivery(session_factory, delivery_id)
+    assert stored.status == "retry"
+    assert stored.eligible_at == NOW + timedelta(seconds=5)
+    attempts = await _attempts(session_factory, delivery_id)
+    assert [(attempt.outcome, attempt.safe_error) for attempt in attempts] == [
+        ("retry", "telegram_temporary_error")
+    ]
 
 
 async def test_rate_limit_pause_blocks_a_second_due_delivery_until_its_exact_expiry(
