@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "r03",
   "phase": "execution",
-  "status": "implementation-complete-operational-privacy-blocked",
+  "status": "source-repair-committed-re-review-pending-operational-privacy-blocked",
   "date": "2026-09-13",
   "prior_feature_commit": "527184361ed64c154647580caefe262435bb69d3",
   "privacy_repair_implementation_commit": "ab4d46c27fb459cf0bf8d3ed7aee0e5c0d62e322",
@@ -10,11 +10,13 @@
   "envelope_source_privacy_repair_commit": "31b2037722b433c49d06ad901b1bfba5976a5182",
   "transport_boundary_source_privacy_repair_commit": "8f27f576972a531d74cda9f13029616ef92d472e",
   "response_lifecycle_traceback_privacy_repair_commit": "1d8045dd5c5242a671a9b1a1964826a7fc9f0836",
+  "bounded_decoded_result_source_privacy_repair_commit": "43a297828cb3afd90d72805aec69f085c0bad5ba",
+  "response_sanitization_completion_commit": "83cf9bef21d8a06eec5c81ef2c433f154b8d8789",
   "f01_g1_inspected_commit": "987f8a2a90090b55285698283297bb99200774a3",
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
   "focused_evidence": {
     "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "After the response-lifecycle traceback-privacy repair: exit 0; 65 passed, 1 skipped in 1.59s; Ruff check reported All checks passed; Ruff format reported 53 files already formatted; mypy found no issues in 27 source files."
+    "result": "After the response-sanitization completion commit: exit 0; 83 passed, 1 skipped in 1.02s; Ruff check reported All checks passed; Ruff format reported 53 files already formatted; mypy found no issues in 27 source files."
   },
   "privacy_negative_tests": [
     "tests/unit/routing/test_openrouter_gateway.py::test_every_prompt_dto_rejects_common_structured_identifier_aliases",
@@ -27,7 +29,14 @@
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_detaches_interrupted_stdlib_response_body_from_any_operation",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_retain_actual_malformed_stdlib_body_in_traceback",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceback",
-    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_normalizes_incomplete_json_without_traceback_retention"
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_normalizes_incomplete_json_without_traceback_retention",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_retain_response_when_discard_fails",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_closes_deep_stdlib_json_without_raw_traceback_retention",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_closes_stdlib_discard_failure_without_raw_traceback",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_rejects_oversize_stdlib_body_after_one_bounded_read",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_propagates_cancellation_unchanged",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_cancellation_keeps_stdlib_worker_request_snapshots",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_clears_outbound_payload_after_transport_exhaustion"
   ],
   "red_green_evidence": {
     "observability_guard": "Before implementation, the missing-attestation constructor test failed because the gateway constructed successfully. The restored implementation rejects construction without the exact attestation.",
@@ -36,13 +45,15 @@
     "malformed_success_response": "Before the repair, the raw malformed-response regression test failed because GatewayProtocolError had a JSONDecodeError cause. The repair raises outside the parsing exception scope; the test proves no cause, context, message, or argument retains the raw sentinel.",
     "malformed_envelope": "Before the envelope repair, selection, persona, and matching each chained a JSONDecodeError from response.json(). The centralized envelope guard raises the typed protocol error outside that exception scope; all three public operations prove no cause, context, message, or argument retains the raw sentinel.",
     "interrupted_stdlib_body": "Before the transport-boundary repair, the new actual-stdlib-path IncompleteRead regression failed for selection, persona, and matching because http.client.IncompleteRead escaped response.read() with partial provider bytes. The centralized ordinary-Exception retry flag lets the final GatewayTransportError be raised after the catch scope; the restored regression passes all three operations with exact bounded retries and no sentinel in cause, context, message, arguments, or stored attributes.",
-    "response_lifecycle_traceback": "Before the response-lifecycle repair, 9 actual-boundary cases failed: malformed 200 bodies remained in returned stdlib responses, HTTPError 503 handling unnecessarily read and retained error bodies, and response.json() IncompleteRead escaped. The repaired typed response contract consumes and clears successful bodies, makes HTTPError responses status-only, and discards after JSON decoding; selection, persona, and matching now pass the recursive gateway-traceback-local sentinel checks. A separate pre-repair non-2xx fake-response traceback assertion also failed until _post discarded and cleared its response local."
+    "response_lifecycle_traceback": "Before the response-lifecycle repair, 9 actual-boundary cases failed: malformed 200 bodies remained in returned stdlib responses, HTTPError 503 handling unnecessarily read and retained error bodies, and response.json() IncompleteRead escaped. The repair was superseded by the bounded decoded-result lifecycle.",
+    "bounded_decoded_result_lifecycle": "Before the bounded decoded-result repair, the focused response-discard regression failed 3 times because each public operation raised while its gateway traceback frame still reached a raw-bearing response. The new client protocol returns only decoded operation values or typed static failures. Restored cases pass for selection, persona, and matching; actual stdlib tests cover malformed/deep JSON, unread HTTPError bodies, IncompleteRead, discard/close failure, and oversize bodies, and cancellation propagates unchanged.",
+    "outbound_lifecycle_cleanup": "The added retaining-client regression failed before the completion repair because `_post` only dropped its local payload reference, leaving the client-held outbound prompt populated after retry exhaustion. The minimal repair clears that caller-owned payload and headers. A follow-up cancellation regression then failed because the stdlib worker shared that payload; the adapter now takes a worker snapshot and clears it after its own lifecycle."
   },
   "review": {
     "identifier": "r03-privacy-review-repair-2026-09-13",
     "ruling": "OpenRouter Input & Output Logging is an account-level Observability setting or requires per-key exclusion. logprobs controls returned token probabilities and is not logging control.",
     "result": "Implemented the fail-closed attestation guard, corrected the logging claim, expanded boundary tests, and retained the external account-evidence blocker.",
-    "source_privacy_re_review": "response-lifecycle-repair-committed-re-review-pending"
+    "source_privacy_re_review": "response-sanitization-repair-committed-re-review-pending-not-approved"
   },
   "operational_privacy": {
     "environment_setting": "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION",
@@ -52,11 +63,21 @@
     "account_evidence_status": "not-available-on-this-machine",
     "required_account_evidence": "A redacted receipt proving Input & Output Logging is disabled globally or the dedicated Friendly Bot API key is explicitly excluded."
   },
+  "decoded_response_lifecycle": {
+    "body_limit_bytes": 65536,
+    "client_contract": "GatewayHttpClient.post receives an operation decoder and returns only a validated configured key, nonempty persona summary, validated local alias, or typed static protocol/transport failure; it returns no raw response object to a public gateway operation.",
+    "non_2xx": "HTTPError and other non-2xx outcomes are status-only transport failures; their provider bodies are never read.",
+    "success": "A 2xx stdlib body is read at most limit plus one bytes, rejected if oversize, parsed and operation-validated in the same low-level scope, and the local bytearray is cleared before the safe outcome returns.",
+    "ordinary_failures": "IncompleteRead, malformed/deep JSON, decoder failures, and discard/close failures become static protocol or retryable transport outcomes after the raw scope exits; BaseException and cancellation are not caught.",
+    "outbound_cleanup": "The caller-owned headers and payload are cleared before the final safe outcome; a stdlib worker receives an isolated snapshot and clears it after its own lifecycle so cancellation does not dispatch an empty payload.",
+    "public_error_boundary": "GatewayError is constructed only after the lifecycle returns a safe outcome. Its message, args, cause, context, and attributes contain only static safe summaries; the gateway does not log these errors.",
+    "scope_limit": "This is not a universal assertion that arbitrary live Python frame inspection cannot find transient self, request, prompt, or credential references during normal execution. It guarantees the normal returned-response and raised-gateway-error boundary for raw provider response bytes."
+  },
   "remote_reachability": {
-    "status": "response-lifecycle-repair-published-before-documentation-handoff",
-    "commit": "1d8045dd5c5242a671a9b1a1964826a7fc9f0836",
-    "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 1d8045dd5c5242a671a9b1a1964826a7fc9f0836 origin/main && git rev-parse 1d8045dd5c5242a671a9b1a1964826a7fc9f0836 origin/main",
-    "result": "All commands exited 0 after response-lifecycle repair publication; the final two SHA values were both 1d8045dd5c5242a671a9b1a1964826a7fc9f0836."
+    "status": "bounded-decoded-result-repair-published-before-documentation-handoff",
+    "commit": "43a297828cb3afd90d72805aec69f085c0bad5ba",
+    "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 43a297828cb3afd90d72805aec69f085c0bad5ba origin/main && git rev-parse 43a297828cb3afd90d72805aec69f085c0bad5ba origin/main",
+    "result": "All commands exited 0 after bounded decoded-result repair publication; the final two SHA values were both 43a297828cb3afd90d72805aec69f085c0bad5ba."
   },
   "g2": {
     "status": "not-passed",
