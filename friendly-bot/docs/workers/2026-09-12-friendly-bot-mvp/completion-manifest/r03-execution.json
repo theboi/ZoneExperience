@@ -8,11 +8,12 @@
   "privacy_repair_implementation_commit": "ab4d46c27fb459cf0bf8d3ed7aee0e5c0d62e322",
   "source_privacy_repair_commit": "2f89abaf05c49b73b9d9452a07da671ead7683c9",
   "envelope_source_privacy_repair_commit": "31b2037722b433c49d06ad901b1bfba5976a5182",
+  "transport_boundary_source_privacy_repair_commit": "8f27f576972a531d74cda9f13029616ef92d472e",
   "f01_g1_inspected_commit": "987f8a2a90090b55285698283297bb99200774a3",
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
   "focused_evidence": {
     "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "After safe rebase onto T02's two Telegram commits: exit 0; 53 passed, 1 skipped in 1.05s; Ruff check reported All checks passed; Ruff format reported 53 files already formatted; mypy found no issues in 27 source files."
+    "result": "After the transport-boundary repair: exit 0; 56 passed, 1 skipped in 0.86s; Ruff check reported All checks passed; Ruff format reported 53 files already formatted; mypy found no issues in 27 source files."
   },
   "privacy_negative_tests": [
     "tests/unit/routing/test_openrouter_gateway.py::test_every_prompt_dto_rejects_common_structured_identifier_aliases",
@@ -21,20 +22,22 @@
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_serializes_only_safe_match_prompt_content",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_closes_without_attaching_raw_transport_data_after_retry_exhaustion",
     "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_attach_raw_malformed_response_to_protocol_error",
-    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_attach_raw_malformed_envelope_to_any_operation"
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_does_not_attach_raw_malformed_envelope_to_any_operation",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_detaches_interrupted_stdlib_response_body_from_any_operation"
   ],
   "red_green_evidence": {
     "observability_guard": "Before implementation, the missing-attestation constructor test failed because the gateway constructed successfully. The restored implementation rejects construction without the exact attestation.",
     "dto_validation": "With PromptDTO extra handling temporarily changed to allow unknown fields, all 15 DTO-and-alias cases failed because identifier sentinels were accepted. The smallest production mutation was immediately reverted; the restored strict models pass.",
     "retry_exhaustion": "The added non-2xx and transport fake-client cases prove exactly ROUTING_MAX_ATTEMPTS calls and a typed closed error without raw request or response attachment.",
     "malformed_success_response": "Before the repair, the raw malformed-response regression test failed because GatewayProtocolError had a JSONDecodeError cause. The repair raises outside the parsing exception scope; the test proves no cause, context, message, or argument retains the raw sentinel.",
-    "malformed_envelope": "Before the envelope repair, selection, persona, and matching each chained a JSONDecodeError from response.json(). The centralized envelope guard raises the typed protocol error outside that exception scope; all three public operations prove no cause, context, message, or argument retains the raw sentinel."
+    "malformed_envelope": "Before the envelope repair, selection, persona, and matching each chained a JSONDecodeError from response.json(). The centralized envelope guard raises the typed protocol error outside that exception scope; all three public operations prove no cause, context, message, or argument retains the raw sentinel.",
+    "interrupted_stdlib_body": "Before the transport-boundary repair, the new actual-stdlib-path IncompleteRead regression failed for selection, persona, and matching because http.client.IncompleteRead escaped response.read() with partial provider bytes. The centralized ordinary-Exception retry flag lets the final GatewayTransportError be raised after the catch scope; the restored regression passes all three operations with exact bounded retries and no sentinel in cause, context, message, arguments, or stored attributes."
   },
   "review": {
     "identifier": "r03-privacy-review-repair-2026-09-13",
     "ruling": "OpenRouter Input & Output Logging is an account-level Observability setting or requires per-key exclusion. logprobs controls returned token probabilities and is not logging control.",
     "result": "Implemented the fail-closed attestation guard, corrected the logging claim, expanded boundary tests, and retained the external account-evidence blocker.",
-    "source_privacy_re_review": "envelope-repair-committed-re-review-pending"
+    "source_privacy_re_review": "transport-boundary-repair-committed-re-review-pending"
   },
   "operational_privacy": {
     "environment_setting": "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION",
@@ -45,10 +48,10 @@
     "required_account_evidence": "A redacted receipt proving Input & Output Logging is disabled globally or the dedicated Friendly Bot API key is explicitly excluded."
   },
   "remote_reachability": {
-    "status": "source-repair-published-before-documentation-handoff",
-    "commit": "31b2037722b433c49d06ad901b1bfba5976a5182",
-    "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 31b2037722b433c49d06ad901b1bfba5976a5182 origin/main && git rev-parse 31b2037722b433c49d06ad901b1bfba5976a5182 origin/main",
-    "result": "All commands exited 0 after source-repair publication; the final two SHA values were both 31b2037722b433c49d06ad901b1bfba5976a5182."
+    "status": "transport-repair-published-before-documentation-handoff",
+    "commit": "8f27f576972a531d74cda9f13029616ef92d472e",
+    "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 8f27f576972a531d74cda9f13029616ef92d472e origin/main && git rev-parse 8f27f576972a531d74cda9f13029616ef92d472e origin/main",
+    "result": "All commands exited 0 after transport-repair publication; the final two SHA values were both 8f27f576972a531d74cda9f13029616ef92d472e."
   },
   "g2": {
     "status": "not-passed",
