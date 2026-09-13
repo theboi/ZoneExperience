@@ -2,54 +2,54 @@
   "schema_version": 1,
   "worker": "r03",
   "phase": "execution",
-  "status": "execution-complete",
+  "status": "implementation-complete-operational-privacy-blocked",
   "date": "2026-09-13",
-  "final_feature_commit": "527184361ed64c154647580caefe262435bb69d3",
+  "prior_feature_commit": "527184361ed64c154647580caefe262435bb69d3",
+  "privacy_repair_implementation_commit": "ab4d46c27fb459cf0bf8d3ed7aee0e5c0d62e322",
   "f01_g1_inspected_commit": "987f8a2a90090b55285698283297bb99200774a3",
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
-  "task_commits": [
-    "2f35384f0ebd450f467299ba88b223295cdf1ad1",
-    "c6ba40f4ad1a3b78029dc323cd5fc8eb2583cdc4",
-    "a9faf3bb19cbdd1eea68f1c1f390ca1f230af65e",
-    "7e29f4d39b78c4ec092d719bfa17b29faf5ccbe1",
-    "34b0f36914967a2958911404500068084d2fac35",
-    "527184361ed64c154647580caefe262435bb69d3"
-  ],
   "focused_evidence": {
-    "command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "exit 0; 27 passed in 1.85s; Ruff clean; 48 files formatted; mypy clean over 24 source files",
-    "live_postgresql": "The one-capacity race test ran through F01 UnitOfWork and guarded repositories against the approved account-local friendly-bot-u504 Colima Compose PostgreSQL project. It asserted one returned winner, reserved capacity one, one active HumanMatchAssignment, and one active CapacityReservation. The exact Compose project was then torn down and loopback port 5832 was confirmed released."
+    "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
+    "result": "exit 0; 49 passed, 1 skipped; Ruff clean; 48 files formatted; mypy clean over 24 source files"
   },
   "privacy_negative_tests": [
-    "tests/unit/routing/test_openrouter_gateway.py::test_prompt_dto_forbids_structured_identity_fields",
+    "tests/unit/routing/test_openrouter_gateway.py::test_every_prompt_dto_rejects_common_structured_identifier_aliases",
     "tests/unit/routing/test_openrouter_gateway.py::test_request_requires_policy_and_excludes_identifier_sentinels",
-    "tests/unit/persona/test_service.py::test_persona_prompt_dto_forbids_structured_identity_fields"
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_serializes_only_safe_persona_prompt_content",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_serializes_only_safe_match_prompt_content",
+    "tests/unit/routing/test_openrouter_gateway.py::test_gateway_closes_without_attaching_raw_transport_data_after_retry_exhaustion"
   ],
   "red_green_evidence": {
-    "safety_policy": "A temporary, immediately reverted mutation excluding staff responders made test_safety_allows_leader_or_staff_attending_or_always_available fail because the expected staff alias was missing. The restored policy passed.",
-    "live_race_fixture": "The first live run failed with a foreign-key violation caused by an unsafe direct test seed order. The fixture now flushes users/services before dependent rows; the live one-capacity race passed after that isolated test-only correction."
+    "observability_guard": "Before implementation, the missing-attestation constructor test failed because the gateway constructed successfully. The restored implementation rejects construction without the exact attestation.",
+    "dto_validation": "With PromptDTO extra handling temporarily changed to allow unknown fields, all 15 DTO-and-alias cases failed because identifier sentinels were accepted. The smallest production mutation was immediately reverted; the restored strict models pass.",
+    "retry_exhaustion": "The added non-2xx and transport fake-client cases prove exactly ROUTING_MAX_ATTEMPTS calls and a typed closed error without raw request or response attachment."
   },
   "review": {
-    "identifier": "r03-task5-scoped-review-2026-09-13",
-    "task5_result": "Task 5 spec compliance passed with no Critical or Important findings. Its two evidence gaps were fixed in 5271843, and the scoped re-review marked both ADDRESSED with no new Critical or Important breakage.",
-    "whole_r03_identifier": "r03-whole-feature-review-2026-09-13",
-    "whole_r03_result": "Feature approved: no Critical or Important findings. One prompt-logging wording overstatement in the draft status was corrected before handoff publication."
+    "identifier": "r03-privacy-review-repair-2026-09-13",
+    "ruling": "OpenRouter Input & Output Logging is an account-level Observability setting or requires per-key exclusion. logprobs controls returned token probabilities and is not logging control.",
+    "result": "Implemented the fail-closed attestation guard, corrected the logging claim, expanded boundary tests, and retained the external account-evidence blocker."
+  },
+  "operational_privacy": {
+    "environment_setting": "FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION",
+    "accepted_attestation": "disabled-globally-or-friendly-bot-key-excluded",
+    "default": false,
+    "attestation_meaning": "Operator declaration only; it is not proof of account state.",
+    "account_evidence_status": "not-available-on-this-machine",
+    "required_account_evidence": "A redacted receipt proving Input & Output Logging is disabled globally or the dedicated Friendly Bot API key is explicitly excluded."
   },
   "remote_reachability": {
-    "command": "git fetch --quiet origin main && git merge-base --is-ancestor 5271843 origin/main && git rev-list --left-right --count HEAD...origin/main",
-    "result": "exit 0; final feature commit reachable from origin/main; pre-handoff divergence 0 0"
-  },
-  "t02_reconciliation": {
-    "status": "no t02 commit was present in origin/main during task5 publication fetches",
-    "action": "no t02 surface was touched"
+    "status": "pending-repair-handoff-publication",
+    "required_proof": "Fetch origin main after push and prove the privacy-repair implementation commit is an ancestor."
   },
   "g2": {
     "status": "not-passed",
-    "reason": "T02 evidence and coordinator verification are still required."
+    "reason": "The redacted account-level privacy receipt, T02 evidence, and coordinator verification are still required."
   },
   "scope": {
+    "product_scope": "unchanged",
     "implemented": [
       "private key-only OpenRouter gateway",
+      "fail-closed OpenRouter Observability attestation guard",
       "constrained configured-key routing",
       "durable persona cursor maintenance",
       "normal and safety matching through F01 UnitOfWork and repository contracts"
@@ -58,6 +58,7 @@
       "F01 persistence implementation changes",
       "Telegram delivery or live calls",
       "OpenRouter live calls",
+      "account-side OpenRouter configuration changes",
       "G2 approval"
     ]
   }

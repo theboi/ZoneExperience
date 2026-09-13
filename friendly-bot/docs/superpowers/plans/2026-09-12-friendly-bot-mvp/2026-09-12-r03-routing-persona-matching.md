@@ -15,7 +15,8 @@
 - Start only after coordinator-passed `PG` and G1 F01 evidence are both reachable on `origin/main`.
 - Use F01's `UnitOfWork` and repository DTOs; add no schema, migration, ORM session, adapter, compatibility shim, or fallback store.
 - Use `qwen/qwen3.7-flash` only from `hyperparameters.py`; API keys remain environment-only.
-- Every OpenRouter request sets ZDR, denies collection, disables prompt logging, and contains no structured Telegram ID or DOB.
+- Every OpenRouter request sets ZDR, denies collection, contains no structured Telegram ID or DOB, and opts into no debug, trace, or metadata logging fields. `logprobs` is not a logging control and is not used as one.
+- Gateway construction fails closed unless R03's non-secret `FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION` has the exact value `disabled-globally-or-friendly-bot-key-excluded`. This is an operator attestation, not proof of the account state; operational use remains blocked until a redacted account-level receipt proves either disabled Input & Output Logging or exclusion of the dedicated Friendly Bot key.
 - The model returns configured/reserved keys only; the harness alone renders fixed user-facing copy.
 
 ## File map
@@ -35,7 +36,7 @@
 
 **Files:** Create `friendly-bot/src/friendly_bot/hyperparameters.py`, `routing/__init__.py`, `routing/contracts.py`, `routing/openrouter_gateway.py`; create `friendly-bot/tests/unit/routing/test_openrouter_gateway.py`.
 
-**Interfaces:** Produces `OpenRouterGateway.select_key(request: KeySelectionRequest) -> str`, `KeySelectionRequest`, and `OPENROUTER_MODEL`. Consumes `OPENROUTER_API_KEY`.
+**Interfaces:** Produces `OpenRouterGateway.select_key(request: KeySelectionRequest) -> str`, `KeySelectionRequest`, and `OPENROUTER_MODEL`. Consumes `OPENROUTER_API_KEY` plus R03's exact non-secret Input & Output Logging attestation.
 
 - [ ] **Step 1: Write failing gateway/privacy tests.**
 
@@ -61,7 +62,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_m
 ```
 
 - [ ] **Step 2: Run the failing test.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q`. Expected: FAIL because the R03 modules do not exist.
-- [ ] **Step 3: Implement the strict gateway.** Put `model_config = ConfigDict(extra="forbid")` on every prompt DTO. Define constants `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}` and `logprobs=False`; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
+- [ ] **Step 3: Implement the strict gateway.** Put `model_config = ConfigDict(extra="forbid")` on every prompt DTO. Define constants `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}`; never add `logprobs`, debug, trace, or metadata logging fields. Fail construction closed unless the exact non-secret attestation is present; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
 - [ ] **Step 4: Run focused checks.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q && uv run ruff check src/friendly_bot/routing tests/unit/routing && uv run mypy src/friendly_bot/routing`. Expected: exit 0.
 - [ ] **Step 5: Commit.** Run: `git add friendly-bot/src/friendly_bot/hyperparameters.py friendly-bot/src/friendly_bot/routing friendly-bot/tests/unit/routing/test_openrouter_gateway.py && git commit -m "feat: add private OpenRouter key gateway"`.
 
@@ -165,7 +166,7 @@ async def test_one_capacity_slot_has_one_concurrent_winner() -> None:
 
 **Files:** Modify `friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/status/r03.md`; create `friendly-bot/docs/workers/2026-09-12-friendly-bot-mvp/completion-manifest/r03-execution.json`.
 
-**Interfaces:** Consumes all completed Tasks 1–5 and their F01 G1 contract evidence. Produces the execution completion manifest consumed by G2 and I04.
+**Interfaces:** Consumes all completed Tasks 1–5 and their F01 G1 contract evidence. Produces an implementation handoff manifest for G2 and I04; it never establishes account-level OpenRouter Observability state.
 
 - [ ] **Step 1: Run the complete R03 focused evidence once at the final feature commit.**
 
@@ -175,7 +176,7 @@ Expected: every command exits 0; record the exact final feature commit from `git
 
 - [ ] **Step 2: Write the execution status and manifest from fresh evidence.**
 
-Set `status/r03.md` to execution-complete only if Step 1 passed and `git merge-base --is-ancestor <final-feature-commit> origin/main` succeeds after push. Create lowercase JSON with `worker`, `phase`, `status`, the exact final feature commit, focused command/output summary, F01 G1 commit inspected, privacy-negative test names, review result, and remote reachability command/result. Do not claim G2 passed; G2 requires T02 evidence and coordinator verification.
+Set `status/r03.md` to implementation-complete / operational-privacy-blocked only if Step 1 passed and `git merge-base --is-ancestor <final-feature-commit> origin/main` succeeds after push. Create lowercase JSON with `worker`, `phase`, `status`, the exact final feature commit, focused command/output summary, F01 G1 commit inspected, privacy-negative test names, review result, remote reachability command/result, and the external account-evidence blocker. Do not treat the environment attestation as proof. Do not claim G2 passed; G2 also requires redacted account evidence that Input & Output Logging is disabled globally or the dedicated Friendly Bot key is excluded, plus T02 evidence and coordinator verification.
 
 - [ ] **Step 3: Request review before publishing the handoff.**
 
@@ -191,8 +192,8 @@ Expected: valid JSON, no whitespace errors, and only the two handoff paths stage
 
 Run: `git fetch origin && git merge --no-edit origin/main && cd friendly-bot && uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && cd .. && git push origin main && git fetch origin && git merge-base --is-ancestor HEAD origin/main`
 
-Expected: affected suite passes after reconciliation; push succeeds; the handoff commit is reachable from `origin/main`.
+Expected: affected suite passes after reconciliation; push succeeds; the handoff commit is reachable from `origin/main`. This proves repository delivery only, not OpenRouter account configuration.
 
 ## Plan self-review
 
-The six tasks cover provider policy/redaction, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools from joined `users.role`, rematch exclusions, concurrency, review, full R03 acceptance evidence, and a G2-consumable execution handoff. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Interface names and signatures are the exact F01 published UoW/repository contracts; execution waits for their G1 implementation evidence before code is started.
+The six tasks cover provider policy/redaction, exact non-secret operator attestation, strict keys and multi-selection terminals, cursor-only persona advancement, exact normal and safety pools from joined `users.role`, rematch exclusions, concurrency, review, full R03 acceptance evidence, and an implementation handoff. They create no product-policy changes, action registry, migration, seed, or Telegram implementation. Repository delivery and the attestation do not prove OpenRouter account Observability state; the redacted receipt remains an external operational blocker and G2 is not passed.

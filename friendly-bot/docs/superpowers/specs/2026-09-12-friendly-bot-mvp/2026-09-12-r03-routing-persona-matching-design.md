@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Planning complete; execution blocked pending `PG` and `G1` |
+| Status | Implementation complete; operational privacy blocked pending account-level OpenRouter Observability proof; G2 not passed |
 | Date | 2026-09-12 |
 | Owner | R03 |
 | Authority inputs | Product specification, architecture (`ARCH-004`, `ARCH-006`, `ARCH-008`, `ARCH-012`), approved MVP design, Zone X fixture, frozen blueprint, and corrected F01 planning commit `a920d2d` |
@@ -40,11 +40,11 @@ R03 consumes these exact F01 protocols and frozen DTOs after G1 supplies their i
 
 ## 3. Gateway and privacy boundary
 
-`hyperparameters.py` owns non-secret constants: `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `OPENROUTER_TIMEOUT_SECONDS`, `ROUTING_MAX_ATTEMPTS`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. `OpenRouterSettings` reads `OPENROUTER_API_KEY` only from the environment.
+`hyperparameters.py` owns non-secret constants: `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `OPENROUTER_TIMEOUT_SECONDS`, `ROUTING_MAX_ATTEMPTS`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. `OpenRouterSettings` reads `OPENROUTER_API_KEY` plus R03's non-secret `FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION` from the environment. That setting defaults to `false` (unattested) and only accepts `disabled-globally-or-friendly-bot-key-excluded` to enable a gateway. It is an operator attestation that the account has disabled OpenRouter Input & Output Logging globally or explicitly excluded the dedicated Friendly Bot key; it is not proof of either account state and is deliberately usable by I04 through `OpenRouterGateway.from_environment()` without exposing a Telegram ID, DOB, or credential.
 
-`OpenRouterGateway` posts to `https://openrouter.ai/api/v1/chat/completions` with the configured model, prompt logging disabled, and `provider={"zdr": true, "data_collection": "deny"}`. A response is accepted only when its entire parsed assistant content is a single JSON object `{"key":"<one allowed key>"}`. Any unavailable compliant endpoint, non-2xx response after bounded retry, malformed object, unknown key, or multiple key is a closed failure.
+`OpenRouterGateway` refuses construction without that exact attestation. It posts to `https://openrouter.ai/api/v1/chat/completions` with the configured model and `provider={"zdr": true, "data_collection": "deny"}`. It never opts into `logprobs`, debug, trace, or metadata logging fields: `logprobs` controls returned token probabilities, not OpenRouter prompt storage, so it is never described or used as a logging control. A response is accepted only when its entire parsed assistant content is a single JSON object `{"key":"<one allowed key>"}`. Any unavailable compliant endpoint, non-2xx response after bounded retry, malformed object, unknown key, or multiple key is a closed failure with no raw request or response attached.
 
-Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forbid")`. The DTOs admit user name, persona, user-authored message/reply bodies, unsummarized messages, candidate keys/gists/context labels, and match candidate aliases with interests and `cg_name`. They reject `telegram_user_id`, `telegram_chat_id`, `dob`, source message IDs, contact URL, UUID, raw database records, and diagnostic payloads. Gateway tests prove those forbidden keys raise `ValidationError`, then serialize a valid DTO and prove sentinel Telegram-ID/DOB values are absent while ordinary user-authored words such as “telegram” and “dob” remain allowed.
+Every prompt DTO is a Pydantic model with `model_config = ConfigDict(extra="forbid")`. The DTOs admit user name, persona, user-authored message/reply bodies, unsummarized messages, candidate keys/gists/context labels, and match candidate aliases with interests and `cg_name`. They reject structured-identifier aliases including `telegramUserId`, `telegram_chat_id`, and `dob`, as well as source message IDs, contact URL, UUID, raw database records, and diagnostic payloads. Gateway tests exercise each DTO, including nested `RoutingPromptCandidate` and `MatchPromptCandidate`, and the actual selection, persona, and matching transports. They prove sentinels are rejected and absent from serialized payloads while ordinary authored words such as “telegram” and “dob” remain allowed free text.
 
 ## 4. Routing contract
 
@@ -83,4 +83,4 @@ For rematch, `release_and_exclude` releases the active reservation, writes the r
 
 ## 7. Execution acceptance
 
-Focused R03 evidence is: gateway payload/privacy and fail-closed tests; current/global/reusable/native-reply/multi-key/ambiguity/no-match routing tests; idle/token/cursor persona tests; normal role/attendance/capacity/exclusion/rematch tests; safety leader/staff/always-available/no-fallback tests; and concurrent reservation integration tests. `ruff check .`, `ruff format --check .`, and `mypy src/friendly_bot` run after R03 focused suites. No product code is created in this Pass 1 artifact.
+Focused R03 evidence is: gateway payload/privacy and fail-closed tests, including transport and non-2xx retry exhaustion; current/global/reusable/native-reply/multi-key/ambiguity/no-match routing tests; idle/token/cursor persona tests; normal role/attendance/capacity/exclusion/rematch tests; safety leader/staff/always-available/no-fallback tests; and concurrent reservation integration tests. `ruff check .`, `ruff format --check .`, and `mypy src/friendly_bot` run after R03 focused suites. User-facing and product scope are unchanged. R03 implementation cannot become operational until an account operator supplies a redacted receipt showing OpenRouter Input & Output Logging is disabled globally or the dedicated Friendly Bot API key is excluded; the local environment attestation is not that receipt and G2 remains not passed.
