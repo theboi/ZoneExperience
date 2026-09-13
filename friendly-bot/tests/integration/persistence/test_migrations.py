@@ -265,6 +265,22 @@ async def test_alembic_head_matches_every_f01_metadata_table_and_column(
     assert str(profiles["reserved_capacity"]["default"]) == "0"
 
 
+async def test_alembic_head_exposes_nullable_service_interaction_closure(
+    async_engine: AsyncEngine,
+) -> None:
+    """Lifecycle fencing needs durable state rather than a process-local flag."""
+
+    async with async_engine.connect() as connection:
+        columns = await connection.run_sync(
+            lambda sync_connection: {
+                column["name"]: column
+                for column in inspect(sync_connection).get_columns("services")
+            }
+        )
+
+    assert columns["interaction_closed_at"]["nullable"] is True
+
+
 async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
     migrated_database: MigratedDatabase,
 ) -> None:

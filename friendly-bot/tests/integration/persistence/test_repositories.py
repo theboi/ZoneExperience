@@ -35,6 +35,7 @@ from friendly_bot.persistence.models import (
     OutboundDelivery,
     OutboundDeliveryAttempt,
     Service,
+    ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
     User,
@@ -42,6 +43,7 @@ from friendly_bot.persistence.models import (
 from friendly_bot.persistence.repositories import (
     DeliveryClaimLostError,
     NewOutboundDelivery,
+    ServiceInteractionClosedError,
 )
 from friendly_bot.persistence.uow import UnitOfWork
 
@@ -144,6 +146,7 @@ async def _seed_service(
     session_factory: _SESSION_FACTORY,
     *,
     key: str,
+    interaction_ends_at: datetime | None = None,
 ) -> UUID:
     service_id = uuid4()
     async with session_factory.begin() as session:
@@ -158,7 +161,7 @@ async def _seed_service(
                 doors_close_at=NOW + timedelta(hours=1),
                 service_starts_at=NOW,
                 service_ends_at=NOW + timedelta(hours=2),
-                interaction_ends_at=NOW + timedelta(hours=3),
+                interaction_ends_at=interaction_ends_at or NOW + timedelta(hours=3),
             )
         )
     return service_id
@@ -345,6 +348,207 @@ async def test_attendance_switch_ends_previous_active_service(
     assert active is not None
     assert active.id == second.attendance.id
     assert active.attendee_kind == "latecomer"
+
+
+async def test_end_active_for_service_preserves_a_previously_switched_history_time(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Lifecycle cleanup must not overwrite an attendance already ended by a switch."""
+
+    user_id = await _seed_user(session_factory)
+    first_service_id = await _seed_service(session_factory, key="task6-history-first")
+    second_service_id = await _seed_service(session_factory, key="task6-history-second")
+    switched_at = NOW + timedelta(minutes=1)
+
+    async with uow_factory() as uow:
+        await uow.attendances.start_or_switch(
+            user_id, first_service_id, attendee_kind="ordinary", started_at=NOW
+        )
+        await uow.attendances.start_or_switch(
+            user_id,
+            second_service_id,
+            attendee_kind="ordinary",
+            started_at=switched_at,
+        )
+    async with uow_factory() as uow:
+        ended = await uow.attendances.end_active_for_service(
+            first_service_id, ended_at=NOW + timedelta(minutes=2)
+        )
+    async with session_factory() as session:
+        history = await session.scalar(
+            select(ServiceAttendance).where(
+                ServiceAttendance.user_id == user_id,
+                ServiceAttendance.service_id == first_service_id,
+            )
+        )
+
+    assert ended == 0
+    assert history is not None
+    assert history.ended_at == switched_at
+
+
+async def test_closed_or_logically_ended_service_rejects_attendance_mutation(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A later cleanup cannot repair attendance committed beyond an interaction end."""
+
+    user_id = await _seed_user(session_factory)
+    service_id = await _seed_service(session_factory, key="task6-attendance-closed")
+    at_interaction_end = NOW + timedelta(hours=3)
+
+    async with uow_factory() as uow:
+        with pytest.raises(ServiceInteractionClosedError):
+            await uow.attendances.start_or_switch(
+                user_id,
+                service_id,
+                attendee_kind="ordinary",
+                started_at=at_interaction_end,
+            )
+        assert await uow.services.claim_interaction_closure(
+            service_id, now=at_interaction_end
+        )
+    async with uow_factory() as uow:
+        with pytest.raises(ServiceInteractionClosedError):
+            await uow.attendances.start_or_switch(
+                user_id,
+                service_id,
+                attendee_kind="ordinary",
+                started_at=NOW,
+            )
+
+
+async def test_service_closure_claim_is_due_atomic_and_visible_through_its_dto(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Only one due lifecycle transaction may set the durable closure timestamp."""
+
+    interaction_end = NOW + timedelta(hours=3)
+    service_id = await _seed_service(
+        session_factory,
+        key="task6-closure-claim",
+        interaction_ends_at=interaction_end,
+    )
+
+    async with uow_factory() as uow:
+        assert not await uow.services.claim_interaction_closure(service_id, now=NOW)
+    async with uow_factory() as uow:
+        assert await uow.services.claim_interaction_closure(
+            service_id, now=interaction_end
+        )
+    async with uow_factory() as uow:
+        assert not await uow.services.claim_interaction_closure(
+            service_id, now=interaction_end + timedelta(minutes=1)
+        )
+        service = await uow.services.get(service_id)
+
+    assert service.interaction_closed_at == interaction_end
+
+
+async def test_logically_ended_service_rejects_selection_application(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """The selection mutation itself must reject a stale pre-closure transition."""
+
+    service_id = await _seed_service(
+        session_factory,
+        key="task6-selection-ended",
+        interaction_ends_at=NOW,
+    )
+    user_id = await _seed_user(session_factory)
+    definition = PublishedFlowDefinition(
+        document={"key": "service.closure", "revision": "selection"},
+        flow_key_index={"service.closure": ()},
+    )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            definition,
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    source = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=version.id,
+        parent_flow_key="service.closure",
+        service_id=service_id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.closure",),
+        checkpoint_flow_keys=("service.closure",),
+        opened_at=NOW - timedelta(minutes=1),
+        last_focused_at=NOW - timedelta(minutes=1),
+    )
+    child = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=version.id,
+        parent_flow_key="service.closure.child",
+        service_id=service_id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.closure", "service.closure.child"),
+        checkpoint_flow_keys=("service.closure",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    await _seed_selection(session_factory, source)
+    transition = SelectionTransition(
+        source_selection_id=source.id,
+        delete_selection_ids=frozenset(),
+        reusable_past_selection_ids=frozenset({source.id}),
+        current_selection_ids=frozenset({child.parent_flow_key}),
+        upsert_selections=(child,),
+        child_actions=(),
+        checkpoint_return=None,
+        generic_leaf_return_suppressed=False,
+    )
+
+    async with uow_factory() as uow:
+        await uow.lock_user(user_id)
+        with pytest.raises(ServiceInteractionClosedError):
+            await uow.open_selections.apply(transition, at=NOW)
+    async with session_factory() as session:
+        selections = list(await session.scalars(select(OpenFlowSelection)))
+
+    assert [selection.id for selection in selections] == [source.id]
+
+
+async def test_closed_service_rejects_service_match_reservation_without_touching_capacity(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A reservation waiting behind closure must not consume responder capacity."""
+
+    service_id = await _seed_service(session_factory, key="task6-reservation-closed")
+    requester_id = await _seed_user(session_factory)
+    responder_id = await _seed_user(session_factory, role=OperationalRole.SERVER)
+    profile_id = await _seed_profile(
+        session_factory, user_id=responder_id, name="task6-reservation"
+    )
+    request_id = await _seed_request(
+        session_factory, requester_user_id=requester_id, service_id=service_id
+    )
+    at_interaction_end = NOW + timedelta(hours=3)
+
+    async with uow_factory() as uow:
+        assert await uow.services.claim_interaction_closure(
+            service_id, now=at_interaction_end
+        )
+    async with uow_factory() as uow:
+        with pytest.raises(ServiceInteractionClosedError):
+            await uow.matches.reserve_ranked(request_id, [profile_id], now=NOW)
+    async with session_factory() as session:
+        profile = await session.get(OperationalProfile, profile_id)
+        reservations = list(await session.scalars(select(CapacityReservation)))
+
+    assert profile is not None
+    assert profile.reserved_capacity == 0
+    assert reservations == []
 
 
 async def test_audiences_use_authoritative_user_roles_and_active_attendance(
@@ -724,7 +928,7 @@ async def test_open_selection_apply_persists_transition_rows_without_actions(
 
     async with uow_factory() as uow:
         await uow.lock_user(user_id)
-        await uow.open_selections.apply(transition)
+        await uow.open_selections.apply(transition, at=NOW)
     async with uow_factory() as uow:
         selections = await uow.open_selections.list_for_user(user_id, now=NOW)
 
@@ -792,7 +996,7 @@ async def test_open_selection_apply_rejects_an_upsert_without_its_user_lock(
 
     async with uow_factory() as uow:
         with pytest.raises(RuntimeError, match="locked"):
-            await uow.open_selections.apply(transition)
+            await uow.open_selections.apply(transition, at=NOW)
 
 
 async def test_leaf_return_scopes_checkpoint_focus_to_its_source_branch(
@@ -911,7 +1115,7 @@ async def test_leaf_return_scopes_checkpoint_focus_to_its_source_branch(
 
     async with uow_factory() as uow:
         await uow.lock_user(user_id)
-        await uow.open_selections.apply(transition)
+        await uow.open_selections.apply(transition, at=NOW)
     async with session_factory() as session:
         rows = await session.scalars(
             select(OpenFlowSelection).where(

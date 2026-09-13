@@ -37,15 +37,21 @@ class ServiceLifecycleService:
     ) -> ServiceLifecycleOutcome:
         """Expire each due service atomically and return users for I04 checkpoint work."""
 
-        ended_services = tuple(
+        due_services = tuple(
             service for service in services if now >= service.interaction_ends_at
         )
+        ended_service_ids = frozenset[UUID]()
         affected_user_ids = frozenset[UUID]()
         expired_selection_count = 0
         released_match_count = 0
         ended_attendance_count = 0
         async with self._uow_factory() as uow:
-            for service in ended_services:
+            for service in due_services:
+                if not await uow.services.claim_interaction_closure(
+                    service.id, now=now
+                ):
+                    continue
+                ended_service_ids = ended_service_ids | {service.id}
                 expiry = await uow.open_selections.expire_service_bound(
                     service.id, at=now
                 )
@@ -59,7 +65,7 @@ class ServiceLifecycleService:
                 )
         return ServiceLifecycleOutcome(
             kind="ended",
-            ended_service_ids=frozenset(service.id for service in ended_services),
+            ended_service_ids=ended_service_ids,
             affected_user_ids=affected_user_ids,
             expired_selection_count=expired_selection_count,
             released_match_count=released_match_count,

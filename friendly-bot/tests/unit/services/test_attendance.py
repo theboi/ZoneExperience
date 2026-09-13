@@ -13,6 +13,7 @@ from friendly_bot.persistence.repositories import (
     AttendanceRecord,
     AttendanceStartResult,
     ServiceBoundSelectionExpiry,
+    ServiceInteractionClosedError,
     ServiceRecord,
 )
 from friendly_bot.services.attendance import ServiceAttendanceService
@@ -48,6 +49,7 @@ class AttendanceUow:
         self.locked_user_ids: list[UUID] = []
         self.started: list[tuple[UUID, UUID, str, datetime]] = []
         self._services: dict[UUID, ServiceRecord] = {}
+        self.raise_closed_for_service_id: UUID | None = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -74,6 +76,8 @@ class AttendanceUow:
         attendee_kind: str,
         started_at: datetime,
     ) -> AttendanceStartResult:
+        if service_id == self.raise_closed_for_service_id:
+            raise ServiceInteractionClosedError(service_id)
         self.started.append((user_id, service_id, attendee_kind, started_at))
         return AttendanceStartResult(
             attendance=AttendanceRecord(
@@ -95,11 +99,22 @@ class LifecycleUow:
     """F01-shaped expiry collaborators for one service lifecycle transaction."""
 
     def __init__(self, affected_user_ids: frozenset[UUID]) -> None:
+        self.services = self
         self.open_selections = self
         self.matches = self
         self.attendances = self
         self.affected_user_ids = affected_user_ids
         self.calls: list[tuple[str, UUID, datetime]] = []
+        self.claimed_service_ids: set[UUID] = set()
+
+    async def claim_interaction_closure(
+        self, service_id: UUID, *, now: datetime
+    ) -> bool:
+        self.calls.append(("claim", service_id, now))
+        if service_id in self.claimed_service_ids:
+            return False
+        self.claimed_service_ids.add(service_id)
+        return True
 
     async def __aenter__(self) -> Self:
         return self
@@ -201,6 +216,22 @@ async def test_old_check_in_button_after_doors_close_is_latecomer_not_ordinary()
     assert uow.started == []
 
 
+async def test_old_check_in_button_before_doors_open_is_none_available() -> None:
+    """Accepting a pre-door click would create attendance before the service starts."""
+
+    candidate = service(highkey=True)
+    uow = AttendanceUow()
+    uow.add(candidate)
+    attendance = ServiceAttendanceService(lambda: uow)
+
+    outcome = await attendance.select_service(
+        USER_ID, candidate.id, now=DOORS_OPEN - MINUTE
+    )
+
+    assert outcome.kind == "none_available"
+    assert uow.started == []
+
+
 async def test_old_check_in_button_at_interaction_end_creates_no_attendance() -> None:
     """The inclusive interaction-end boundary must prevent a stale enrollment."""
 
@@ -212,6 +243,21 @@ async def test_old_check_in_button_at_interaction_end_creates_no_attendance() ->
     outcome = await attendance.select_service(
         USER_ID, candidate.id, now=INTERACTION_END
     )
+
+    assert outcome.kind == "ended"
+    assert uow.started == []
+
+
+async def test_service_closure_at_the_attendance_boundary_maps_to_ended() -> None:
+    """A closure claimed after a rendered choice must never become selected."""
+
+    candidate = service(highkey=True)
+    uow = AttendanceUow()
+    uow.add(candidate)
+    uow.raise_closed_for_service_id = candidate.id
+    attendance = ServiceAttendanceService(lambda: uow)
+
+    outcome = await attendance.select_service(USER_ID, candidate.id, now=DOORS_OPEN)
 
     assert outcome.kind == "ended"
     assert uow.started == []
@@ -244,7 +290,29 @@ async def test_lifecycle_expires_only_ended_services_and_returns_affected_users(
     assert outcome.released_match_count == 2
     assert outcome.ended_attendance_count == 4
     assert uow.calls == [
+        ("claim", expired.id, INTERACTION_END),
         ("expire", expired.id, INTERACTION_END),
         ("release", expired.id, INTERACTION_END),
         ("end_attendance", expired.id, INTERACTION_END),
+    ]
+
+
+async def test_lifecycle_skips_service_work_when_the_closure_was_claimed() -> None:
+    """A repeated lifecycle delivery must not re-expire or re-release service work."""
+
+    expired = service(highkey=True)
+    uow = LifecycleUow(frozenset({USER_ID}))
+    lifecycle = ServiceLifecycleService(lambda: uow)
+
+    first = await lifecycle.end_interactions([expired], now=INTERACTION_END)
+    second = await lifecycle.end_interactions([expired], now=INTERACTION_END)
+
+    assert first.ended_service_ids == frozenset({expired.id})
+    assert second.ended_service_ids == frozenset()
+    assert uow.calls == [
+        ("claim", expired.id, INTERACTION_END),
+        ("expire", expired.id, INTERACTION_END),
+        ("release", expired.id, INTERACTION_END),
+        ("end_attendance", expired.id, INTERACTION_END),
+        ("claim", expired.id, INTERACTION_END),
     ]

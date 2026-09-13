@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from typing import Self
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from friendly_bot.domain.publication import PublishedFlowDefinition
+from friendly_bot.domain.state import OpenSelectionState, SelectionTransition
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     CapacityReservation,
@@ -30,7 +33,10 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     User,
 )
-from friendly_bot.persistence.repositories import ServiceRecord
+from friendly_bot.persistence.repositories import (
+    ServiceInteractionClosedError,
+    ServiceRecord,
+)
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.services.lifecycle import ServiceLifecycleService
 
@@ -114,6 +120,87 @@ def _service_record(service: Service) -> ServiceRecord:
         doors_close_at=service.doors_close_at,
         interaction_ends_at=service.interaction_ends_at,
     )
+
+
+class _ClosureBarrierServices:
+    """Pause the real lifecycle immediately after its durable closure claim."""
+
+    def __init__(
+        self,
+        services: object,
+        claimed: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        self._services = services
+        self._claimed = claimed
+        self._release = release
+
+    async def claim_interaction_closure(
+        self, service_id: UUID, *, now: datetime
+    ) -> bool:
+        claim = await self._services.claim_interaction_closure(service_id, now=now)
+        if claim:
+            self._claimed.set()
+            await self._release.wait()
+        return claim
+
+
+class _ClosureBarrierUow:
+    """Expose the real F01 repositories while retaining the claimed service row lock."""
+
+    def __init__(
+        self,
+        factory: Callable[[], UnitOfWork],
+        claimed: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        self._factory = factory
+        self._claimed = claimed
+        self._release = release
+        self._uow: UnitOfWork | None = None
+
+    async def __aenter__(self) -> Self:
+        self._uow = self._factory()
+        active = await self._uow.__aenter__()
+        self.services = _ClosureBarrierServices(
+            active.services, self._claimed, self._release
+        )
+        self.open_selections = active.open_selections
+        self.matches = active.matches
+        self.attendances = active.attendances
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._uow is None:
+            raise RuntimeError("barrier unit of work is not active")
+        await self._uow.__aexit__(*args)
+
+
+async def _assert_lifecycle_closure_fences_writer(
+    uow_factory: Callable[[], UnitOfWork],
+    service: Service,
+    writer: Callable[[asyncio.Event], Awaitable[None]],
+) -> None:
+    """Run a real lifecycle transaction that holds the claimed service row as a barrier."""
+
+    claimed = asyncio.Event()
+    release = asyncio.Event()
+    lifecycle = ServiceLifecycleService(
+        lambda: _ClosureBarrierUow(uow_factory, claimed, release)
+    )
+    lifecycle_task = asyncio.create_task(
+        lifecycle.end_interactions([_service_record(service)], now=NOW)
+    )
+    await asyncio.wait_for(claimed.wait(), timeout=1)
+    writer_ready = asyncio.Event()
+    writer_task = asyncio.create_task(writer(writer_ready))
+    await asyncio.wait_for(writer_ready.wait(), timeout=1)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.05)
+    release.set()
+    await lifecycle_task
+    with pytest.raises(ServiceInteractionClosedError):
+        await writer_task
 
 
 async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
@@ -374,3 +461,215 @@ async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
     assert ongoing_selection is not None
     assert ongoing_selection.expires_at is None
     assert [message.body for message in history] == ["keep this history"]
+
+
+async def test_lifecycle_closure_fences_a_waiting_service_match_reservation(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A reservation blocked behind lifecycle closure must roll back without capacity use."""
+
+    service = Service(
+        id=uuid4(),
+        key="task6-race-match",
+        name="Race match",
+        timezone="UTC",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=2),
+        doors_close_at=NOW - timedelta(hours=1),
+        service_starts_at=NOW - timedelta(hours=2),
+        service_ends_at=NOW - timedelta(hours=1),
+        interaction_ends_at=NOW,
+    )
+    requester_id = uuid4()
+    responder_id = uuid4()
+    profile_id = uuid4()
+    request_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                service,
+                User(id=requester_id, role=OperationalRole.NBNC),
+                User(id=responder_id, role=OperationalRole.SERVER),
+                OperationalProfile(
+                    id=profile_id,
+                    user_id=responder_id,
+                    normalized_name="task6-race-match",
+                    dob=NOW.date(),
+                    interests=["music"],
+                    cg_name=None,
+                    capacity=1,
+                    reserved_capacity=0,
+                ),
+                HumanMatchRequest(
+                    id=request_id,
+                    requester_user_id=requester_id,
+                    service_id=service.id,
+                    kind="normal",
+                    status="pending",
+                    created_at=NOW - timedelta(minutes=1),
+                ),
+            ]
+        )
+
+    async def writer(ready: asyncio.Event) -> None:
+        async with uow_factory() as uow:
+            ready.set()
+            await uow.matches.reserve_ranked(request_id, [profile_id], now=NOW)
+
+    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    async with session_factory() as session:
+        profile = await session.get(OperationalProfile, profile_id)
+        reservations = list(await session.scalars(select(CapacityReservation)))
+
+    assert profile is not None
+    assert profile.reserved_capacity == 0
+    assert reservations == []
+
+
+async def test_lifecycle_closure_fences_a_waiting_service_selection_apply(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A source branch must check its service fence before it can mutate selections."""
+
+    service = Service(
+        id=uuid4(),
+        key="task6-race-selection",
+        name="Race selection",
+        timezone="UTC",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=2),
+        doors_close_at=NOW - timedelta(hours=1),
+        service_starts_at=NOW - timedelta(hours=2),
+        service_ends_at=NOW - timedelta(hours=1),
+        interaction_ends_at=NOW,
+    )
+    user_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                service,
+                User(id=user_id, role=OperationalRole.NBNC),
+            ]
+        )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.race"},
+                flow_key_index={"service.race": ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service.id,
+            published_by_user_id=None,
+        )
+    source = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=version.id,
+        parent_flow_key="service.race",
+        service_id=service.id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.race",),
+        checkpoint_flow_keys=("service.race",),
+        opened_at=NOW - timedelta(minutes=1),
+        last_focused_at=NOW - timedelta(minutes=1),
+    )
+    child = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=version.id,
+        parent_flow_key="service.race.child",
+        service_id=service.id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.race", "service.race.child"),
+        checkpoint_flow_keys=("service.race",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    async with session_factory.begin() as session:
+        session.add(
+            OpenFlowSelection(
+                id=source.id,
+                user_id=source.user_id,
+                flow_version_id=source.flow_version_id,
+                parent_flow_key=source.parent_flow_key,
+                service_id=source.service_id,
+                is_current=source.is_current,
+                is_global_interruptive=source.is_global_interruptive,
+                ancestor_flow_keys=list(source.ancestor_flow_keys),
+                checkpoint_flow_keys=list(source.checkpoint_flow_keys),
+                opened_at=source.opened_at,
+                last_focused_at=source.last_focused_at,
+            )
+        )
+    transition = SelectionTransition(
+        source_selection_id=source.id,
+        delete_selection_ids=frozenset(),
+        reusable_past_selection_ids=frozenset({source.id}),
+        current_selection_ids=frozenset({child.parent_flow_key}),
+        upsert_selections=(child,),
+        child_actions=(),
+        checkpoint_return=None,
+        generic_leaf_return_suppressed=False,
+    )
+
+    async def writer(ready: asyncio.Event) -> None:
+        async with uow_factory() as uow:
+            await uow.lock_user(user_id)
+            ready.set()
+            await uow.open_selections.apply(transition, at=NOW)
+
+    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    async with session_factory() as session:
+        selections = list(await session.scalars(select(OpenFlowSelection)))
+
+    assert [selection.id for selection in selections] == [source.id]
+
+
+async def test_lifecycle_closure_fences_a_waiting_attendance_start(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A writer waiting on the service row cannot create attendance after release."""
+
+    service = Service(
+        id=uuid4(),
+        key="task6-race-attendance",
+        name="Race attendance",
+        timezone="UTC",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=2),
+        doors_close_at=NOW - timedelta(hours=1),
+        service_starts_at=NOW - timedelta(hours=2),
+        service_ends_at=NOW - timedelta(hours=1),
+        interaction_ends_at=NOW,
+    )
+    user_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                service,
+                User(id=user_id, role=OperationalRole.NBNC),
+            ]
+        )
+
+    async def writer(ready: asyncio.Event) -> None:
+        async with uow_factory() as uow:
+            ready.set()
+            await uow.attendances.start_or_switch(
+                user_id,
+                service.id,
+                attendee_kind="ordinary",
+                started_at=NOW - timedelta(minutes=1),
+            )
+
+    await _assert_lifecycle_closure_fences_writer(uow_factory, service, writer)
+    async with session_factory() as session:
+        attendance = await session.scalar(
+            select(ServiceAttendance).where(ServiceAttendance.user_id == user_id)
+        )
+
+    assert attendance is None

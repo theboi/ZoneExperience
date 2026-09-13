@@ -8,7 +8,10 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from friendly_bot.persistence.repositories import ServiceRecord
+from friendly_bot.persistence.repositories import (
+    ServiceInteractionClosedError,
+    ServiceRecord,
+)
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
 type AttendanceOutcomeKind = Literal[
@@ -92,15 +95,20 @@ class ServiceAttendanceService:
         service: ServiceRecord,
         now: datetime,
     ) -> AttendanceOutcome:
+        if now < service.doors_open_at:
+            return AttendanceOutcome("none_available")
         if now >= service.interaction_ends_at:
             return AttendanceOutcome("ended", service.id)
         if now >= service.doors_close_at:
             return AttendanceOutcome("latecomer", service.id)
         await uow.lock_user(user_id)
-        await uow.attendances.start_or_switch(
-            user_id,
-            service.id,
-            attendee_kind="ordinary",
-            started_at=now,
-        )
+        try:
+            await uow.attendances.start_or_switch(
+                user_id,
+                service.id,
+                attendee_kind="ordinary",
+                started_at=now,
+            )
+        except ServiceInteractionClosedError:
+            return AttendanceOutcome("ended", service.id)
         return AttendanceOutcome("selected", service.id)

@@ -191,7 +191,7 @@ async def test_uow_rolls_back_open_selection_when_action_effect_fails(
     with pytest.raises(SimulatedActionFailure):
         async with uow_factory() as uow:
             await uow.lock_user(source.user_id)
-            await uow.open_selections.apply(transition)
+            await uow.open_selections.apply(transition, at=NOW)
             raise SimulatedActionFailure("executor failed before commit")
     async with uow_factory() as verify:
         assert await verify.open_selections.list_for_user(source.user_id, now=NOW) == [
@@ -226,7 +226,7 @@ async def test_reused_uow_does_not_retain_a_previous_user_lock(
         await uow.lock_user(source.user_id)
     async with uow:
         with pytest.raises(RuntimeError, match="locked"):
-            await uow.open_selections.apply(transition)
+            await uow.open_selections.apply(transition, at=NOW)
 
 
 async def test_concurrent_update_claim_has_exactly_one_winner(

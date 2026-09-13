@@ -61,6 +61,14 @@ class DeliveryClaimLostError(RuntimeError):
     """Raised when a worker no longer owns a safe outbound-delivery claim."""
 
 
+class ServiceInteractionClosedError(RuntimeError):
+    """Raised when a service-bound write crosses the interaction boundary."""
+
+    def __init__(self, service_id: UUID) -> None:
+        super().__init__("service interaction is closed")
+        self.service_id = service_id
+
+
 @dataclass(frozen=True, slots=True)
 class UserRecord:
     id: UUID
@@ -108,6 +116,7 @@ class ServiceRecord:
     doors_open_at: datetime
     doors_close_at: datetime
     interaction_ends_at: datetime
+    interaction_closed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +296,10 @@ class ServiceRepository(Protocol):
 
     async def list_ongoing(self, *, now: datetime) -> list[ServiceRecord]: ...
 
+    async def claim_interaction_closure(
+        self, service_id: UUID, *, now: datetime
+    ) -> bool: ...
+
     async def list_due_timestamps(
         self, *, now: datetime
     ) -> list[ServiceTimestampRecord]: ...
@@ -384,7 +397,10 @@ class OpenSelectionRepository(Protocol):
     ) -> list[OpenSelectionState]: ...
 
     async def apply(
-        self, transition: SelectionTransition | CheckpointReturnTransition
+        self,
+        transition: SelectionTransition | CheckpointReturnTransition,
+        *,
+        at: datetime,
     ) -> None: ...
 
     async def expire_service_bound(
@@ -518,7 +534,23 @@ def _service_record(row: Service) -> ServiceRecord:
         doors_open_at=row.doors_open_at,
         doors_close_at=row.doors_close_at,
         interaction_ends_at=row.interaction_ends_at,
+        interaction_closed_at=row.interaction_closed_at,
     )
+
+
+async def _lock_open_service(
+    session: AsyncSession, service_id: UUID, *, at: datetime
+) -> Service:
+    """Fence service-bound mutations behind durable interaction closure state."""
+
+    service = await session.scalar(
+        select(Service).where(Service.id == service_id).with_for_update()
+    )
+    if service is None:
+        raise LookupError("service was not found")
+    if service.interaction_closed_at is not None or at >= service.interaction_ends_at:
+        raise ServiceInteractionClosedError(service_id)
+    return service
 
 
 def _attendance_record(row: ServiceAttendance) -> AttendanceRecord:
@@ -813,6 +845,23 @@ class SqlAlchemyServiceRepository:
         )
         return [_service_record(row) for row in rows]
 
+    async def claim_interaction_closure(
+        self, service_id: UUID, *, now: datetime
+    ) -> bool:
+        """Atomically close a due interaction while retaining its row lock to commit."""
+
+        claimed_id = await self._session.scalar(
+            update(Service)
+            .where(
+                Service.id == service_id,
+                Service.interaction_ends_at <= now,
+                Service.interaction_closed_at.is_(None),
+            )
+            .values(interaction_closed_at=now)
+            .returning(Service.id)
+        )
+        return claimed_id is not None
+
     async def list_due_timestamps(
         self, *, now: datetime
     ) -> list[ServiceTimestampRecord]:
@@ -897,6 +946,7 @@ class SqlAlchemyAttendanceRepository:
         started_at: datetime,
     ) -> AttendanceStartResult:
         await self._lock_user(user_id)
+        await _lock_open_service(self._session, service_id, at=started_at)
         active = await self._session.scalar(
             select(ServiceAttendance)
             .where(
@@ -951,24 +1001,31 @@ class SqlAlchemyAttendanceRepository:
     async def end_active_for_service(
         self, service_id: UUID, *, ended_at: datetime
     ) -> int:
-        active_ids = list(
+        active_rows = list(
             await self._session.scalars(
-                select(ServiceAttendance.id).where(
+                select(ServiceAttendance)
+                .where(
                     ServiceAttendance.service_id == service_id,
                     ServiceAttendance.ended_at.is_(None),
                 )
+                .with_for_update()
             )
         )
-        if not active_ids:
+        active_ids = [row.id for row in active_rows]
+        if not active_rows:
             return 0
-        await self._session.execute(
-            update(ServiceAttendance)
-            .where(
-                ServiceAttendance.id.in_(active_ids),
+        ended_ids = list(
+            await self._session.scalars(
+                update(ServiceAttendance)
+                .where(
+                    ServiceAttendance.id.in_(active_ids),
+                    ServiceAttendance.ended_at.is_(None),
+                )
+                .values(ended_at=ended_at, updated_at=ended_at)
+                .returning(ServiceAttendance.id)
             )
-            .values(ended_at=ended_at, updated_at=ended_at)
         )
-        return len(active_ids)
+        return len(ended_ids)
 
 
 class SqlAlchemyPollStateRepository:
@@ -1224,16 +1281,6 @@ class SqlAlchemyMatchRepository:
     async def reserve_ranked(
         self, request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime
     ) -> MatchAssignmentRecord | None:
-        active_assignment = await self._session.scalar(
-            select(HumanMatchAssignment)
-            .where(
-                HumanMatchAssignment.request_id == request_id,
-                HumanMatchAssignment.released_at.is_(None),
-            )
-            .with_for_update()
-        )
-        if active_assignment is not None:
-            return None
         request = await self._session.scalar(
             select(HumanMatchRequest)
             .where(HumanMatchRequest.id == request_id)
@@ -1241,6 +1288,8 @@ class SqlAlchemyMatchRepository:
         )
         if request is None:
             raise LookupError("human match request was not found")
+        if request.service_id is not None:
+            await _lock_open_service(self._session, request.service_id, at=now)
         active_assignment = await self._session.scalar(
             select(HumanMatchAssignment)
             .where(
@@ -1429,8 +1478,16 @@ class SqlAlchemyOpenSelectionRepository:
         return [_open_selection_state(row) for row in rows]
 
     async def apply(
-        self, transition: SelectionTransition | CheckpointReturnTransition
+        self,
+        transition: SelectionTransition | CheckpointReturnTransition,
+        *,
+        at: datetime,
     ) -> None:
+        source_user_id, source_service_id = await self._source_branch_for(transition)
+        if source_user_id not in self._locked_user_ids:
+            raise RuntimeError("selection transition user is not locked")
+        if source_service_id is not None:
+            await _lock_open_service(self._session, source_service_id, at=at)
         source = await self._source_for(transition)
         user_id = source.user_id
         flow_version_id = source.flow_version_id
@@ -1493,6 +1550,20 @@ class SqlAlchemyOpenSelectionRepository:
                         "selection upsert must stay within the source branch"
                     )
                 await self._upsert(selection)
+
+    async def _source_branch_for(
+        self, transition: SelectionTransition | CheckpointReturnTransition
+    ) -> tuple[UUID, UUID | None]:
+        row = (
+            await self._session.execute(
+                select(OpenFlowSelection.user_id, OpenFlowSelection.service_id).where(
+                    OpenFlowSelection.id == transition.source_selection_id
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise LookupError("selection transition source was not found")
+        return row.tuple()
 
     async def expire_service_bound(
         self, service_id: UUID, *, at: datetime
