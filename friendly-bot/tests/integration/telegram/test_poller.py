@@ -356,11 +356,41 @@ async def test_distinct_callback_presses_on_one_message_are_both_recorded(
         received_at=NOW,
     )
 
-    assert [row.body for row in await _conversation_rows(session_factory)] == [
-        "zone_x.attendance.here",
-        "zone_x.attendance.late",
-    ]
+    assert {
+        (row.source_message_id, row.body)
+        for row in await _conversation_rows(session_factory)
+    } == {
+        (-51, "zone_x.attendance.here"),
+        (-52, "zone_x.attendance.late"),
+    }
     assert dispatcher.dispatched_message_ids == [92, 92]
+    assert await _processed_update_count(session_factory) == 2
+
+
+async def test_callback_and_message_with_same_numeric_id_are_distinct_events(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Sharing F01's source key across Telegram ID spaces would lose one event."""
+
+    dispatcher = RecordingDispatcher()
+    ingress = TelegramIngress(uow_factory, dispatcher)
+
+    await ingress.process(
+        _callback_update(100, message_id=92, callback_data="zone_x.attendance.here"),
+        received_at=NOW,
+    )
+    await ingress.process(
+        _message_update(101, message_id=100, text="Normal message"),
+        received_at=NOW,
+    )
+
+    rows = await _conversation_rows(session_factory)
+    assert [(row.source_message_id, row.body) for row in rows] == [
+        (-100, "zone_x.attendance.here"),
+        (100, "Normal message"),
+    ]
+    assert dispatcher.dispatched_message_ids == [92, 100]
     assert await _processed_update_count(session_factory) == 2
 
 

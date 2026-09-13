@@ -178,8 +178,13 @@ def _normalized_body(message: TelegramMessage) -> str:
 
 
 def _source_event_id(update: IncomingTelegramUpdate, message: TelegramMessage) -> int:
-    """Keep each callback press distinct when Telegram reuses its message ID."""
+    """Map Telegram's two positive ID spaces into F01's one signed source key.
+
+    F01 fixes ``source_kind`` to ``telegram``. Normal messages therefore retain
+    their positive message IDs while callback events use negative update IDs,
+    making the two event identities collision-free in the signed bigint key.
+    """
 
     if message.callback_data is not None:
-        return update.update_id
+        return -update.update_id
     return message.message_id
