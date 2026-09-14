@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
 
+import pytest
 from pydantic import JsonValue
 
 from friendly_bot.actions.context import ActionContext
@@ -27,6 +28,7 @@ from friendly_bot.persistence.models import (
     ServiceAudience,
 )
 from friendly_bot.persistence.repositories import (
+    DiagnosticRecord,
     DiagnosticRepository,
     FlowVersionRecord,
     MatchRequestRecord,
@@ -36,6 +38,10 @@ from friendly_bot.persistence.repositories import (
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.routing.openrouter_gateway import (
+    GatewayProtocolError,
+    GatewayTransportError,
+)
 from friendly_bot.routing.router import ConstrainedRouter
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
 from friendly_bot.telegram import (
@@ -146,9 +152,20 @@ class RejectingMatches:
 
 
 class RecordingDiagnostics:
-    async def record(self, **kwargs: object) -> object:
-        del kwargs
-        return object()
+    reason_codes: list[str]
+
+    def __init__(self) -> None:
+        self.reason_codes = []
+
+    async def record(self, **kwargs: object) -> DiagnosticRecord:
+        safe_context = cast(dict[str, JsonValue], kwargs["safe_context"])
+        self.reason_codes.append(cast(str, safe_context["reason_code"]))
+        return DiagnosticRecord(
+            id=uuid4(),
+            correlation_id=cast(UUID, kwargs["correlation_id"]),
+            severity=cast(str, kwargs["severity"]),
+            safe_summary=cast(str, kwargs["safe_summary"]),
+        )
 
     async def enqueue_admin_notifications(
         self, diagnostic_id: object, *, at: datetime
@@ -252,7 +269,11 @@ def _version(root: DiscussionFlow) -> FlowVersionRecord:
 
 
 def _application(
-    user: UserRecord, version: FlowVersionRecord, service: ServiceRecord
+    user: UserRecord,
+    version: FlowVersionRecord,
+    service: ServiceRecord,
+    *,
+    router: ConstrainedRouter | None = None,
 ) -> FriendlyBotApplication:
     registry = ActionExecutorRegistry()
 
@@ -284,13 +305,17 @@ def _application(
             diagnostics=cast(DiagnosticRepository, object()),
         ),
         registry=registry,
-        router=cast(ConstrainedRouter, object()),
+        router=router or cast(ConstrainedRouter, object()),
         zone_x=zone_x,
     )
 
 
 def _message(
-    user: UserRecord, *, callback: TelegramCallback, message_id: int
+    user: UserRecord,
+    *,
+    message_id: int,
+    text: str | None = None,
+    callback: TelegramCallback | None = None,
 ) -> TelegramMessage:
     assert user.telegram_user_id is not None
     return TelegramMessage(
@@ -298,7 +323,7 @@ def _message(
         sent_at=NOW,
         chat=TelegramChat(user.telegram_user_id, "private"),
         sender=TelegramUser(user.telegram_user_id),
-        text=None,
+        text=text,
         reply_text=None,
         callback=callback,
     )
@@ -338,6 +363,82 @@ def _fixture() -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
     )
     uow = FakeUnitOfWork(user, version, [branch], {service.id: service})
     return _application(user, version, service), uow, user
+
+
+@dataclass
+class FailingRouter:
+    error: GatewayTransportError | GatewayProtocolError
+
+    async def route_update_in_uow(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "reason_code"),
+    [
+        (GatewayTransportError("provider unavailable"), "routing.provider_unavailable"),
+        (
+            GatewayProtocolError("provider returned invalid key"),
+            "routing.provider_invalid_response",
+        ),
+    ],
+)
+async def test_routing_failure_commits_a_redacted_fallback(
+    error: GatewayTransportError | GatewayProtocolError, reason_code: str
+) -> None:
+    """An exhausted provider must not terminate the Telegram runtime task group."""
+
+    root = _root()
+    version = _version(root)
+    user = UserRecord(
+        id=uuid4(),
+        telegram_user_id=77,
+        display_name="Ryan",
+        role=OperationalRole.NBNC,
+        is_admin=False,
+    )
+    service = ServiceRecord(
+        id=uuid4(),
+        key="zone_x_2026_10_18",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=1),
+        doors_close_at=NOW + timedelta(hours=1),
+        interaction_ends_at=NOW + timedelta(hours=2),
+        name="Zone X",
+    )
+    branch = OpenSelectionState(
+        id=uuid4(),
+        user_id=user.id,
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        service_id=None,
+        is_current=True,
+        is_global_interruptive=True,
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    uow = FakeUnitOfWork(user, version, [branch], {service.id: service})
+    application = _application(
+        user,
+        version,
+        service,
+        router=cast(ConstrainedRouter, FailingRouter(error)),
+    )
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=8, text="help"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result == DispatchResult("failed")
+    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
+        {"text": "Sorry, an error occurred. Error log: 77."}
+    ]
+    assert uow.diagnostics.reason_codes == [reason_code]
 
 
 async def test_dispatch_persists_event_child_for_its_later_button_callback() -> None:

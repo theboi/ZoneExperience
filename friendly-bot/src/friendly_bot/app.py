@@ -27,7 +27,7 @@ from friendly_bot.actions.registry import (
     ActionExecutorRegistry,
     build_action_registry,
 )
-from friendly_bot.actions.runner import ActionRunner
+from friendly_bot.actions.runner import DEFAULT_UNHANDLED_ERROR_TEXT, ActionRunner
 from friendly_bot.config.settings import (
     PROJECT_ROOT,
     DatabaseSettings,
@@ -64,7 +64,11 @@ from friendly_bot.persistence.repositories import (
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
-from friendly_bot.routing.openrouter_gateway import OpenRouterGateway
+from friendly_bot.routing.openrouter_gateway import (
+    GatewayProtocolError,
+    GatewayTransportError,
+    OpenRouterGateway,
+)
 from friendly_bot.routing.router import ConstrainedRouter, IncomingText, RoutingTerminal
 from friendly_bot.services import (
     AudienceResolver,
@@ -182,7 +186,7 @@ class RuntimeRoutingPolicy:
 class DispatchResult:
     """One ingress decision without carrying Telegram content out of the UoW."""
 
-    kind: Literal["selected", "no_match", "clarified", "ignored", "expired"]
+    kind: Literal["selected", "no_match", "clarified", "ignored", "expired", "failed"]
     selected_flow_keys: tuple[str, ...] = ()
 
 
@@ -266,14 +270,31 @@ class FriendlyBotApplication:
                 )
                 return DispatchResult("selected", executed)
 
-        routing = await self._router.route_update_in_uow(
-            unit_of_work,
-            user_id=user.id,
-            incoming=IncomingText(
-                body=incoming.text, replied_to_body=incoming.reply_text
-            ),
-            now=now,
-        )
+        try:
+            routing = await self._router.route_update_in_uow(
+                unit_of_work,
+                user_id=user.id,
+                incoming=IncomingText(
+                    body=incoming.text, replied_to_body=incoming.reply_text
+                ),
+                now=now,
+            )
+        except GatewayTransportError:
+            return await self._routing_failure_result(
+                unit_of_work,
+                user=user,
+                correlation_id=correlation_id,
+                now=now,
+                reason_code="routing.provider_unavailable",
+            )
+        except GatewayProtocolError:
+            return await self._routing_failure_result(
+                unit_of_work,
+                user=user,
+                correlation_id=correlation_id,
+                now=now,
+                reason_code="routing.provider_invalid_response",
+            )
         executed_flow_keys: set[str] = set()
         selected: list[str] = []
         for decision in routing.selected_keys:
@@ -741,6 +762,36 @@ class FriendlyBotApplication:
                 eligible_at=now,
             )
         )
+
+    async def _routing_failure_result(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        user: UserRecord,
+        correlation_id: UUID,
+        now: datetime,
+        reason_code: str,
+    ) -> DispatchResult:
+        diagnostic = await unit_of_work.diagnostics.record(
+            correlation_id=correlation_id,
+            severity="error",
+            safe_summary="routing provider failed",
+            safe_context={"reason_code": reason_code},
+            at=now,
+        )
+        await unit_of_work.diagnostics.enqueue_admin_notifications(
+            diagnostic.id, at=now
+        )
+        await self._enqueue_fixed_text(
+            unit_of_work,
+            user=user,
+            correlation_id=correlation_id,
+            now=now,
+            text=DEFAULT_UNHANDLED_ERROR_TEXT.format(
+                telegram_user_id=user.telegram_user_id
+            ),
+        )
+        return DispatchResult("failed")
 
 
 class _ApplicationNavigation(ActionNavigation):
