@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from uuid import UUID
 
@@ -127,6 +127,22 @@ class ActionContext:
         """Retain only the typed assignment for subsequent local action executors."""
 
         self._match_assignment = assignment
+
+    def for_child(
+        self,
+        child: DiscussionFlow,
+        *,
+        event_payload: dict[str, JsonValue] | None,
+    ) -> ActionContext:
+        """Create a fresh terminal-event scope for one direct child only."""
+
+        child_context = replace(
+            self,
+            flow=child,
+            local_values={**self.local_values, **(event_payload or {})},
+        )
+        child_context._match_assignment = self._match_assignment
+        return child_context
 
     @property
     def match_assignment(self) -> MatchAssignmentRecord | None:

@@ -13,15 +13,29 @@ from friendly_bot.actions.registry import (
     UnregisteredActionExecutorError,
     concrete_action_types,
 )
+from friendly_bot.actions.runner import (
+    DEFAULT_UNHANDLED_ERROR_TEXT,
+    ActionRunner,
+    ActionRunResult,
+    DirectEventHandlerInvariantError,
+    RetryableActionExecutionError,
+    send_unhandled_action_error,
+)
 
 __all__ = [
+    "DEFAULT_UNHANDLED_ERROR_TEXT",
     "ActionContext",
     "ActionDependencies",
     "ActionExecutorRegistry",
     "ActionRegistryCompletenessError",
+    "ActionRunResult",
+    "ActionRunner",
+    "DirectEventHandlerInvariantError",
     "DuplicateActionExecutorError",
     "ReservedActionEventError",
+    "RetryableActionExecutionError",
     "TerminalActionEventAlreadyEmittedError",
     "UnregisteredActionExecutorError",
     "concrete_action_types",
+    "send_unhandled_action_error",
 ]
