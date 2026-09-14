@@ -1245,7 +1245,9 @@ async def _poll_forever(
 ) -> None:
     while not stop_event.is_set():
         await runtime_lock.ensure_healthy()
-        await runtime.poller.run_once(now=datetime.now(UTC))
+        result = await runtime.poller.run_once(now=datetime.now(UTC))
+        if result.gateway_failure is not None:
+            await _wait_for_stop(stop_event, seconds=0.5)
 
 
 async def _outbox_forever(
