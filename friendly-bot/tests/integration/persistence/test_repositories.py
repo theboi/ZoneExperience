@@ -38,6 +38,7 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
+    TelegramOutboundPause,
     TimestampDeliveryClaim,
     User,
 )
@@ -1446,6 +1447,72 @@ async def test_delivery_claim_exposes_a_provider_neutral_immutable_message(
 
     assert stored is not None
     assert stored.status == "claimed"
+
+
+async def test_expired_claim_recovery_and_stale_start_do_not_deadlock(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A recovering worker and stale starter must serialize without a lock cycle."""
+
+    user_id = await _seed_user(session_factory)
+    delivery = NewOutboundDelivery(
+        idempotency_key="delivery:stale-start",
+        user_id=user_id,
+        telegram_chat_id=72,
+        kind="message",
+        payload={"text": "stale start"},
+        eligible_at=NOW,
+    )
+    lease_duration = timedelta(minutes=1)
+    expired_at = NOW + lease_duration
+    async with uow_factory() as uow:
+        enqueued = await uow.deliveries.enqueue(delivery)
+    async with uow_factory() as uow:
+        original_claim = await uow.deliveries.claim_next_safe(
+            now=NOW, lease_duration=lease_duration
+        )
+
+    assert original_claim is not None
+    assert original_claim.claim_token is not None
+    async with session_factory.begin() as pause_holder:
+        await pause_holder.scalar(
+            select(TelegramOutboundPause)
+            .where(TelegramOutboundPause.singleton_id == 1)
+            .with_for_update()
+        )
+
+        async def stale_start() -> object:
+            async with uow_factory() as uow:
+                try:
+                    return await uow.deliveries.start_attempt(
+                        enqueued.id,
+                        uuid4(),
+                        claim_token=original_claim.claim_token,
+                        started_at=expired_at,
+                    )
+                except DeliveryClaimLostError as error:
+                    return error
+
+        async def recover() -> object:
+            async with uow_factory() as uow:
+                return await uow.deliveries.claim_next_safe(
+                    now=expired_at, lease_duration=lease_duration
+                )
+
+        stale_task = asyncio.create_task(stale_start())
+        await asyncio.sleep(0.05)
+        recovery_task = asyncio.create_task(recover())
+        await asyncio.sleep(0.05)
+
+    recovered, stale = await asyncio.wait_for(
+        asyncio.gather(recovery_task, stale_task), timeout=1
+    )
+
+    assert recovered is not None
+    assert recovered.claim_token is not None
+    assert recovered.claim_token != original_claim.claim_token
+    assert isinstance(stale, DeliveryClaimLostError)
 
 
 async def test_delivery_retry_at_is_exact_and_attempt_result_metadata_persists(

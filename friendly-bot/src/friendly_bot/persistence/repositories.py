@@ -1901,9 +1901,6 @@ class SqlAlchemyDeliveryRepository:
         claim_token: UUID,
         started_at: datetime,
     ) -> DeliveryAttemptRecord:
-        pause = await self._locked_telegram_outbound_pause()
-        if pause.pause_until > started_at:
-            raise DeliveryClaimLostError("outbound delivery claim was paused")
         delivery = await self._session.scalar(
             select(OutboundDelivery)
             .where(OutboundDelivery.id == delivery_id)
@@ -1917,6 +1914,13 @@ class SqlAlchemyDeliveryRepository:
             or delivery.claim_expires_at <= started_at
         ):
             raise DeliveryClaimLostError("outbound delivery claim was lost")
+        # Delivery operations always acquire the delivery row before the
+        # singleton pause row.  Keeping this order consistent with
+        # ``claim_next_safe`` prevents a recovering worker and a stale starter
+        # from holding the two locks in opposite orders.
+        pause = await self._locked_telegram_outbound_pause()
+        if pause.pause_until > started_at:
+            raise DeliveryClaimLostError("outbound delivery claim was paused")
         attempt_number = await self._session.scalar(
             select(
                 func.coalesce(func.max(OutboundDeliveryAttempt.attempt_number), 0)
