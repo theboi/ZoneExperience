@@ -29,7 +29,7 @@
 - Consumes: `GatewayTransportError`, `GatewayProtocolError`, `UnitOfWork.diagnostics`, and `_enqueue_fixed_text`.
 - Produces: `DispatchResult(kind="failed")` and `_record_routing_failure(...)` with no provider/user text.
 
-- [ ] **Step 1: Write failing application tests**
+- [x] **Step 1: Write failing application tests**
 
 Add a router double whose `route_update_in_uow` raises each closed gateway error.  Assert the observable output and diagnostic facts, not the double call:
 
@@ -49,13 +49,13 @@ Use a separate literal expectation for protocol failure:
 assert diagnostics.reason_codes == ["routing.provider_invalid_response"]
 ```
 
-- [ ] **Step 2: Run the two tests and verify RED**
+- [x] **Step 2: Run the two tests and verify RED**
 
 Run: `uv run pytest tests/e2e/test_application_dispatch.py -q -k 'routing_failure'`
 
 Expected: FAIL because `GatewayTransportError` and `GatewayProtocolError` escape `FriendlyBotApplication.dispatch`.
 
-- [ ] **Step 3: Add the narrow application boundary**
+- [x] **Step 3: Add the narrow application boundary**
 
 Import only `GatewayTransportError` and `GatewayProtocolError`.  Wrap the single
 `route_update_in_uow(...)` call, map the two exact exception types to literal reason codes,
@@ -64,13 +64,13 @@ and queue `DEFAULT_UNHANDLED_ERROR_TEXT.format(telegram_user_id=user.telegram_us
 Extend `DispatchResult.kind` with `"failed"`.  Do not catch `GatewayPrivacyConfigurationError`,
 `asyncio.CancelledError`, database errors, or a generic `Exception`.
 
-- [ ] **Step 4: Run the focused application suite and verify GREEN**
+- [x] **Step 4: Run the focused application suite and verify GREEN**
 
 Run: `uv run pytest tests/e2e/test_application_dispatch.py -q`
 
 Expected: PASS, including normal direct-command, router-terminal, callback, and the new failure tests.
 
-- [ ] **Step 5: Commit and push Task 1**
+- [x] **Step 5: Commit and push Task 1**
 
 Run: `git add src/friendly_bot/app.py tests/e2e/test_application_dispatch.py && git commit -m "fix: contain routing provider failures" && git push origin main`
 
@@ -84,7 +84,7 @@ Run: `git add src/friendly_bot/app.py tests/e2e/test_application_dispatch.py && 
 - Consumes: `PollResult.gateway_failure` and `_wait_for_stop(stop_event, seconds=0.5)`.
 - Produces: one wait before retry after a typed Telegram API failure, with the durable cursor still owned by `TelegramPoller`.
 
-- [ ] **Step 1: Write a failing loop test**
+- [x] **Step 1: Write a failing loop test**
 
 Use a real `asyncio.Event`, a fake healthy lock, and a fake poller that yields once and returns
 `PollResult(0, (), TelegramApiError(502))`.  Start `_poll_forever`, yield control briefly,
@@ -92,25 +92,25 @@ and assert that `run_once` has been called once before setting the stop event.  
 change that makes this fail is removing the post-failure idle wait, which would immediately
 call `run_once` again.
 
-- [ ] **Step 2: Run the focused loop test and verify RED**
+- [x] **Step 2: Run the focused loop test and verify RED**
 
 Run: `uv run pytest tests/unit/test_runtime_loops.py -q`
 
 Expected: FAIL because the current loop immediately begins the next poll after a typed failure.
 
-- [ ] **Step 3: Add the typed-failure wait**
+- [x] **Step 3: Add the typed-failure wait**
 
 Store `result = await runtime.poller.run_once(...)`.  When `result.gateway_failure is not None`,
 await `_wait_for_stop(stop_event, seconds=0.5)`.  Leave exceptions unhandled so cancellation,
 lock loss, and incomplete transactions retain their fail-closed semantics.
 
-- [ ] **Step 4: Run Telegram and loop tests and verify GREEN**
+- [x] **Step 4: Run Telegram and loop tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/test_runtime_loops.py tests/unit/telegram tests/integration/telegram -q`
 
 Expected: PASS; returned poll failures neither advance the cursor nor cause an immediate retry loop.
 
-- [ ] **Step 5: Commit and push Task 2**
+- [x] **Step 5: Commit and push Task 2**
 
 Run: `git add src/friendly_bot/app.py tests/unit/test_runtime_loops.py && git commit -m "fix: back off after telegram poll failures" && git push origin main`
 
@@ -126,7 +126,7 @@ Run: `git add src/friendly_bot/app.py tests/unit/test_runtime_loops.py && git co
 - Consumes: `OnboardingService.handle_in_uow`, `ServiceAttendanceService.resolve_for_new_nbnc_in_uow`, `PublishedZoneX`, `_open_root`, and `normalize_command`.
 - Produces: `DispatchResult(kind="onboarding")`; an unnamed-user `/start` path with no `ConstrainedRouter` call; a saved display name followed by selected/late/system root opening.
 
-- [ ] **Step 1: Write failing `/start` boundary tests**
+- [x] **Step 1: Write failing `/start` boundary tests**
 
 Add a router double that raises `AssertionError` if called.  Use the real onboarding service with a transaction-shaped fake UoW and a literal unnamed user.  Assert:
 
@@ -143,14 +143,14 @@ Then dispatch `"Ari"` against the persisted user fixture and assert its display 
 or selected Zone X root has been opened according to the literal service time fixture.
 Add an existing-user `/start` test that opens the system root without model routing.
 
-- [ ] **Step 2: Run the new `/start` tests and verify RED**
+- [x] **Step 2: Run the new `/start` tests and verify RED**
 
 Run: `uv run pytest tests/e2e/test_application_dispatch.py -q -k 'start or onboarding'`
 
 Expected: FAIL because the current application sends `/start` to `route_update_in_uow` and
 does not own an `OnboardingService`.
 
-- [ ] **Step 3: Compose onboarding and attendance in `FriendlyBotApplication`**
+- [x] **Step 3: Compose onboarding and attendance in `FriendlyBotApplication`**
 
 Add an injected `OnboardingService` field and construct it once in `build_application` from
 the existing UoW factory.  For non-callback text, call `handle_in_uow` before opening normal
@@ -161,21 +161,21 @@ for `none_available` or `ended`.  Map `existing_start` to the system root.  Only
 `existing` result continues to direct command/model routing.  Reuse caller-owned UoW methods
 throughout.
 
-- [ ] **Step 4: Make the system no-service root visibly configured**
+- [x] **Step 4: Make the system no-service root visibly configured**
 
 Move the existing literal `"What would you like help with?"` from the system root's
 `return_actions` into its root `actions` as `{"type": "send_message", "text": ...}` while
 leaving the checkpoint return copy intact.  Add or update the seed validation test to assert
 the parsed system root has this action; do not make `/start` an OpenRouter message trigger.
 
-- [ ] **Step 5: Run focused onboarding/application/seed tests and verify GREEN**
+- [x] **Step 5: Run focused onboarding/application/seed tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/onboarding tests/unit/services/test_attendance.py tests/e2e/test_application_dispatch.py tests/e2e/test_seed_runtime.py -q`
 
 Expected: PASS, with `/start` and first-contact paths avoiding the model router and existing
 flow routing behavior retained for named users.
 
-- [ ] **Step 6: Commit and push Task 3**
+- [x] **Step 6: Commit and push Task 3**
 
 Run: `git add src/friendly_bot/app.py seeds/zone-x.json tests/e2e && git commit -m "fix: compose deterministic telegram onboarding" && git push origin main`
 
@@ -189,13 +189,13 @@ Run: `git add src/friendly_bot/app.py seeds/zone-x.json tests/e2e && git commit 
 - Consumes: merged `main`, the guarded operator-owned PostgreSQL namespace, and ignored local `.env`.
 - Produces: fresh automated evidence and a controlled Telegram test request.
 
-- [ ] **Step 1: Run the full automated suite from a fresh base directory**
+- [x] **Step 1: Run the full automated suite from a fresh base directory**
 
 Run: `uv run pytest --basetemp /private/tmp/friendly-bot-provider-start-tests -q`
 
 Expected: all tests pass; integration tests without a supplied database URL may skip only according to their existing markers.
 
-- [ ] **Step 2: Run static verification**
+- [x] **Step 2: Run static verification**
 
 Run: `uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot`
 

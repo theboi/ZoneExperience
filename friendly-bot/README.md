@@ -90,7 +90,7 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    The process publishes the bundled Zone X seed idempotently, verifies Telegram webhook state, obtains one PostgreSQL advisory lock, then runs polling, outbox delivery, and service scheduling together. A second process against the same database should refuse to start rather than compete for Telegram updates.
 
-6. Before inviting real users, send `/start` from a controlled Telegram test account and confirm that it opens the expected Zone X flow and asset. Leave the process running only if this check succeeds.
+6. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
 
 ## Stopping and local data lifecycle
 
@@ -118,6 +118,7 @@ uv run python scripts/db_runtime_check.py reset --confirm-reset
 | `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run as `ryanthe` from `/Users/ryanthe/Dev/ZoneExperience/friendly-bot`; do not pass overrides to bypass the guard. |
 | Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
 | `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |
+| OpenRouter routing is temporarily unavailable or returns an invalid response | Friendly Bot records a redacted diagnostic, sends the user the fixed error-log message, commits that update, and continues polling. Restore the provider rather than weakening the privacy configuration. |
 | Telegram webhook preflight fails | Check the dedicated bot token and Telegram connectivity. The runtime will not poll unless it can safely inspect and, when configured, clear the webhook. |
 | `telegram_runtime_already_running` | Another Friendly Bot process owns the database's polling lock. Stop that process; do not run two pollers. |
 
