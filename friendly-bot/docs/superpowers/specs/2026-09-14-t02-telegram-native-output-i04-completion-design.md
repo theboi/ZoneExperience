@@ -95,6 +95,29 @@ repository methods that use its existing service/request/capacity locking rules.
 those operations only; it neither traverses SQLAlchemy models nor creates another session.
 R03's candidate eligibility and ranking policy do not change.
 
+The repair also corrects a real operational-login mismatch in the existing query: an
+`OperationalProfile` belongs to the role-owner user, but its active Telegram identity is the
+attached `OperationalLogin.user_id`. Eligibility must read the exact role from the owner,
+but attendance, recipient display name, and chat ID from the active attached user. Candidates
+without an active attached Telegram user, positive chat ID, qualifying attendance, or capacity
+are ineligible. Tests must use the real split identity rather than fixtures that attach
+attendance to the role owner.
+
+The frozen DTOs are `MatchRequestRecord` (requester, optional service, normal/safety kind,
+interest, meeting preference, status, timestamps) and `MatchResponderRecord` (assignment,
+profile, active recipient user/chat, local display name, CG name, contact URL). The repository
+offers guarded get-or-create request, requester-owned interest/confirmation/request lookup,
+current responder, release-active responder, and exclusion operations. Reservation marks a
+request reserved; confirmation is idempotent only for the same preference; release is one
+atomic assignment/reservation/capacity update and returns the prior recipient; service expiry
+also resolves released requests.
+
+I04 already runs under T02's user-locked ingress UoW, so `MatchingService` must additionally
+offer caller-owned-UoW reserve/safety/rematch methods. It must not open a second session from
+inside action execution. Every service-bound mutation follows one order: requester user lock,
+service lock/open-boundary fence, request lock, active assignment lock, reservation lock, then
+the guarded profile-capacity update. This repair creates no table or migration.
+
 ## Runtime decision
 
 All future local acceptance work uses `ryanthe` (UID 501) and a new, checked namespace and
