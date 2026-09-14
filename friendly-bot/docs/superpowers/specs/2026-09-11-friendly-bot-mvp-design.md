@@ -242,7 +242,7 @@ Structured Telegram user IDs and DOB fields are never sent to OpenRouter. User-a
 
 ### 8.3 OpenRouter policy
 
-The MVP uses `qwen/qwen3.7-flash`, declared in `hyperparameters.py`. Every request requires zero-data-retention routing and denies provider data collection. Prompt logging remains disabled. If no compliant endpoint is available, the request fails closed and emits the reserved `error` event; it never silently relaxes privacy requirements.
+The MVP uses `mistralai/mistral-nemo`, declared in `hyperparameters.py`. Every request requires zero-data-retention routing and denies provider data collection. Prompt logging remains disabled. If no compliant endpoint is available, the request fails closed and emits the reserved `error` event; it never silently relaxes privacy requirements.
 
 The OpenRouter API key is a secret supplied outside source control.
 

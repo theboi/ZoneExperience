@@ -14,7 +14,7 @@
 
 - Start only after coordinator-passed `PG` and G1 F01 evidence are both reachable on `origin/main`.
 - Use F01's `UnitOfWork` and repository DTOs; add no schema, migration, ORM session, adapter, compatibility shim, or fallback store.
-- Use `qwen/qwen3.7-flash` only from `hyperparameters.py`; API keys remain environment-only.
+- Use `mistralai/mistral-nemo` only from `hyperparameters.py`; API keys remain environment-only.
 - Every OpenRouter request sets ZDR, denies collection, contains no structured Telegram ID or DOB, and opts into no debug, trace, or metadata logging fields. `logprobs` is not a logging control and is not used as one.
 - Gateway construction fails closed unless R03's non-secret `FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION` has the exact value `disabled-globally-or-friendly-bot-key-excluded`. This is an operator attestation, not proof of the account state; operational use remains blocked until a redacted account-level receipt proves either disabled Input & Output Logging or exclusion of the dedicated Friendly Bot key.
 - The model returns configured/reserved keys only; the harness alone renders fixed user-facing copy.
@@ -62,7 +62,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels(httpx_m
 ```
 
 - [ ] **Step 2: Run the failing test.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q`. Expected: FAIL because the R03 modules do not exist.
-- [ ] **Step 3: Implement the strict gateway.** Put `model_config = ConfigDict(extra="forbid")` on every prompt DTO. Define constants `OPENROUTER_MODEL = "qwen/qwen3.7-flash"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}`; never add `logprobs`, debug, trace, or metadata logging fields. Fail construction closed unless the exact non-secret attestation is present; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
+- [ ] **Step 3: Implement the strict gateway.** Put `model_config = ConfigDict(extra="forbid")` on every prompt DTO. Define constants `OPENROUTER_MODEL = "mistralai/mistral-nemo"`, `ROUTING_MAX_ATTEMPTS = 3`, `PERSONA_IDLE_AFTER = timedelta(hours=48)`, and `PERSONA_MAX_UNSUMMARIZED_TOKENS`. Post only prompt-safe DTO serialization with `provider={"zdr": True, "data_collection": "deny"}`; never add `logprobs`, debug, trace, or metadata logging fields. Fail construction closed unless the exact non-secret attestation is present; parse exactly `{"key": str}` and reject a key outside `allowed_keys`.
 - [ ] **Step 4: Run focused checks.** Run: `cd friendly-bot && uv run pytest tests/unit/routing/test_openrouter_gateway.py -q && uv run ruff check src/friendly_bot/routing tests/unit/routing && uv run mypy src/friendly_bot/routing`. Expected: exit 0.
 - [ ] **Step 5: Commit.** Run: `git add friendly-bot/src/friendly_bot/hyperparameters.py friendly-bot/src/friendly_bot/routing friendly-bot/tests/unit/routing/test_openrouter_gateway.py && git commit -m "feat: add private OpenRouter key gateway"`.
 

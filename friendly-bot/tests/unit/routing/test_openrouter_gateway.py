@@ -439,7 +439,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels() -> No
 
     payload = client.requests[0]["json"]
     serialized = json.dumps(payload)
-    assert payload["model"] == "qwen/qwen3.7-flash"
+    assert payload["model"] == "mistralai/mistral-nemo"
     assert payload["provider"] == {"zdr": True, "data_collection": "deny"}
     assert set(payload) == {"model", "provider", "messages"}
     assert all(sentinel not in serialized for sentinel in _IDENTIFIER_SENTINELS)
@@ -1142,7 +1142,7 @@ async def test_gateway_cancellation_keeps_stdlib_worker_request_snapshots(
         (
             {"Authorization": "Bearer test-only", "Content-Type": "application/json"},
             {
-                "model": "qwen/qwen3.7-flash",
+                "model": "mistralai/mistral-nemo",
                 "provider": {"zdr": True, "data_collection": "deny"},
                 "messages": [
                     {
