@@ -1,0 +1,115 @@
+# Friendly Bot MVP: operator launch guide
+
+This is the local operator runbook for the Friendly Bot MVP. Run every command from this directory:
+
+```sh
+cd /Users/ryanthe/Dev/ZoneExperience/friendly-bot
+```
+
+This is a live Telegram runtime, not a harmless preview. Starting it clears a configured webhook before long polling (while preserving pending updates), processes queued deliveries, and runs scheduled work. Use the intended bot token and database only.
+
+## Runtime boundary
+
+The local database is deliberately locked to this machine's `ryanthe` account and this checkout:
+
+| Setting | Required value |
+| --- | --- |
+| macOS user ID | `501` (`ryanthe`) |
+| Compose project and network | `friendly-bot-ryanthe` |
+| PostgreSQL volume | `friendly-bot-ryanthe-postgres` |
+| PostgreSQL address | `127.0.0.1:5833` |
+| Local PostgreSQL credentials | `.runtime/ryanthe/postgres.env` |
+
+Do not override these values, change the port, or point the bot at an arbitrary or shared database. The guarded runtime script rejects a different account, checkout, project, network, volume, or port before it invokes Docker.
+
+## Prerequisites
+
+- Run as the macOS `ryanthe` user (`id -u` must print `501`).
+- Install Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
+- Install and start Docker Desktop with the Docker Compose v2 plugin. `docker compose version` must succeed.
+- Have a dedicated Telegram bot token and an OpenRouter API key ready. Never commit either value.
+- Confirm the OpenRouter account/key privacy setting excludes Friendly Bot input/output logging (or logging is disabled globally). The application fails closed without the attestation below.
+
+## Launch
+
+1. Install the pinned project environment and validate the guarded database namespace.
+
+   ```sh
+   uv sync
+   uv run python scripts/db_runtime_check.py verify
+   ```
+
+   If this reports `Docker Compose v2 plugin is unavailable`, enable or install the Compose v2 plugin in Docker Desktop and rerun the command. Do not work around the guard with a differently named Compose project or another database.
+
+2. Start the local PostgreSQL container. On its first run, the guard creates a mode-`600`, ignored credential file at `.runtime/ryanthe/postgres.env`.
+
+   ```sh
+   uv run python scripts/db_runtime_check.py up
+   ```
+
+3. Create the local environment file and replace every placeholder. Copy the PostgreSQL password from the generated `.runtime/ryanthe/postgres.env` file into the database URL; do not paste it into source control, logs, tickets, or chat.
+
+   ```sh
+   cp .env.example .env
+   ```
+
+   Set these values in `.env`:
+
+   ```dotenv
+   FRIENDLY_BOT_DATABASE_URL=postgresql+asyncpg://friendly_bot:<POSTGRES_PASSWORD>@127.0.0.1:5833/friendly_bot
+   TELEGRAM_BOT_TOKEN=<dedicated_telegram_bot_token>
+   OPENROUTER_API_KEY=<openrouter_api_key>
+   FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION=disabled-globally-or-friendly-bot-key-excluded
+   ```
+
+   The literal attestation value is required. It does not contain a secret; it records the operator's confirmation that the configured OpenRouter account/key meets the privacy requirement.
+
+4. Validate configuration locally, then apply the schema migrations. The validation command does not contact Telegram or OpenRouter and does not print credentials.
+
+   ```sh
+   uv run python -c 'from friendly_bot.config.settings import DatabaseSettings, TelegramSettings; from friendly_bot.routing.openrouter_gateway import OpenRouterGateway; DatabaseSettings(); TelegramSettings(); OpenRouterGateway.from_environment(); print("configuration accepted")'
+   uv run alembic upgrade head
+   ```
+
+   If the migration reports that PostgreSQL is not accepting connections yet, wait for the container health check to become healthy and rerun the same migration command. Do not change the configured port.
+
+5. Start the runtime.
+
+   ```sh
+   uv run python -m friendly_bot
+   ```
+
+   The process publishes the bundled Zone X seed idempotently, verifies Telegram webhook state, obtains one PostgreSQL advisory lock, then runs polling, outbox delivery, and service scheduling together. A second process against the same database should refuse to start rather than compete for Telegram updates.
+
+6. Before inviting real users, send `/start` from a controlled Telegram test account and confirm that it opens the expected Zone X flow and asset. Leave the process running only if this check succeeds.
+
+## Stopping and local data lifecycle
+
+Press `Ctrl-C` in the terminal running Friendly Bot. It stops the polling, outbox, and scheduler loops and releases the runtime lock.
+
+To stop PostgreSQL while preserving the local MVP data:
+
+```sh
+uv run python scripts/db_runtime_check.py down
+```
+
+To delete all local PostgreSQL data and immediately recreate the container, stop Friendly Bot first, then run:
+
+```sh
+uv run python scripts/db_runtime_check.py reset --confirm-reset
+```
+
+`reset` deletes the `friendly-bot-ryanthe-postgres` volume. It is irreversible for this local database; use it only when a clean MVP database is intended.
+
+## Operator failure guide
+
+| Symptom | Correct response |
+| --- | --- |
+| `Docker Compose v2 plugin is unavailable` | Enable/install the Docker Compose v2 plugin in Docker Desktop, then rerun the guarded command. |
+| `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run as `ryanthe` from `/Users/ryanthe/Dev/ZoneExperience/friendly-bot`; do not pass overrides to bypass the guard. |
+| Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
+| `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |
+| Telegram webhook preflight fails | Check the dedicated bot token and Telegram connectivity. The runtime will not poll unless it can safely inspect and, when configured, clear the webhook. |
+| `telegram_runtime_already_running` | Another Friendly Bot process owns the database's polling lock. Stop that process; do not run two pollers. |
+
+The `.env` file and `.runtime/` directory are intentionally ignored by Git. Keep secrets there only and rotate a credential immediately if it is exposed.
