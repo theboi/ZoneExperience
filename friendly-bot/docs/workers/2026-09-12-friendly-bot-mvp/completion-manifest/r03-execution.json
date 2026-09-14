@@ -2,8 +2,8 @@
   "schema_version": 1,
   "worker": "r03",
   "phase": "execution",
-  "status": "source-approved-execution-complete-operational-privacy-blocked",
-  "date": "2026-09-13",
+  "status": "source-approved-execution-complete-g2-attested",
+  "date": "2026-09-14",
   "prior_feature_commit": "527184361ed64c154647580caefe262435bb69d3",
   "privacy_repair_implementation_commit": "ab4d46c27fb459cf0bf8d3ed7aee0e5c0d62e322",
   "source_privacy_repair_commit": "2f89abaf05c49b73b9d9452a07da671ead7683c9",
@@ -17,7 +17,7 @@
   "coordinator_status_inspected_commit": "ca2b2c00db23126dad10cdc82fb271d5375db259",
   "focused_evidence": {
     "command": "uv run pytest tests/unit/routing tests/unit/persona tests/unit/matching tests/integration/routing tests/integration/matching -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
-    "result": "Earlier focused R03 post-repair verification: exit 0; 85 passed, 1 skipped because a Postgres URL was absent; Ruff check and format check clean; mypy found no issues in 30 source files. This is not a whole-project test claim."
+    "result": "Fresh loopback-only PostgreSQL verification: exit 0; 92 passed, 1 existing SQLAlchemy Row.tuple() deprecation warning; Ruff clean, 89 files formatted, and mypy found no issues in 39 source files. This is focused R03 evidence, not a whole-project test claim."
   },
   "independent_final_source_review": {
     "scope": "Configuration-validation context privacy repair 1f325bff083dcdeaab3bc150b02e2762659463c0",
@@ -75,8 +75,8 @@
     "accepted_attestation": "disabled-globally-or-friendly-bot-key-excluded",
     "default": false,
     "attestation_meaning": "Operator declaration only; it is not proof of account state.",
-    "account_evidence_status": "not-available-on-this-machine",
-    "required_account_evidence": "A redacted receipt proving Input & Output Logging is disabled globally or the dedicated Friendly Bot API key is explicitly excluded."
+    "account_evidence_status": "direct-user-attestation-no-receipt-inspected",
+    "required_account_evidence": "A redacted receipt remains the independent-proof standard; the account holder/coordinator explicitly instructed this run to trust their privacy-setting attestation instead."
   },
   "decoded_response_lifecycle": {
     "body_limit_bytes": 65536,
@@ -95,8 +95,8 @@
     "result": "The context repair was verified as an ancestor of origin/main after fetch; the compared SHA values were 1f325bff083dcdeaab3bc150b02e2762659463c0."
   },
   "g2": {
-    "status": "not-passed",
-    "reason": "A redacted account-level privacy receipt is still required to prove Input & Output Logging is disabled globally or the Friendly Bot API key is excluded. The fail-closed attestation is an operator declaration, not evidence; T02 and coordinator gates may also remain."
+    "status": "passed-by-direct-coordinator-attestation",
+    "reason": "The account holder/coordinator directly instructed this run to trust that OpenRouter privacy settings are updated. No redacted receipt was inspected; this is run-specific authorization, not independent proof."
   },
   "scope": {
     "product_scope": "unchanged",

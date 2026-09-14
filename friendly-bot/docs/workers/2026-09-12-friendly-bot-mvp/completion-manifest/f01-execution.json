@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "F01",
   "phase": "execution",
-  "status": "delivery-contract-runtime-guard-and-automatic-root-repairs-recorded",
+  "status": "delivery-contract-runtime-guard-and-delivery-lock-order-repairs-recorded",
   "date": "2026-09-14",
   "accepted_source_and_review": {
     "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
@@ -53,6 +53,12 @@
         "The exact schema inventory test now includes the existing telegram_outbound_pauses metadata/migration table."
       ],
       "authority_impact": "No product, architecture, role, privacy, or worker-ownership change. This is a bounded F01 prerequisite repair needed by the approved I04 automatic-root and T02 durable-outbox contracts."
+    },
+    "stale_start_delivery_lock_order_repair": {
+      "implementation_commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
+      "root_cause": "claim_next_safe acquired a delivery before the singleton pause row, while start_attempt acquired the pause row before that delivery. An expired-claim recovery and stale start could hold the two rows in opposite orders.",
+      "implemented": "start_attempt now locks and validates the claimed delivery before it locks the singleton pause row, matching claim_next_safe.",
+      "authority_impact": "No product, architecture, runtime-account, or privacy change; this is a bounded F01 delivery-contract correction discovered during T02 review."
     },
     "excluded": [
       "bot and routing behavior",
@@ -111,6 +117,14 @@
       "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_open_root_is_idempotent_and_preserves_another_current_branch tests/integration/persistence/test_repositories.py::test_delivery_claim_exposes_a_provider_neutral_immutable_message -q",
       "green_result": "exit 0; 2 passed in 1.02s.",
       "contract": "An automatic service/timestamp root is user-locked, scope-validated, service-fenced, idempotent, and coexists with a pending onboarding branch; a competing claim skips a delivery already locked by another transaction."
+    },
+    {
+      "test": "test_expired_claim_recovery_and_stale_start_do_not_deadlock",
+      "red_command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_expired_claim_recovery_and_stale_start_do_not_deadlock -q",
+      "red_result": "exit 1; the two concurrent UnitOfWorks timed out while waiting on delivery and pause rows held in inverse order.",
+      "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_expired_claim_recovery_and_stale_start_do_not_deadlock -q",
+      "green_result": "exit 0; 1 passed in 0.79s.",
+      "contract": "Recovery and stale start acquire delivery then pause; recovery receives a replacement claim token and stale start loses its expired claim without a lock cycle."
     }
   ],
   "verification": [
@@ -179,6 +193,11 @@
       "command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/unit/domain tests/integration/persistence -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
       "result": "exit 0; 157 passed, 1 skipped, 16 existing SQLAlchemy deprecation warnings in 24.22s; Ruff clean, 89 files formatted, mypy clean over 39 source files.",
       "coverage": "complete F01 domain, repository, schema, and migration suite after automatic-root, nonblocking-claim, and schema-inventory repairs"
+    },
+    {
+      "command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py tests/integration/persistence/test_schema_constraints.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src/friendly_bot",
+      "result": "exit 0; 50 passed, 14 existing SQLAlchemy Row.tuple() deprecation warnings; Ruff clean, 82 files formatted, mypy clean over 39 source files.",
+      "coverage": "repository, schema, and lock-order regression verification after stale-start repair"
     }
   ],
   "isolated_runtime": {
@@ -384,6 +403,11 @@
       "commit": "a98e63a7d36e32c84466ea1c827b1cba1da2c0ff",
       "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor a98e63a7d36e32c84466ea1c827b1cba1da2c0ff origin/main && git rev-parse a98e63a7d36e32c84466ea1c827b1cba1da2c0ff origin/main",
       "result": "exit 0; both compared SHA values were a98e63a7d36e32c84466ea1c827b1cba1da2c0ff."
+    },
+    "stale_start_delivery_lock_order_repair": {
+      "commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
+      "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor d7db17a5061e0e351a6fc1996f56105c194acaf0 origin/main && git rev-parse d7db17a5061e0e351a6fc1996f56105c194acaf0 origin/main",
+      "result": "exit 0; the lock-order repair was pushed and is an ancestor of origin/main."
     },
     "remote_reachability": {
       "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",

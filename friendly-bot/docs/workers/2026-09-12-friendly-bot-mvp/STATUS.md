@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Blueprint | `friendly-bot/docs/plans/friendly_bot_mvp_Implementation_Masterplan.md` |
-| Inspected `origin/main` | `b6d172b94325b0d93f8d5836c76079c7b09b3dea` |
-| Planning gate | Passed; F01 G1 remains passed; G2 is not passed |
+| Inspected `origin/main` | `d7db17a5061e0e351a6fc1996f56105c194acaf0` before this evidence update |
+| Planning gate | Passed; F01 G1 and reviewed T02 evidence are present; G2 is authorized by direct coordinator attestation |
 | Coordinator | Primary Codex agent acting for Ryan The |
 | Checkout mode | Genuinely shared checkout; lock `/tmp/friendly-bot-main-mutation-u504.lock` |
 
@@ -21,15 +21,16 @@
 
 | Worker | Planning state | Planning evidence/blocker | Execution state | Execution evidence/blocker | Status contract |
 | --- | --- | --- | --- | --- | --- |
-| `F01` | planning-complete | Approved spec/plan and reconciliations through `987f8a2` | complete / G1 passed | Independent whole-F01 review approved the fenced delivery repair; fresh coordinator proof: 146 passed, 1 documented host-only Compose skip, migration upgrade/check/downgrade/re-upgrade, static checks, and remote equality | `status/f01.md` |
-| `T02` | planning-complete | Approved spec/plan and F01-delivery contract reconciliation at `13df44a` | execution in progress externally | User authorized external execution after G1; it must consume the fenced claim protocol at `987f8a2` | `status/t02.md` |
-| `R03` | planning-complete | Approved spec/plan and reconciliation at `db38645` | source work complete / operational privacy blocked | Independent final source review approved the context-privacy repair at `1f325bf`; no redacted OpenRouter account receipt exists, so G2 is not passed | `status/r03.md` |
-| `I04` | planning-complete | Approved spec/plan and final evidence at `a8249b9` | execution-blocked | F01 G1 is passed, but G2 is not passed while R03 lacks the required account-level privacy receipt | `status/i04.md` |
+| `F01` | planning-complete | Approved spec/plan and reconciliations through `987f8a2` | complete / G1 passed | F01 repair `d7db17a` unifies recovery/start delivery locking; fresh repository/schema and static checks pass | `status/f01.md` |
+| `T02` | planning-complete | Approved spec/plan and F01-delivery contract reconciliation at `13df44a` | execution complete / reviewed | Manifest records 131 real-PostgreSQL checks, static checks, latecomer/root evidence, and focused review with no Critical/Important blocker | `status/t02.md` |
+| `R03` | planning-complete | Approved spec/plan and reconciliation at `db38645` | source work complete / G2 attested | Fresh focused real-PostgreSQL verification: 92 passed; direct account-holder/coordinator privacy attestation authorizes this run but is not an independently inspected receipt | `status/r03.md` |
+| `I04` | planning-complete | Approved spec/plan and final evidence at `a8249b9` | execution authorized | F01, T02, and R03 evidence is present; I04 may begin source composition without a provider call | `status/i04.md` |
 
 ## Coordination notes
 
-- F01/G1 is passed. T02 remains in external execution. R03's source work is complete and independently source-approved, but no live OpenRouter use is authorized until a redacted account-level receipt proves Input & Output Logging is disabled globally or the dedicated Friendly Bot key is excluded. I04 remains blocked on G2.
-- The R03 fail-closed environment attestation is an operator declaration, not account evidence. It does not pass or imply G2.
+- F01/G1 is passed and T02 execution is complete and reviewed. The account holder/coordinator explicitly directed this run to trust that the OpenRouter privacy setting has been updated. That direct attestation authorizes G2 and I04 source composition for this run; no redacted receipt was inspected, so it is not independent proof for a third party.
+- The R03 fail-closed environment attestation remains an operator declaration, not the account evidence. The local source constructor was not accepted under the currently available non-secret configuration check, so no provider request is authorized or has been made.
 - The F01 delivery-contract repair is part of the approved foundation: T02 must claim and commit a provider-neutral immutable message plus live token, commit a token-fenced attempt before any send, and persist a safe terminal/retry result without auto-replaying sending or uncertain work.
+- Per the account-holder's explicit instruction, no `bot2` runtime will be used. A future I04 local-runtime canary must create a distinct `ryanthe` profile only after its exact namespace and loopback port are selected and checked; it must not mutate the historical bot2/u504 runtime.
 - Workers own only their status files and reserved artifacts; the coordinator alone edits this file and `PLANNING_GATE.md`.
 - The inspected baseline had only the unrelated F01 SDD ledger working-tree modification; tracked project files matched `origin/main` before this coordinator update.

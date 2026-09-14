@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "worker": "T02",
+  "phase": "execution",
+  "status": "execution-complete-reviewed-g2-ready",
+  "date": "2026-09-14",
+  "f01_g1_prerequisite": {
+    "commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
+    "contract": "F01 supplies immutable, token-fenced delivery records, idempotent automatic roots, and delivery-before-pause locking without an ORM bypass."
+  },
+  "implementation_commits": [
+    {
+      "commit": "35720bed553eae767ed90532f0f3c6f01c3ff89d",
+      "summary": "Public T02 composition exports."
+    },
+    {
+      "commit": "0f203284d90da313fa399885874087bd3a19f354",
+      "summary": "Latecomer attendance is durably enrolled."
+    },
+    {
+      "commit": "0fa86ee34a8a9c616b3c4fc46549d156573ed548",
+      "summary": "Real PostgreSQL T02 scheduler and parent-row integration evidence."
+    }
+  ],
+  "delivered_imports": [
+    "TelegramGateway",
+    "TelegramPoller",
+    "OutboundDeliveryWorker",
+    "OnboardingService",
+    "OperationalAccountService",
+    "ServiceAttendanceService",
+    "ServiceDeliveryScheduler",
+    "ServiceLifecycleService"
+  ],
+  "evidence_driven_repairs": [
+    {
+      "contract": "Latecomer service confirmations persist attendance with attendee_kind=latecomer before returning the latecomer result.",
+      "evidence": "The focused attendance test was changed to require start_or_switch(..., attendee_kind=latecomer), initially failed, then passed after the bounded service repair."
+    },
+    {
+      "contract": "A timestamp automatic root is a persisted F01 root and can coexist with a current onboarding root.",
+      "evidence": "The scheduler integration test uses F01 open_root in the scheduler UnitOfWork and asserts both current root keys."
+    },
+    {
+      "contract": "A stale delivery start and expired-claim recovery cannot hold delivery and pause locks in inverse order.",
+      "evidence": "tests/integration/persistence/test_repositories.py::test_expired_claim_recovery_and_stale_start_do_not_deadlock first timed out under the inverse order, then passed after F01 commit d7db17a."
+    }
+  ],
+  "verification": [
+    {
+      "command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/unit/telegram tests/integration/telegram tests/unit/onboarding tests/integration/onboarding tests/unit/services tests/integration/services -q",
+      "result": "exit 0; 131 passed, 3 existing SQLAlchemy Row.tuple() deprecation warnings.",
+      "runtime": "uniquely named PostgreSQL 16-alpine container, loopback-only, auto-removed after the run"
+    },
+    {
+      "command": "uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
+      "result": "exit 0; Ruff clean, 89 files formatted, mypy clean across 39 source files."
+    },
+    {
+      "command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_expired_claim_recovery_and_stale_start_do_not_deadlock -q",
+      "result": "exit 0; 1 passed after the preceding red run timed out as expected."
+    }
+  ],
+  "review": {
+    "scope": "Focused rereview after the delivery lock-order repair.",
+    "result": "No Critical or Important T02 code blocker remains.",
+    "minor_follow_up": "The regression's task scheduling sleeps could later be replaced by explicit barriers; this is not a correctness blocker."
+  },
+  "g2_handoff": {
+    "status": "ready-for-coordinator-decision",
+    "limit": "T02 validates Telegram/service durability only. It does not authorize OpenRouter use or claim account privacy evidence."
+  },
+  "remote_evidence": {
+    "remote": "origin/main",
+    "source_tip_before_evidence_commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
+    "required_proof_after_publication": "git fetch --quiet origin main && git merge-base --is-ancestor HEAD origin/main"
+  }
+}
