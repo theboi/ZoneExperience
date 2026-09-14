@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from friendly_bot.domain.publication import PublishedFlowDefinition
+from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     FlowScopeKind,
+    OpenFlowSelection,
     OperationalRole,
     OutboundDelivery,
     Service,
@@ -135,6 +137,44 @@ class RecordingTimestampRoots:
         return delivery
 
 
+class PersistingTimestampRoots:
+    """Exercise the real F01 root mutation inside T02's scheduler transaction."""
+
+    async def open_for_recipient(
+        self,
+        uow: UnitOfWork,
+        timestamp: ServiceTimestampRecord,
+        user_id: UUID,
+        *,
+        now: datetime,
+    ) -> NewOutboundDelivery:
+        await uow.lock_user(user_id)
+        await uow.open_selections.open_root(
+            OpenSelectionState(
+                id=uuid4(),
+                user_id=user_id,
+                flow_version_id=timestamp.flow_version_id,
+                parent_flow_key=timestamp.root_flow_key,
+                service_id=timestamp.service_id,
+                is_current=True,
+                is_global_interruptive=False,
+                ancestor_flow_keys=(timestamp.root_flow_key,),
+                checkpoint_flow_keys=(timestamp.root_flow_key,),
+                opened_at=now,
+                last_focused_at=now,
+            ),
+            at=now,
+        )
+        return NewOutboundDelivery(
+            idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
+            user_id=user_id,
+            telegram_chat_id=73,
+            kind="message",
+            payload={"text": "Service timestamp"},
+            eligible_at=now,
+        )
+
+
 @dataclass
 class RecordingUnitOfWorkFactory:
     """Expose the exact scheduler UoWs passed through the preparer port."""
@@ -209,6 +249,7 @@ async def test_authoritative_audiences_apply_role_inheritance_without_admin_gran
                 ),
             ]
         )
+        await session.flush()
         session.add_all(
             [
                 ServiceAttendance(
@@ -362,6 +403,99 @@ async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_prepare
     assert deliveries[0].kind == prepared_delivery.kind
     assert deliveries[0].payload == prepared_delivery.payload
     assert deliveries[0].eligible_at == prepared_delivery.eligible_at
+
+
+async def test_timestamp_root_preserves_a_current_onboarding_branch(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Timestamp work must open an independent current branch for the recipient."""
+
+    service_id = uuid4()
+    user_id = uuid4()
+    timestamp_id = uuid4()
+    timestamp_root = "service.task8.timestamp.service_questions"
+    onboarding_root = "system.onboarding.name_capture"
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                Service(
+                    id=service_id,
+                    key="task8-independent-root",
+                    name="Task 8 independent root",
+                    timezone="UTC",
+                    highkey=True,
+                    doors_open_at=NOW - timedelta(hours=1),
+                    doors_close_at=NOW + timedelta(hours=1),
+                    service_starts_at=NOW,
+                    service_ends_at=NOW + timedelta(hours=1),
+                    interaction_ends_at=NOW + timedelta(hours=2),
+                ),
+                User(id=user_id, telegram_user_id=73, role=OperationalRole.NBNC),
+            ]
+        )
+    async with uow_factory() as uow:
+        onboarding_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": onboarding_root},
+                flow_key_index={onboarding_root: ()},
+            ),
+            scope_kind=FlowScopeKind.SYSTEM,
+            service_id=None,
+            published_by_user_id=None,
+        )
+        timestamp_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": timestamp_root},
+                flow_key_index={timestamp_root: ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                OpenFlowSelection(
+                    id=uuid4(),
+                    user_id=user_id,
+                    flow_version_id=onboarding_version.id,
+                    parent_flow_key=onboarding_root,
+                    service_id=None,
+                    is_current=True,
+                    is_global_interruptive=False,
+                    ancestor_flow_keys=[onboarding_root],
+                    checkpoint_flow_keys=[onboarding_root],
+                    opened_at=NOW,
+                    last_focused_at=NOW,
+                ),
+                ServiceTimestamp(
+                    id=timestamp_id,
+                    service_id=service_id,
+                    key="service-start",
+                    occurs_at=NOW,
+                    audience=ServiceAudience.ALL_NBNCS,
+                    flow_version_id=timestamp_version.id,
+                    root_flow_key=timestamp_root,
+                ),
+            ]
+        )
+
+    scheduler = ServiceDeliveryScheduler(
+        uow_factory,
+        AudienceResolver(uow_factory, clock=lambda: NOW),
+        PersistingTimestampRoots(),
+    )
+
+    result = await scheduler.run_once(now=NOW)
+    async with uow_factory() as uow:
+        selections = await uow.open_selections.list_for_user(user_id, now=NOW)
+
+    assert result.claimed_delivery_count == 1
+    assert result.enqueued_delivery_count == 1
+    assert {
+        (selection.parent_flow_key, selection.is_current) for selection in selections
+    } == {(onboarding_root, True), (timestamp_root, True)}
 
 
 async def test_closed_service_after_due_listing_cannot_claim_prepare_or_enqueue_timestamp(

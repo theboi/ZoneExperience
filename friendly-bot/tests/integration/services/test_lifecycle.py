@@ -326,6 +326,11 @@ async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
                 User(id=unrelated_user_id, role=OperationalRole.NBNC),
                 User(id=target_responder_user_id, role=OperationalRole.SERVER),
                 User(id=unrelated_responder_user_id, role=OperationalRole.SERVER),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 OperationalProfile(
                     id=target_profile_id,
                     user_id=target_responder_user_id,
@@ -376,6 +381,20 @@ async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
                     status="pending",
                     created_at=NOW - timedelta(minutes=30),
                 ),
+                ConversationMessage(
+                    id=uuid4(),
+                    user_id=affected_user_id,
+                    source_kind="telegram",
+                    source_message_id=17,
+                    body="keep this history",
+                    replied_to_body=None,
+                    occurred_at=NOW - timedelta(minutes=20),
+                ),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 CapacityReservation(
                     id=target_reservation_id,
                     operational_profile_id=target_profile_id,
@@ -388,6 +407,11 @@ async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
                     request_id=unrelated_request_id,
                     reserved_at=NOW - timedelta(minutes=30),
                 ),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 HumanMatchAssignment(
                     id=target_assignment_id,
                     request_id=target_request_id,
@@ -401,15 +425,6 @@ async def test_lifecycle_ends_only_expired_service_work_and_retains_history(
                     responder_profile_id=unrelated_profile_id,
                     capacity_reservation_id=unrelated_reservation_id,
                     assigned_at=NOW - timedelta(minutes=30),
-                ),
-                ConversationMessage(
-                    id=uuid4(),
-                    user_id=affected_user_id,
-                    source_kind="telegram",
-                    source_message_id=17,
-                    body="keep this history",
-                    replied_to_body=None,
-                    occurred_at=NOW - timedelta(minutes=20),
                 ),
             ]
         )
@@ -563,6 +578,11 @@ async def test_lifecycle_closure_fences_a_waiting_service_match_reservation(
                 service,
                 User(id=requester_id, role=OperationalRole.NBNC),
                 User(id=responder_id, role=OperationalRole.SERVER),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 OperationalProfile(
                     id=profile_id,
                     user_id=responder_id,
@@ -633,6 +653,11 @@ async def test_lifecycle_closure_fences_an_existing_assignment_rematch(
                 User(id=requester_id, role=OperationalRole.NBNC),
                 User(id=assigned_user_id, role=OperationalRole.SERVER),
                 User(id=fallback_user_id, role=OperationalRole.SERVER),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
                 OperationalProfile(
                     id=assigned_profile_id,
                     user_id=assigned_user_id,
@@ -661,25 +686,35 @@ async def test_lifecycle_closure_fences_an_existing_assignment_rematch(
                     status="pending",
                     created_at=NOW - timedelta(minutes=1),
                 ),
-                CapacityReservation(
-                    id=reservation_id,
-                    operational_profile_id=assigned_profile_id,
-                    request_id=request_id,
-                    reserved_at=NOW - timedelta(minutes=1),
-                ),
-                HumanMatchAssignment(
-                    id=assignment_id,
-                    request_id=request_id,
-                    responder_profile_id=assigned_profile_id,
-                    capacity_reservation_id=reservation_id,
-                    assigned_at=NOW - timedelta(minutes=1),
-                ),
                 ServiceAttendance(
                     id=uuid4(),
                     service_id=service.id,
                     user_id=fallback_user_id,
                     attendee_kind="server",
                     started_at=NOW - timedelta(minutes=1),
+                ),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
+                CapacityReservation(
+                    id=reservation_id,
+                    operational_profile_id=assigned_profile_id,
+                    request_id=request_id,
+                    reserved_at=NOW - timedelta(minutes=1),
+                ),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
+                HumanMatchAssignment(
+                    id=assignment_id,
+                    request_id=request_id,
+                    responder_profile_id=assigned_profile_id,
+                    capacity_reservation_id=reservation_id,
+                    assigned_at=NOW - timedelta(minutes=1),
                 ),
             ]
         )

@@ -117,6 +117,7 @@ async def _seed_profile(
                 is_admin=False,
             )
         )
+        await session.flush()
         session.add(
             OperationalProfile(
                 id=profile_id,
