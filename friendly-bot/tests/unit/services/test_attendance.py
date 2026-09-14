@@ -198,10 +198,8 @@ async def test_no_active_service_returns_typed_none_available() -> None:
     assert outcome.service_ids == ()
 
 
-async def test_old_check_in_button_after_doors_close_is_latecomer_not_ordinary() -> (
-    None
-):
-    """A choice rendered before close must re-evaluate service time when clicked."""
+async def test_old_check_in_button_after_doors_close_enrolls_a_latecomer() -> None:
+    """A pre-close choice must create latecomer attendance before its flow opens."""
 
     candidate = service(highkey=True)
     uow = AttendanceUow()
@@ -213,7 +211,8 @@ async def test_old_check_in_button_after_doors_close_is_latecomer_not_ordinary()
     )
 
     assert outcome.kind == "latecomer"
-    assert uow.started == []
+    assert uow.started == [(USER_ID, candidate.id, "latecomer", DOORS_CLOSE + MINUTE)]
+    assert uow.locked_user_ids == [USER_ID]
 
 
 async def test_old_check_in_button_before_doors_open_is_none_available() -> None:

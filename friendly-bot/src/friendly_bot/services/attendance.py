@@ -122,16 +122,17 @@ class ServiceAttendanceService:
             return AttendanceOutcome("none_available")
         if now >= service.interaction_ends_at:
             return AttendanceOutcome("ended", service.id)
-        if now >= service.doors_close_at:
-            return AttendanceOutcome("latecomer", service.id)
+        attendee_kind = "latecomer" if now >= service.doors_close_at else "ordinary"
         await uow.lock_user(user_id)
         try:
             await uow.attendances.start_or_switch(
                 user_id,
                 service.id,
-                attendee_kind="ordinary",
+                attendee_kind=attendee_kind,
                 started_at=now,
             )
         except ServiceInteractionClosedError:
             return AttendanceOutcome("ended", service.id)
-        return AttendanceOutcome("selected", service.id)
+        return AttendanceOutcome(
+            "latecomer" if attendee_kind == "latecomer" else "selected", service.id
+        )
