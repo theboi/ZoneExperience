@@ -51,6 +51,7 @@ from friendly_bot.domain.triggers import (
     MessageDiscussionFlowTrigger,
 )
 from friendly_bot.matching.service import MatchingService
+from friendly_bot.onboarding.service import OnboardingService
 from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
 from friendly_bot.persistence.models import FlowScopeKind, ServiceAudience
 from friendly_bot.persistence.repositories import (
@@ -186,7 +187,15 @@ class RuntimeRoutingPolicy:
 class DispatchResult:
     """One ingress decision without carrying Telegram content out of the UoW."""
 
-    kind: Literal["selected", "no_match", "clarified", "ignored", "expired", "failed"]
+    kind: Literal[
+        "selected",
+        "no_match",
+        "clarified",
+        "ignored",
+        "expired",
+        "failed",
+        "onboarding",
+    ]
     selected_flow_keys: tuple[str, ...] = ()
 
 
@@ -214,12 +223,14 @@ class FriendlyBotApplication:
         router: ConstrainedRouter,
         zone_x: PublishedZoneX,
         routing_policy: RuntimeRoutingPolicy | None = None,
+        onboarding: OnboardingService | None = None,
     ) -> None:
         self._dependencies = dependencies
         self._runner = ActionRunner(registry)
         self._router = router
         self._zone_x = zone_x
         self._routing_policy = routing_policy or RuntimeRoutingPolicy()
+        self._onboarding = onboarding
         self._navigation = _ApplicationNavigation(self)
 
     async def dispatch(
@@ -246,6 +257,15 @@ class FriendlyBotApplication:
             )
 
         assert incoming.text is not None
+        onboarding = await self._dispatch_onboarding(
+            user=user,
+            incoming=incoming,
+            unit_of_work=unit_of_work,
+            correlation_id=correlation_id,
+            now=now,
+        )
+        if onboarding is not None:
+            return onboarding
         if not await self._valid_branches(unit_of_work, user.id, now=now):
             await self.open_system_root_for_user(
                 user_id=user.id, unit_of_work=unit_of_work, now=now
@@ -340,6 +360,88 @@ class FriendlyBotApplication:
             )
             return DispatchResult("no_match", tuple(selected))
         return DispatchResult("selected", tuple(selected))
+
+    async def _dispatch_onboarding(
+        self,
+        *,
+        user: UserRecord,
+        incoming: TelegramMessage,
+        unit_of_work: UnitOfWork,
+        correlation_id: UUID,
+        now: datetime,
+    ) -> DispatchResult | None:
+        """Handle deterministic onboarding before provider-backed message routing."""
+
+        if self._onboarding is None:
+            return None
+        result = await self._onboarding.handle_in_uow(
+            unit_of_work,
+            user_id=user.id,
+            message=incoming,
+            now=now,
+        )
+        if result.kind == "existing":
+            return None
+        if result.kind == "ignored":
+            return DispatchResult("ignored")
+        if result.kind == "name_capture":
+            await self._enqueue_fixed_text(
+                unit_of_work,
+                user=user,
+                correlation_id=correlation_id,
+                now=now,
+                text=(
+                    "Hey! Welcome to The Zone! Glad to see you here today!\n\n"
+                    "How may I address you?"
+                ),
+            )
+            return DispatchResult("onboarding")
+        if result.kind == "existing_start":
+            await self.open_system_root_for_user(
+                user_id=user.id,
+                unit_of_work=unit_of_work,
+                now=now,
+            )
+            return DispatchResult("onboarding")
+
+        if result.kind != "name_captured":
+            raise AssertionError("onboarding returned an unsupported outcome")
+        completed_user = await unit_of_work.users.require_by_id(user.id)
+        attendance = await self._dependencies.services.resolve_for_new_nbnc_in_uow(
+            unit_of_work,
+            user_id=completed_user.id,
+            services=(self._zone_x.service,),
+            now=now,
+        )
+        if attendance.kind == "selected":
+            await self._open_root(
+                user=completed_user,
+                incoming=incoming,
+                unit_of_work=unit_of_work,
+                version=self._zone_x.service_root,
+                root=_root_from_version(self._zone_x.service_root),
+                service=self._zone_x.service,
+                now=now,
+                run_actions=True,
+            )
+        elif attendance.kind == "latecomer":
+            await self._open_root(
+                user=completed_user,
+                incoming=incoming,
+                unit_of_work=unit_of_work,
+                version=self._zone_x.latecomer_root,
+                root=_root_from_version(self._zone_x.latecomer_root),
+                service=self._zone_x.service,
+                now=now,
+                run_actions=True,
+            )
+        else:
+            await self.open_system_root_for_user(
+                user_id=completed_user.id,
+                unit_of_work=unit_of_work,
+                now=now,
+            )
+        return DispatchResult("onboarding")
 
     async def open_system_root_for_user(
         self, *, user_id: UUID, unit_of_work: UnitOfWork, now: datetime
@@ -1138,6 +1240,7 @@ async def build_application() -> FriendlyBotRuntime:
     try:
         router_gateway = OpenRouterGateway.from_environment()
         services = ServiceAttendanceService(unit_of_work_factory)
+        onboarding = OnboardingService(unit_of_work_factory)
         lifecycle = ServiceLifecycleService(unit_of_work_factory)
         matching = MatchingService(
             unit_of_work_factory,
@@ -1165,6 +1268,7 @@ async def build_application() -> FriendlyBotRuntime:
             registry=registry,
             router=ConstrainedRouter(unit_of_work_factory, router_gateway),
             zone_x=zone_x,
+            onboarding=onboarding,
         )
         ingress = TelegramIngress(unit_of_work_factory, application)
         return FriendlyBotRuntime(

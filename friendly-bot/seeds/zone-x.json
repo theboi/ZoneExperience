@@ -3,7 +3,10 @@
     "key": "system.global",
     "trigger": null,
     "actions": [
-
+      {
+        "type": "send_message",
+        "text": "What would you like help with?"
+      }
     ],
     "next_flow_mode": "CHECKPOINT",
     "return_actions": [

@@ -22,12 +22,15 @@ from friendly_bot.domain.state import (
     SelectionTransition,
 )
 from friendly_bot.matching.service import MatchingService
+from friendly_bot.onboarding.service import OnboardingService
 from friendly_bot.persistence.models import (
     FlowScopeKind,
     OperationalRole,
     ServiceAudience,
 )
 from friendly_bot.persistence.repositories import (
+    AttendanceRecord,
+    AttendanceStartResult,
     DiagnosticRecord,
     DiagnosticRepository,
     FlowVersionRecord,
@@ -131,6 +134,14 @@ class RecordingUsers:
             raise LookupError("user was not found")
         return self.user
 
+    async def set_display_name(
+        self, user_id: UUID, display_name: str, *, at: datetime
+    ) -> UserRecord:
+        if user_id != self.user.id:
+            raise LookupError("user was not found")
+        self.user = replace(self.user, display_name=display_name)
+        return self.user
+
 
 @dataclass
 class RecordingServices:
@@ -141,6 +152,41 @@ class RecordingServices:
             return self.services[service_id]
         except KeyError as error:
             raise LookupError("service was not found") from error
+
+
+@dataclass
+class RecordingAttendances:
+    started: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+
+    async def start_or_switch(
+        self,
+        user_id: UUID,
+        service_id: UUID,
+        *,
+        attendee_kind: str,
+        started_at: datetime,
+    ) -> AttendanceStartResult:
+        self.started.append((user_id, service_id, attendee_kind))
+        return AttendanceStartResult(
+            attendance=AttendanceRecord(
+                id=uuid4(),
+                service_id=service_id,
+                user_id=user_id,
+                attendee_kind=attendee_kind,
+                started_at=started_at,
+                ended_at=None,
+            ),
+            ended_previous=False,
+        )
+
+
+@dataclass
+class RecordingConversations:
+    messages: list[object] = field(default_factory=list)
+
+    async def list_after(self, user_id: UUID, cursor: object) -> list[object]:
+        del user_id, cursor
+        return self.messages
 
 
 class RejectingMatches:
@@ -197,6 +243,8 @@ class FakeUnitOfWork:
     def __post_init__(self) -> None:
         self.users = RecordingUsers(self.user)
         self.services = RecordingServices(self.services_by_id)
+        self.attendances = RecordingAttendances()
+        self.conversations = RecordingConversations()
         self.matches = RejectingMatches()
         self.diagnostics = RecordingDiagnostics()
         self.flow_versions = RecordingVersions({self.version.id: self.version})
@@ -274,6 +322,8 @@ def _application(
     service: ServiceRecord,
     *,
     router: ConstrainedRouter | None = None,
+    onboarding: OnboardingService | None = None,
+    services: ServiceAttendanceService | None = None,
 ) -> FriendlyBotApplication:
     registry = ActionExecutorRegistry()
 
@@ -299,7 +349,7 @@ def _application(
     return FriendlyBotApplication(
         dependencies=ActionDependencies(
             telegram=cast(TelegramGateway, object()),
-            services=cast(ServiceAttendanceService, object()),
+            services=services or cast(ServiceAttendanceService, object()),
             lifecycle=cast(ServiceLifecycleService, object()),
             matching=cast(MatchingService, object()),
             diagnostics=cast(DiagnosticRepository, object()),
@@ -307,6 +357,7 @@ def _application(
         registry=registry,
         router=router or cast(ConstrainedRouter, object()),
         zone_x=zone_x,
+        onboarding=onboarding,
     )
 
 
@@ -329,13 +380,18 @@ def _message(
     )
 
 
-def _fixture() -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
+def _fixture(
+    *,
+    display_name: str | None = "Ryan",
+    router: ConstrainedRouter | None = None,
+    onboarding: OnboardingService | None = None,
+) -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
     root = _root()
     version = _version(root)
     user = UserRecord(
         id=uuid4(),
         telegram_user_id=77,
-        display_name="Ryan",
+        display_name=display_name,
         role=OperationalRole.NBNC,
         is_admin=False,
     )
@@ -362,7 +418,18 @@ def _fixture() -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
         last_focused_at=NOW,
     )
     uow = FakeUnitOfWork(user, version, [branch], {service.id: service})
-    return _application(user, version, service), uow, user
+    return (
+        _application(
+            user,
+            version,
+            service,
+            router=router,
+            onboarding=onboarding,
+            services=ServiceAttendanceService(lambda: cast(UnitOfWork, uow)),
+        ),
+        uow,
+        user,
+    )
 
 
 @dataclass
@@ -372,6 +439,74 @@ class FailingRouter:
     async def route_update_in_uow(self, *args: object, **kwargs: object) -> object:
         del args, kwargs
         raise self.error
+
+
+class RejectingRouter:
+    async def route_update_in_uow(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("deterministic onboarding must not invoke model routing")
+
+
+async def test_start_and_name_capture_do_not_invoke_model_routing() -> None:
+    """Removing the onboarding boundary would send `/start` and the name to OpenRouter."""
+
+    uow_holder: list[FakeUnitOfWork] = []
+    onboarding = OnboardingService(lambda: cast(UnitOfWork, uow_holder[0]))
+    application, uow, user = _fixture(
+        display_name=None,
+        router=cast(ConstrainedRouter, RejectingRouter()),
+        onboarding=onboarding,
+    )
+    uow_holder.append(uow)
+
+    started = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=5, text="/start"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+    uow.conversations.messages.extend([object(), object()])
+    named = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=6, text="Ari"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert started == DispatchResult("onboarding")
+    assert named == DispatchResult("onboarding")
+    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
+        {
+            "text": (
+                "Hey! Welcome to The Zone! Glad to see you here today!\n\n"
+                "How may I address you?"
+            )
+        }
+    ]
+    assert uow.users.user.display_name == "Ari"
+    assert uow.attendances.started == [
+        (uow.users.user.id, next(iter(uow.services_by_id)), "ordinary")
+    ]
+
+
+async def test_existing_start_opens_the_system_path_without_model_routing() -> None:
+    """An existing user's `/start` must not depend on provider availability."""
+
+    uow_holder: list[FakeUnitOfWork] = []
+    onboarding = OnboardingService(lambda: cast(UnitOfWork, uow_holder[0]))
+    application, uow, user = _fixture(
+        router=cast(ConstrainedRouter, RejectingRouter()), onboarding=onboarding
+    )
+    uow_holder.append(uow)
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=7, text="/start"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result == DispatchResult("onboarding")
+    assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
+        "system.dispatch.root"
+    ]
 
 
 @pytest.mark.parametrize(

@@ -40,7 +40,9 @@ The flow graph, keys, behavior, copy, and outcomes below are the development bas
 system_global_root_excerpt:
   key: system.global
   trigger: null
-  actions: []
+  actions:
+    - type: send_message
+      text: "What would you like help with?"
   next_flow_mode: CHECKPOINT
   return_actions:
     - type: send_message
