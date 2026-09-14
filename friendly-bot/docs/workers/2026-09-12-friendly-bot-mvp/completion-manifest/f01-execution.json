@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "F01",
   "phase": "execution",
-  "status": "delivery-contract-and-runtime-guard-test-repair-recorded",
+  "status": "delivery-contract-runtime-guard-and-automatic-root-repairs-recorded",
   "date": "2026-09-14",
   "accepted_source_and_review": {
     "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
@@ -43,6 +43,16 @@
       "root_cause": "The verify-only unit test mocked the Docker Compose call but still invoked the production guard's fixed bot2/UID-504 checkout validation, making the test fail on a normal development account before it could test verify behavior.",
       "implemented": "The test binds only its freshly loaded guard module to the current test checkout and UID, then invokes the real namespace validator and mocked Compose boundary. The production bot2/UID-504 guard constants are unchanged.",
       "authority_impact": "This is a deterministic F01 test-fixture repair only. It changes no production runtime boundary, product behavior, or downstream contract."
+    },
+    "automatic_root_and_nonblocking_claim_repair": {
+      "implementation_commit": "a98e63a7d36e32c84466ea1c827b1cba1da2c0ff",
+      "root_cause": "The published repository contract could only apply a transition from an existing selection, so I04 could not open an independent automatic root without an ORM bypass or an unrelated source branch. Separately, claim_next_safe locked the singleton pause row before it could skip an already claimed delivery, causing the established concurrent-claim proof to self-block.",
+      "implemented": [
+        "OpenSelectionRepository.open_root validates the locked user, exact flow-version root key, and service scope; it fences a service root, inserts idempotently, and preserves unrelated current selections.",
+        "claim_next_safe selects and locks a due delivery with SKIP LOCKED before it locks the pause row, so a competing claimant sees no available delivery rather than waiting behind an unrelated global-row lock.",
+        "The exact schema inventory test now includes the existing telegram_outbound_pauses metadata/migration table."
+      ],
+      "authority_impact": "No product, architecture, role, privacy, or worker-ownership change. This is a bounded F01 prerequisite repair needed by the approved I04 automatic-root and T02 durable-outbox contracts."
     },
     "excluded": [
       "bot and routing behavior",
@@ -93,6 +103,14 @@
       "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted isolated loopback PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_recovered_claim_rejects_stale_token_renewal -q",
       "green_result": "exit 0; 1 passed in 1.51s",
       "contract": "An expired unstarted claim gets a new opaque token on recovery; the old claimant cannot renew it or start a send."
+    },
+    {
+      "test": "test_open_root_is_idempotent_and_preserves_another_current_branch",
+      "red_command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_open_root_is_idempotent_and_preserves_another_current_branch -q",
+      "red_result": "exit 1; the real repository raised AttributeError because no public root-opening operation existed.",
+      "green_command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/integration/persistence/test_repositories.py::test_open_root_is_idempotent_and_preserves_another_current_branch tests/integration/persistence/test_repositories.py::test_delivery_claim_exposes_a_provider_neutral_immutable_message -q",
+      "green_result": "exit 0; 2 passed in 1.02s.",
+      "contract": "An automatic service/timestamp root is user-locked, scope-validated, service-fenced, idempotent, and coexists with a pending onboarding branch; a competing claim skips a delivery already locked by another transaction."
     }
   ],
   "verification": [
@@ -156,6 +174,11 @@
       "command": "uv run pytest tests/integration/persistence/test_migrations.py -q && uv run ruff check tests/integration/persistence/test_migrations.py && uv run ruff format --check tests/integration/persistence/test_migrations.py",
       "result": "exit 0; 7 passed, 8 skipped because FRIENDLY_BOT_DATABASE_URL is absent; Ruff clean and the changed file formatted",
       "coverage": "runtime guard verify behavior is now deterministic under a simulated valid local namespace without weakening the production bot2/UID-504 fence"
+    },
+    {
+      "command": "FRIENDLY_BOT_DATABASE_URL=<redacted loopback disposable PostgreSQL> uv run pytest tests/unit/domain tests/integration/persistence -q && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot",
+      "result": "exit 0; 157 passed, 1 skipped, 16 existing SQLAlchemy deprecation warnings in 24.22s; Ruff clean, 89 files formatted, mypy clean over 39 source files.",
+      "coverage": "complete F01 domain, repository, schema, and migration suite after automatic-root, nonblocking-claim, and schema-inventory repairs"
     }
   ],
   "isolated_runtime": {
@@ -263,6 +286,11 @@
         "Finish with exact retry_at for a parsed Telegram 429, safe_error for sanitized detail, and confirmed_telegram_message_id for parsed success. Omitting retry_at preserves immediately eligible retry behavior for existing F01 callers."
       ]
     },
+    "automatic_root_contract": [
+      "I04 may call OpenSelectionRepository.open_root(root, at=...) only within the supplied UnitOfWork after locking root.user_id.",
+      "The root key and service scope must exactly match the immutable FlowVersion; service roots are rejected after interaction closure.",
+      "The method is idempotent and preserves existing current branches, enabling timestamp roots alongside pending onboarding state."
+    ],
     "T02": [
       "UnitOfWork",
       "UserRepository",
@@ -351,6 +379,11 @@
       "commit": "58e1ddfd3b03f94d8db4117374cc07e10119c58d",
       "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 58e1ddfd3b03f94d8db4117374cc07e10119c58d origin/main && git rev-parse 58e1ddfd3b03f94d8db4117374cc07e10119c58d origin/main",
       "result": "exit 0; both compared SHA values were 58e1ddfd3b03f94d8db4117374cc07e10119c58d."
+    },
+    "automatic_root_and_nonblocking_claim_repair": {
+      "commit": "a98e63a7d36e32c84466ea1c827b1cba1da2c0ff",
+      "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor a98e63a7d36e32c84466ea1c827b1cba1da2c0ff origin/main && git rev-parse a98e63a7d36e32c84466ea1c827b1cba1da2c0ff origin/main",
+      "result": "exit 0; both compared SHA values were a98e63a7d36e32c84466ea1c827b1cba1da2c0ff."
     },
     "remote_reachability": {
       "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",
