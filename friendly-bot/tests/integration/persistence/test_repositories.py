@@ -939,6 +939,94 @@ async def test_open_selection_apply_persists_transition_rows_without_actions(
     )
 
 
+async def test_open_root_is_idempotent_and_preserves_another_current_branch(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Automatic timestamp roots must not replace a pending onboarding branch."""
+
+    user_id = await _seed_user(session_factory)
+    service_id = await _seed_service(session_factory, key="task8-timestamp-root")
+    async with uow_factory() as uow:
+        onboarding_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "system.onboarding.name_capture"},
+                flow_key_index={"system.onboarding.name_capture": ()},
+            ),
+            scope_kind=FlowScopeKind.SYSTEM,
+            service_id=None,
+            published_by_user_id=None,
+        )
+        timestamp_version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.zone_x.timestamp.service_questions"},
+                flow_key_index={"service.zone_x.timestamp.service_questions": ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    onboarding = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=onboarding_version.id,
+        parent_flow_key="system.onboarding.name_capture",
+        service_id=None,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("system.onboarding.name_capture",),
+        checkpoint_flow_keys=("system.onboarding.name_capture",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    await _seed_selection(session_factory, onboarding)
+    timestamp_root = OpenSelectionState(
+        id=uuid4(),
+        user_id=user_id,
+        flow_version_id=timestamp_version.id,
+        parent_flow_key="service.zone_x.timestamp.service_questions",
+        service_id=service_id,
+        is_current=True,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.zone_x.timestamp.service_questions",),
+        checkpoint_flow_keys=("service.zone_x.timestamp.service_questions",),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+
+    async with uow_factory() as uow:
+        await uow.lock_user(user_id)
+        opened = await uow.open_selections.open_root(timestamp_root, at=NOW)
+        reopened = await uow.open_selections.open_root(
+            OpenSelectionState(
+                id=uuid4(),
+                user_id=user_id,
+                flow_version_id=timestamp_version.id,
+                parent_flow_key="service.zone_x.timestamp.service_questions",
+                service_id=service_id,
+                is_current=True,
+                is_global_interruptive=False,
+                ancestor_flow_keys=("service.zone_x.timestamp.service_questions",),
+                checkpoint_flow_keys=("service.zone_x.timestamp.service_questions",),
+                opened_at=NOW + timedelta(minutes=1),
+                last_focused_at=NOW + timedelta(minutes=1),
+            ),
+            at=NOW + timedelta(minutes=1),
+        )
+
+    async with uow_factory() as uow:
+        selections = await uow.open_selections.list_for_user(user_id, now=NOW)
+
+    assert opened == timestamp_root
+    assert reopened == timestamp_root
+    assert {
+        (selection.parent_flow_key, selection.is_current) for selection in selections
+    } == {
+        ("system.onboarding.name_capture", True),
+        ("service.zone_x.timestamp.service_questions", True),
+    }
+
+
 async def test_open_selection_apply_rejects_an_upsert_without_its_user_lock(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],

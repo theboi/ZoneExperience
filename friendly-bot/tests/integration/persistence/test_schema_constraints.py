@@ -234,6 +234,7 @@ async def test_metadata_creates_every_f01_durable_table(
         "service_timestamps",
         "services",
         "telegram_poll_state",
+        "telegram_outbound_pauses",
         "timestamp_delivery_claims",
         "user_processing_locks",
         "users",

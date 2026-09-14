@@ -402,6 +402,10 @@ class OpenSelectionRepository(Protocol):
         self, user_id: UUID, *, now: datetime
     ) -> list[OpenSelectionState]: ...
 
+    async def open_root(
+        self, root: OpenSelectionState, *, at: datetime
+    ) -> OpenSelectionState: ...
+
     async def apply(
         self,
         transition: SelectionTransition | CheckpointReturnTransition,
@@ -1552,6 +1556,56 @@ class SqlAlchemyOpenSelectionRepository:
         )
         return [_open_selection_state(row) for row in rows]
 
+    async def open_root(
+        self, root: OpenSelectionState, *, at: datetime
+    ) -> OpenSelectionState:
+        """Idempotently open one published root without changing another branch."""
+
+        if root.user_id not in self._locked_user_ids:
+            raise RuntimeError("root selection user is not locked")
+        version = await self._session.get(FlowVersion, root.flow_version_id)
+        if version is None:
+            raise LookupError("root flow version was not found")
+        if root.parent_flow_key != version.root_flow_key:
+            raise ValueError("root selection key does not match flow version root")
+        if root.service_id != version.service_id:
+            raise ValueError("root selection service does not match flow version")
+        if not root.is_current:
+            raise ValueError("root selection must be current when opened")
+        if root.service_id is not None:
+            await _lock_open_service(self._session, root.service_id, at=at)
+
+        row = await self._session.scalar(
+            pg_insert(OpenFlowSelection)
+            .values(
+                id=root.id,
+                user_id=root.user_id,
+                flow_version_id=root.flow_version_id,
+                parent_flow_key=root.parent_flow_key,
+                service_id=root.service_id,
+                is_current=True,
+                is_global_interruptive=root.is_global_interruptive,
+                ancestor_flow_keys=list(root.ancestor_flow_keys),
+                checkpoint_flow_keys=list(root.checkpoint_flow_keys),
+                opened_at=at,
+                last_focused_at=at,
+            )
+            .on_conflict_do_nothing()
+            .returning(OpenFlowSelection)
+        )
+        if row is None:
+            row = await self._session.scalar(
+                select(OpenFlowSelection).where(
+                    OpenFlowSelection.user_id == root.user_id,
+                    OpenFlowSelection.flow_version_id == root.flow_version_id,
+                    OpenFlowSelection.parent_flow_key == root.parent_flow_key,
+                    OpenFlowSelection.service_id.is_not_distinct_from(root.service_id),
+                )
+            )
+        if row is None:
+            raise RuntimeError("root selection could not be opened")
+        return _open_selection_state(row)
+
     async def apply(
         self,
         transition: SelectionTransition | CheckpointReturnTransition,
@@ -1776,10 +1830,6 @@ class SqlAlchemyDeliveryRepository:
         """Atomically lease due work or an expired unstarted lease, never a send."""
 
         _validate_lease_duration(lease_duration)
-        pause = await self._locked_telegram_outbound_pause()
-        if pause.pause_until > now:
-            return None
-
         row = await self._session.scalar(
             select(OutboundDelivery)
             .where(
@@ -1800,6 +1850,9 @@ class SqlAlchemyDeliveryRepository:
             .limit(1)
         )
         if row is None:
+            return None
+        pause = await self._locked_telegram_outbound_pause()
+        if pause.pause_until > now:
             return None
         row.status = "claimed"
         row.claim_token = uuid4()
