@@ -14,6 +14,7 @@ import pytest
 from friendly_bot.persistence.models import ServiceAudience
 from friendly_bot.persistence.repositories import (
     NewOutboundDelivery,
+    ServiceInteractionClosedError,
     ServiceTimestampRecord,
 )
 from friendly_bot.services.scheduler import AudienceResolver, ServiceDeliveryScheduler
@@ -76,8 +77,13 @@ class FakeDeliveries:
     claimed_pairs: set[tuple[UUID, UUID]] = field(default_factory=set)
     successful_claims: list[tuple[UUID, UUID]] = field(default_factory=list)
     enqueued: list[NewOutboundDelivery] = field(default_factory=list)
+    close_timestamp_claims: bool = False
 
-    async def claim_timestamp_delivery(self, timestamp_id: UUID, user_id: UUID) -> bool:
+    async def claim_timestamp_delivery(
+        self, timestamp_id: UUID, user_id: UUID, *, now: datetime
+    ) -> bool:
+        if self.close_timestamp_claims:
+            raise ServiceInteractionClosedError(SERVICE_ID)
         await asyncio.sleep(0)
         pair = (timestamp_id, user_id)
         if pair in self.claimed_pairs:
@@ -243,6 +249,23 @@ async def test_scheduler_skips_timestamp_excluded_at_interaction_end() -> None:
     assert result.due_timestamp_count == 0
     assert result.enqueued_delivery_count == 0
     assert services.audience_calls == []
+    assert deliveries.successful_claims == []
+    assert roots.calls == []
+
+
+async def test_scheduler_treats_a_final_closed_timestamp_claim_as_no_work() -> None:
+    """A closure after due listing must not prepare a root or enqueue a delivery."""
+
+    scheduler, _, deliveries, roots = scheduler_fixture(
+        due_timestamps=[timestamp()],
+        audience_user_ids={(ServiceAudience.ALL_NBNCS, SERVICE_ID): [NBNC]},
+    )
+    deliveries.close_timestamp_claims = True
+
+    result = await scheduler.run_once(now=NOW)
+
+    assert result.claimed_delivery_count == 0
+    assert result.enqueued_delivery_count == 0
     assert deliveries.successful_claims == []
     assert roots.calls == []
 

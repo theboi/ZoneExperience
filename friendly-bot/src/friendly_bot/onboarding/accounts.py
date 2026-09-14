@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal
+from uuid import UUID
 
 from friendly_bot.persistence.models import OperationalRole
-from friendly_bot.persistence.uow import UnitOfWorkFactory
+from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
 type LoginResultKind = Literal[
     "attached",
@@ -53,23 +54,43 @@ class OperationalAccountService:
                 telegram_user_id, received_at=now
             )
             await uow.lock_user(user.id)
-            profile = await uow.operational_profiles.find_by_login_identity(
-                normalized_name, dob
+            return await self.login_in_uow(
+                uow,
+                user_id=user.id,
+                normalized_name=normalized_name,
+                dob=dob,
+                now=now,
             )
-            if profile is None:
-                return LoginResult("not_found")
-            attached = await uow.operational_logins.attach(profile.id, user.id, at=now)
-            if attached.kind == "occupied":
-                return LoginResult("occupied")
-            if attached.kind == "not_found":
-                return LoginResult("not_found")
-            return LoginResult(
-                "attached",
-                opens_interest_capture=(
-                    attached.is_first_ever_attachment
-                    and user.role in _OPERATIONAL_ROLES
-                ),
-            )
+
+    async def login_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        normalized_name: str,
+        dob: date,
+        now: datetime,
+    ) -> LoginResult:
+        """Attach in ingress's UoW, deriving role from the matched profile owner."""
+
+        profile = await uow.operational_profiles.find_by_login_identity(
+            normalized_name, dob
+        )
+        if profile is None:
+            return LoginResult("not_found")
+        attached = await uow.operational_logins.attach(profile.id, user_id, at=now)
+        if attached.kind == "occupied":
+            return LoginResult("occupied")
+        if attached.kind == "not_found":
+            return LoginResult("not_found")
+        operational_user = await uow.users.require_by_id(profile.user_id)
+        return LoginResult(
+            "attached",
+            opens_interest_capture=(
+                attached.is_first_ever_attachment
+                and operational_user.role in _OPERATIONAL_ROLES
+            ),
+        )
 
     async def manage(self, telegram_user_id: int, *, now: datetime) -> LoginResult:
         """Expose the configured interest editor without updating profile data directly."""
@@ -77,10 +98,22 @@ class OperationalAccountService:
         async with self._uow_factory() as uow:
             user = await uow.users.require_by_telegram_id(telegram_user_id)
             await uow.lock_user(user.id)
-            return LoginResult(
-                "manage",
-                opens_interest_editor=user.role in _OPERATIONAL_ROLES,
-            )
+            return await self.manage_in_uow(uow, user_id=user.id, now=now)
+
+    async def manage_in_uow(
+        self, uow: UnitOfWork, *, user_id: UUID, now: datetime
+    ) -> LoginResult:
+        """Expose editing only for the active profile attached to this login user."""
+
+        del now
+        profile = await uow.operational_profiles.find_active_for_login_user(user_id)
+        if profile is None:
+            return LoginResult("manage")
+        operational_user = await uow.users.require_by_id(profile.user_id)
+        return LoginResult(
+            "manage",
+            opens_interest_editor=operational_user.role in _OPERATIONAL_ROLES,
+        )
 
     async def logout(self, telegram_user_id: int, *, now: datetime) -> LoginResult:
         """Detach the active attachment while retaining profile and login history."""
@@ -88,5 +121,12 @@ class OperationalAccountService:
         async with self._uow_factory() as uow:
             user = await uow.users.require_by_telegram_id(telegram_user_id)
             await uow.lock_user(user.id)
-            detached = await uow.operational_logins.detach_for_user(user.id, at=now)
-            return LoginResult("detached" if detached is not None else "not_attached")
+            return await self.logout_in_uow(uow, user_id=user.id, now=now)
+
+    async def logout_in_uow(
+        self, uow: UnitOfWork, *, user_id: UUID, now: datetime
+    ) -> LoginResult:
+        """Detach the supplied ingress user without opening or owning a transaction."""
+
+        detached = await uow.operational_logins.detach_for_user(user_id, at=now)
+        return LoginResult("detached" if detached is not None else "not_attached")

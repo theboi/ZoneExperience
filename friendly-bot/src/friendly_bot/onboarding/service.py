@@ -52,17 +52,32 @@ class OnboardingService:
                 replied_to_body=message.reply_text,
                 occurred_at=message.sent_at,
             )
-            if message.text is None:
-                return OnboardingResult(user.id, "ignored")
-            if user.display_name is not None:
-                return OnboardingResult(
-                    user.id,
-                    "existing_start" if message.text == "/start" else "existing",
-                )
-            if message.text == "/start" or not await _is_name_reply(uow, user.id):
-                return OnboardingResult(user.id, "name_capture", True)
-            await uow.users.set_display_name(user.id, message.text, at=now)
-            return OnboardingResult(user.id, "name_captured")
+            return await self.handle_in_uow(
+                uow, user_id=user.id, message=message, now=now
+            )
+
+    async def handle_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        message: TelegramMessage,
+        now: datetime,
+    ) -> OnboardingResult:
+        """Decide onboarding inside ingress's already-locked, recorded transaction."""
+
+        user = await uow.users.require_by_id(user_id)
+        if message.text is None:
+            return OnboardingResult(user.id, "ignored")
+        if user.display_name is not None:
+            return OnboardingResult(
+                user.id,
+                "existing_start" if message.text == "/start" else "existing",
+            )
+        if message.text == "/start" or not await _is_name_reply(uow, user.id):
+            return OnboardingResult(user.id, "name_capture", True)
+        await uow.users.set_display_name(user.id, message.text, at=now)
+        return OnboardingResult(user.id, "name_captured")
 
 
 async def _is_name_reply(uow: UnitOfWork, user_id: UUID) -> bool:

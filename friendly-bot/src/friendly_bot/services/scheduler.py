@@ -11,6 +11,7 @@ from uuid import UUID
 from friendly_bot.persistence.models import ServiceAudience
 from friendly_bot.persistence.repositories import (
     NewOutboundDelivery,
+    ServiceInteractionClosedError,
     ServiceTimestampRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
@@ -98,9 +99,13 @@ class ServiceDeliveryScheduler:
             )
             for user_id in recipient_ids:
                 async with self._uow_factory() as uow:
-                    if not await uow.deliveries.claim_timestamp_delivery(
-                        timestamp.id, user_id
-                    ):
+                    try:
+                        claimed = await uow.deliveries.claim_timestamp_delivery(
+                            timestamp.id, user_id, now=now
+                        )
+                    except ServiceInteractionClosedError:
+                        continue
+                    if not claimed:
                         continue
                     claimed_delivery_count += 1
                     delivery = await self._timestamp_roots.open_for_recipient(

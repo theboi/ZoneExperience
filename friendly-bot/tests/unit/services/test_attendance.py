@@ -16,7 +16,7 @@ from friendly_bot.persistence.repositories import (
     ServiceInteractionClosedError,
     ServiceRecord,
 )
-from friendly_bot.services.attendance import ServiceAttendanceService
+from friendly_bot.services.attendance import AttendanceOutcome, ServiceAttendanceService
 from friendly_bot.services.lifecycle import ServiceLifecycleService
 
 NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -261,6 +261,26 @@ async def test_service_closure_at_the_attendance_boundary_maps_to_ended() -> Non
 
     assert outcome.kind == "ended"
     assert uow.started == []
+
+
+async def test_select_service_in_uow_reuses_the_ingress_transaction() -> None:
+    """The action executor's UoW already owns the user lock and commit boundary."""
+
+    candidate = service(highkey=True)
+    uow = AttendanceUow()
+    uow.add(candidate)
+
+    def fail_if_opened() -> AttendanceUow:
+        raise AssertionError("composed attendance must not open another unit of work")
+
+    attendance = ServiceAttendanceService(fail_if_opened)
+
+    outcome = await attendance.select_service_in_uow(
+        uow, user_id=USER_ID, service_id=candidate.id, now=DOORS_OPEN
+    )
+
+    assert outcome == AttendanceOutcome("selected", candidate.id)
+    assert uow.started == [(USER_ID, candidate.id, "ordinary", DOORS_OPEN)]
 
 
 async def test_lifecycle_expires_only_ended_services_and_returns_affected_users() -> (

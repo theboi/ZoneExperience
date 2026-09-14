@@ -38,6 +38,7 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
+    TimestampDeliveryClaim,
     User,
 )
 from friendly_bot.persistence.repositories import (
@@ -1202,7 +1203,9 @@ async def test_concurrent_timestamp_claim_has_exactly_one_winner(
 
     async def claim() -> bool:
         async with uow_factory() as uow:
-            return await uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)
+            return await uow.deliveries.claim_timestamp_delivery(
+                timestamp_id, user_id, now=NOW
+            )
 
     winners = await asyncio.gather(claim(), claim())
 
@@ -1243,9 +1246,67 @@ async def test_timestamp_delivery_claim_is_idempotent(
         )
 
     async with uow_factory() as uow:
-        assert await uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)
+        assert await uow.deliveries.claim_timestamp_delivery(
+            timestamp_id, user_id, now=NOW
+        )
     async with uow_factory() as uow:
-        assert not await uow.deliveries.claim_timestamp_delivery(timestamp_id, user_id)
+        assert not await uow.deliveries.claim_timestamp_delivery(
+            timestamp_id, user_id, now=NOW
+        )
+
+
+async def test_timestamp_claim_at_interaction_boundary_creates_no_durable_claim(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A claim cannot outlive the same durable interaction boundary as attendance."""
+
+    user_id = await _seed_user(session_factory)
+    service_id = await _seed_service(
+        session_factory,
+        key="zone_x_timestamp_closed_boundary",
+        interaction_ends_at=NOW,
+    )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.timestamp.closed"},
+                flow_key_index={"service.timestamp.closed": ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    timestamp_id = uuid4()
+    async with session_factory.begin() as session:
+        session.add(
+            ServiceTimestamp(
+                id=timestamp_id,
+                service_id=service_id,
+                key="closed-boundary",
+                occurs_at=NOW - timedelta(minutes=1),
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key="service.timestamp.closed",
+            )
+        )
+
+    with pytest.raises(ServiceInteractionClosedError):
+        async with uow_factory() as uow:
+            await uow.deliveries.claim_timestamp_delivery(
+                timestamp_id, user_id, now=NOW
+            )
+
+    async with session_factory() as session:
+        claims = list(
+            await session.scalars(
+                select(TimestampDeliveryClaim).where(
+                    TimestampDeliveryClaim.service_timestamp_id == timestamp_id
+                )
+            )
+        )
+
+    assert claims == []
 
 
 async def test_delivery_claim_exposes_a_provider_neutral_immutable_message(

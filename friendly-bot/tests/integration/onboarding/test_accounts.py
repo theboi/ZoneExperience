@@ -15,7 +15,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from friendly_bot.onboarding.accounts import OperationalAccountService
+from friendly_bot.onboarding.accounts import LoginResult, OperationalAccountService
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     OperationalLogin,
@@ -180,6 +180,48 @@ async def test_first_login_for_every_operational_role_opens_interest_capture(
 
     assert result.kind == "attached"
     assert result.opens_interest_capture is True
+
+
+@pytest.mark.parametrize(
+    "role", [OperationalRole.SERVER, OperationalRole.LEADER, OperationalRole.STAFF]
+)
+async def test_unbound_sender_uses_attached_profile_owner_role_for_capture_and_manage(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+    role: OperationalRole,
+) -> None:
+    """A new Telegram sender remains NBNC; role belongs to the matched profile user."""
+
+    owner_id, profile_id = await _seed_profile(
+        session_factory,
+        normalized_name=f"unbound-{role.value}",
+        role=role,
+    )
+    telegram_user_id = {
+        OperationalRole.SERVER: 41,
+        OperationalRole.LEADER: 42,
+        OperationalRole.STAFF: 43,
+    }[role]
+    accounts = OperationalAccountService(uow_factory)
+
+    attached = await accounts.login(
+        telegram_user_id, f"unbound-{role.value}", DOB, now=NOW
+    )
+    managed = await accounts.manage(telegram_user_id, now=NOW)
+
+    async with session_factory() as session:
+        sender = await session.scalar(
+            select(User).where(User.telegram_user_id == telegram_user_id)
+        )
+        profile = await session.get(OperationalProfile, profile_id)
+
+    assert attached == LoginResult("attached", opens_interest_capture=True)
+    assert managed == LoginResult("manage", opens_interest_editor=True)
+    assert sender is not None
+    assert sender.id != owner_id
+    assert sender.role is OperationalRole.NBNC
+    assert profile is not None
+    assert profile.user_id == owner_id
 
 
 async def test_logout_then_reattach_does_not_reopen_interest_capture(

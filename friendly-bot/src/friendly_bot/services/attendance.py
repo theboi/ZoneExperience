@@ -47,6 +47,21 @@ class ServiceAttendanceService:
     ) -> AttendanceOutcome:
         """Select a safe attendance outcome from the services current at this click."""
 
+        async with self._uow_factory() as uow:
+            return await self.resolve_for_new_nbnc_in_uow(
+                uow, user_id=user_id, services=services, now=now
+            )
+
+    async def resolve_for_new_nbnc_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        services: Sequence[ServiceRecord],
+        now: datetime,
+    ) -> AttendanceOutcome:
+        """Resolve attendance under a caller-owned ingress transaction."""
+
         active_services = tuple(
             service
             for service in services
@@ -66,7 +81,9 @@ class ServiceAttendanceService:
         service = active_services[0]
         if not service.highkey:
             return AttendanceOutcome("choice_required", service_ids=(service.id,))
-        return await self._resolve_selected_service(user_id, service, now=now)
+        return await self._resolve_selected_service_in_uow(
+            uow, user_id=user_id, service=service, now=now
+        )
 
     async def select_service(
         self, user_id: UUID, service_id: UUID, *, now: datetime
@@ -74,18 +91,24 @@ class ServiceAttendanceService:
         """Re-evaluate a previously rendered choice immediately before mutation."""
 
         async with self._uow_factory() as uow:
-            service = await uow.services.get(service_id)
-            return await self._resolve_selected_service_in_uow(
-                uow, user_id=user_id, service=service, now=now
+            return await self.select_service_in_uow(
+                uow, user_id=user_id, service_id=service_id, now=now
             )
 
-    async def _resolve_selected_service(
-        self, user_id: UUID, service: ServiceRecord, *, now: datetime
+    async def select_service_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        service_id: UUID,
+        now: datetime,
     ) -> AttendanceOutcome:
-        async with self._uow_factory() as uow:
-            return await self._resolve_selected_service_in_uow(
-                uow, user_id=user_id, service=service, now=now
-            )
+        """Re-evaluate and mutate a selected service in a supplied transaction."""
+
+        service = await uow.services.get(service_id)
+        return await self._resolve_selected_service_in_uow(
+            uow, user_id=user_id, service=service, now=now
+        )
 
     async def _resolve_selected_service_in_uow(
         self,

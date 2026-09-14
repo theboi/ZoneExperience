@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy import Enum, MetaData, select
+from sqlalchemy import Enum, MetaData, select, update
 from sqlalchemy.dialects.postgresql import CreateEnumType, dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -26,6 +26,7 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
+    TimestampDeliveryClaim,
     User,
 )
 from friendly_bot.persistence.repositories import (
@@ -145,6 +146,28 @@ class RecordingUnitOfWorkFactory:
         unit_of_work = UnitOfWork(self.session_factory)
         self.opened.append(unit_of_work)
         return unit_of_work
+
+
+@dataclass
+class ClosingAudience:
+    """Close the service after due listing to exercise the final claim fence."""
+
+    session_factory: _SESSION_FACTORY
+    service_id: UUID
+    user_id: UUID
+    calls: list[tuple[ServiceAudience, UUID | None]] = field(default_factory=list)
+
+    async def resolve(
+        self, audience: ServiceAudience, service_id: UUID | None
+    ) -> list[UUID]:
+        self.calls.append((audience, service_id))
+        async with self.session_factory.begin() as session:
+            await session.execute(
+                update(Service)
+                .where(Service.id == self.service_id)
+                .values(interaction_closed_at=NOW)
+            )
+        return [self.user_id]
 
 
 async def test_authoritative_audiences_apply_role_inheritance_without_admin_grants(
@@ -339,3 +362,85 @@ async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_prepare
     assert deliveries[0].kind == prepared_delivery.kind
     assert deliveries[0].payload == prepared_delivery.payload
     assert deliveries[0].eligible_at == prepared_delivery.eligible_at
+
+
+async def test_closed_service_after_due_listing_cannot_claim_prepare_or_enqueue_timestamp(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """The final claim must reject a closure that races the earlier due query."""
+
+    service_id = uuid4()
+    user_id = uuid4()
+    timestamp_id = uuid4()
+    root_flow_key = "service.task7.timestamp.closed"
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                Service(
+                    id=service_id,
+                    key="task7-closed-claim",
+                    name="Task 7 closed claim",
+                    timezone="UTC",
+                    highkey=True,
+                    doors_open_at=NOW - timedelta(hours=1),
+                    doors_close_at=NOW + timedelta(hours=1),
+                    service_starts_at=NOW,
+                    service_ends_at=NOW + timedelta(hours=1),
+                    interaction_ends_at=NOW + timedelta(hours=2),
+                ),
+                User(id=user_id, telegram_user_id=74, role=OperationalRole.NBNC),
+            ]
+        )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": "service.task7.timestamp.closed"},
+                flow_key_index={root_flow_key: ()},
+            ),
+            scope_kind=FlowScopeKind.SERVICE,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    async with session_factory.begin() as session:
+        session.add(
+            ServiceTimestamp(
+                id=timestamp_id,
+                service_id=service_id,
+                key="closed",
+                occurs_at=NOW,
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key=root_flow_key,
+            )
+        )
+
+    roots = RecordingTimestampRoots()
+    scheduler = ServiceDeliveryScheduler(
+        RecordingUnitOfWorkFactory(session_factory),
+        ClosingAudience(session_factory, service_id, user_id),
+        roots,
+    )
+
+    result = await scheduler.run_once(now=NOW)
+
+    async with session_factory() as session:
+        claims = list(
+            await session.scalars(
+                select(TimestampDeliveryClaim).where(
+                    TimestampDeliveryClaim.service_timestamp_id == timestamp_id
+                )
+            )
+        )
+        deliveries = list(
+            await session.scalars(
+                select(OutboundDelivery).where(OutboundDelivery.user_id == user_id)
+            )
+        )
+
+    assert result.due_timestamp_count == 1
+    assert result.claimed_delivery_count == 0
+    assert result.enqueued_delivery_count == 0
+    assert roots.calls == []
+    assert claims == []
+    assert deliveries == []

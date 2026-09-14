@@ -266,6 +266,8 @@ class UserRepository(Protocol):
 
     async def require_by_telegram_id(self, telegram_user_id: int) -> UserRecord: ...
 
+    async def require_by_id(self, user_id: UUID) -> UserRecord: ...
+
     async def set_display_name(
         self, user_id: UUID, display_name: str, *, at: datetime
     ) -> UserRecord: ...
@@ -274,6 +276,10 @@ class UserRepository(Protocol):
 class OperationalProfileRepository(Protocol):
     async def find_by_login_identity(
         self, normalized_name: str, dob: date
+    ) -> OperationalProfileRecord | None: ...
+
+    async def find_active_for_login_user(
+        self, user_id: UUID
     ) -> OperationalProfileRecord | None: ...
 
     async def update_interests(
@@ -410,7 +416,7 @@ class OpenSelectionRepository(Protocol):
 
 class DeliveryRepository(Protocol):
     async def claim_timestamp_delivery(
-        self, service_timestamp_id: UUID, user_id: UUID
+        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
     ) -> bool: ...
 
     async def enqueue(
@@ -763,6 +769,12 @@ class SqlAlchemyUserRepository:
             raise LookupError("telegram sender was not found")
         return _user_record(row)
 
+    async def require_by_id(self, user_id: UUID) -> UserRecord:
+        row = await self._session.get(User, user_id)
+        if row is None:
+            raise LookupError("user was not found")
+        return _user_record(row)
+
     async def set_display_name(
         self, user_id: UUID, display_name: str, *, at: datetime
     ) -> UserRecord:
@@ -789,6 +801,23 @@ class SqlAlchemyOperationalProfileRepository:
                 OperationalProfile.normalized_name == normalized_name,
                 OperationalProfile.dob == dob,
             )
+        )
+        return _profile_record(row) if row is not None else None
+
+    async def find_active_for_login_user(
+        self, user_id: UUID
+    ) -> OperationalProfileRecord | None:
+        row = await self._session.scalar(
+            select(OperationalProfile)
+            .join(
+                OperationalLogin,
+                OperationalLogin.operational_profile_id == OperationalProfile.id,
+            )
+            .where(
+                OperationalLogin.user_id == user_id,
+                OperationalLogin.detached_at.is_(None),
+            )
+            .with_for_update()
         )
         return _profile_record(row) if row is not None else None
 
@@ -907,6 +936,7 @@ class SqlAlchemyServiceRepository:
             .where(
                 ServiceTimestamp.occurs_at <= now,
                 Service.interaction_ends_at > now,
+                Service.interaction_closed_at.is_(None),
             )
             .order_by(ServiceTimestamp.occurs_at, ServiceTimestamp.id)
         )
@@ -1684,14 +1714,22 @@ class SqlAlchemyDeliveryRepository:
         self._session = session
 
     async def claim_timestamp_delivery(
-        self, service_timestamp_id: UUID, user_id: UUID
+        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
     ) -> bool:
+        timestamp = await self._session.scalar(
+            select(ServiceTimestamp)
+            .where(ServiceTimestamp.id == service_timestamp_id)
+            .with_for_update()
+        )
+        if timestamp is None:
+            raise LookupError("service timestamp was not found")
+        await _lock_open_service(self._session, timestamp.service_id, at=now)
         row = await self._session.scalar(
             pg_insert(TimestampDeliveryClaim)
             .values(
                 service_timestamp_id=service_timestamp_id,
                 user_id=user_id,
-                claimed_at=_now(),
+                claimed_at=now,
                 status="claimed",
             )
             .on_conflict_do_nothing(

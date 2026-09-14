@@ -69,6 +69,12 @@ class FakeUow:
                 return updated
         raise LookupError("user was not found")
 
+    async def require_by_id(self, user_id: UUID) -> UserRecord:
+        for user in self._users_by_telegram_id.values():
+            if user.id == user_id:
+                return user
+        raise LookupError("user was not found")
+
     async def lock_user(self, user_id: UUID) -> None:
         self.locked_user_ids.append(user_id)
 
@@ -161,3 +167,41 @@ async def test_existing_start_returns_configured_welcome_back_outcome() -> None:
     assert result.kind == "existing_start"
     assert result.opens_name_capture is False
     assert uow.display_name(81) == "Existing"
+
+
+async def test_handle_in_uow_uses_the_ingress_user_without_reopening_or_recording() -> (
+    None
+):
+    """Ingress has already locked and persisted this message in its owning UoW."""
+
+    uow = FakeUow()
+    user = await uow.resolve_telegram_sender(81, received_at=NOW)
+    await uow.record_incoming(
+        user_id=user.id,
+        source_message_id=1,
+        body="/start",
+        replied_to_body=None,
+        occurred_at=NOW,
+    )
+    incoming = message(2, "Alex  Tan ")
+    await uow.record_incoming(
+        user_id=user.id,
+        source_message_id=incoming.message_id,
+        body=incoming.text or "",
+        replied_to_body=None,
+        occurred_at=incoming.sent_at,
+    )
+
+    def fail_if_opened() -> FakeUow:
+        raise AssertionError("composed onboarding must not open another unit of work")
+
+    onboarding = OnboardingService(fail_if_opened)
+
+    result = await onboarding.handle_in_uow(
+        uow, user_id=user.id, message=incoming, now=NOW
+    )
+
+    assert result.kind == "name_captured"
+    assert uow.display_name(81) == "Alex  Tan "
+    assert [record.source_message_id for record in uow.messages] == [1, 2]
+    assert uow.locked_user_ids == []
