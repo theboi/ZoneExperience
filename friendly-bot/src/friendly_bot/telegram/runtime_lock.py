@@ -52,6 +52,7 @@ class TelegramRuntimeLock:
     def __init__(self, connection: TelegramRuntimeConnection) -> None:
         self._connection: TelegramRuntimeConnection | None = connection
         self._lost = False
+        self._health_probe_lock = asyncio.Lock()
 
     @classmethod
     async def acquire(
@@ -115,23 +116,24 @@ class TelegramRuntimeLock:
     async def ensure_healthy(self) -> None:
         """Raise when this runtime no longer owns a live advisory-lock session."""
 
-        connection = self._required_live_connection()
-        if connection.is_closed():
-            await self._lose_health_connection()
-            raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
-        try:
-            result = await connection.fetchval(_HEALTH_SQL)
-        except asyncio.CancelledError:
-            await self._lose_health_connection()
-            raise
-        except Exception as error:
-            await self._lose_health_connection()
-            raise TelegramRuntimeLockLostError(
-                "runtime_lock_connection_lost"
-            ) from error
-        if type(result) is not int or result != 1:
-            await self._lose_health_connection()
-            raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
+        async with self._health_probe_lock:
+            connection = self._required_live_connection()
+            if connection.is_closed():
+                await self._lose_health_connection()
+                raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
+            try:
+                result = await connection.fetchval(_HEALTH_SQL)
+            except asyncio.CancelledError:
+                await self._lose_health_connection()
+                raise
+            except Exception as error:
+                await self._lose_health_connection()
+                raise TelegramRuntimeLockLostError(
+                    "runtime_lock_connection_lost"
+                ) from error
+            if type(result) is not int or result != 1:
+                await self._lose_health_connection()
+                raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
 
     async def aclose(self) -> None:
         """Close the dedicated session, releasing its session-level advisory lock."""

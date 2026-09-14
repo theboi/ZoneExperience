@@ -55,6 +55,53 @@ async def _factory(connection: FakeConnection) -> FakeConnection:
     return connection
 
 
+class SerializedHealthConnection:
+    """A direct session that rejects overlapping health queries like asyncpg."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.health_query_count = 0
+        self.health_started = asyncio.Event()
+        self.release_health = asyncio.Event()
+        self._health_query_in_progress = False
+
+    async def fetchval(self, query: str, *_args: object) -> object:
+        if "pg_try_advisory_lock" in query:
+            return True
+        if self._health_query_in_progress:
+            raise RuntimeError("overlapping health query")
+        self._health_query_in_progress = True
+        self.health_started.set()
+        await self.release_health.wait()
+        self._health_query_in_progress = False
+        self.health_query_count += 1
+        return 1
+
+    async def close(self) -> None:
+        self.closed = True
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+async def test_concurrent_health_checks_are_serialized_on_the_lock_session() -> None:
+    """Concurrent runtime loops must not overlap queries on their one lock session."""
+
+    connection = SerializedHealthConnection()
+    lock = await TelegramRuntimeLock.acquire(lambda: _factory(connection))
+
+    first = asyncio.create_task(lock.ensure_healthy())
+    await connection.health_started.wait()
+    second = asyncio.create_task(lock.ensure_healthy())
+    await asyncio.sleep(0)
+    connection.release_health.set()
+
+    await asyncio.gather(first, second)
+
+    assert connection.closed is False
+    assert connection.health_query_count == 2
+
+
 async def test_cancelled_lock_query_closes_its_acquired_session_before_reraising() -> (
     None
 ):
