@@ -36,7 +36,7 @@
 - Consumes: \`TelegramRuntimeLock.ensure_healthy() -> None\` called concurrently by \`_poll_forever\`, \`_outbox_forever\`, and \`_schedule_forever\`.
 - Produces: \`ensure_healthy()\` permits concurrent callers to complete sequentially on one live connection, while preserving \`TelegramRuntimeLockLostError\` for a closed, failed, or invalid connection.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test-only connection whose first health \`fetchval()\` waits on an event and whose second overlapping health query raises \`RuntimeError\`. Start one \`ensure_healthy()\` task, wait until its query begins, start a second task, release the first query, and require both tasks to complete without closing the connection.
 
@@ -57,13 +57,13 @@ async def test_concurrent_health_checks_are_serialized_on_the_lock_session() -> 
     assert connection.health_query_count == 2
 \`\`\`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: \`uv run pytest --basetemp /private/tmp/friendly-bot-runtime-lock tests/unit/telegram/test_runtime_lock_unit.py::test_concurrent_health_checks_are_serialized_on_the_lock_session -q\`
 
 Expected: FAIL with \`TelegramRuntimeLockLostError\`, because the second \`ensure_healthy()\` reaches the same direct connection before the first \`SELECT 1\` completes.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Initialize \`self._health_probe_lock = asyncio.Lock()\` in \`TelegramRuntimeLock.__init__\`. Wrap the existing body of \`ensure_healthy()\` in \`async with self._health_probe_lock:\` without changing its loss, close, result-validation, or cancellation branches.
 
@@ -89,13 +89,13 @@ async def ensure_healthy(self) -> None:
             raise TelegramRuntimeLockLostError("runtime_lock_connection_lost")
 \`\`\`
 
-- [ ] **Step 4: Run focused lock tests to verify they pass**
+- [x] **Step 4: Run focused lock tests to verify they pass**
 
 Run: \`uv run pytest --basetemp /private/tmp/friendly-bot-runtime-lock tests/unit/telegram/test_runtime_lock_unit.py -q\`
 
 Expected: PASS, including the new concurrent-health test and the existing cancellation and loss tests.
 
-- [ ] **Step 5: Commit and push the verified lock change**
+- [x] **Step 5: Commit and push the verified lock change**
 
 \`\`\`bash
 git add src/friendly_bot/telegram/runtime_lock.py tests/unit/telegram/test_runtime_lock_unit.py
@@ -114,7 +114,7 @@ git push origin main
 - Consumes: generated \`POSTGRES_USER=friendly_bot\` and Compose binding \`127.0.0.1:5833:5432\`.
 - Produces: the copyable \`.env\` template uses \`friendly_bot\` at port \`5833\`; the runbook requires no Docker Desktop and describes Compose discovery when installed with Homebrew.
 
-- [ ] **Step 1: Write the failing template expectation**
+- [x] **Step 1: Write the failing template expectation**
 
 Change the shared dotenv assertion to require the guarded values.
 
@@ -124,13 +124,13 @@ assert database_settings.redacted_url() == (
 )
 \`\`\`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: \`uv run pytest --basetemp /private/tmp/friendly-bot-config tests/unit/config/test_settings.py::test_complete_example_loads_all_settings_from_one_shared_dotenv -q\`
 
 Expected: FAIL because \`.env.example\` still supplies \`friendly_bot_user\` and port \`5432\`.
 
-- [ ] **Step 3: Correct the template and runbook**
+- [x] **Step 3: Correct the template and runbook**
 
 Set the template URL to:
 
@@ -149,7 +149,7 @@ docker compose version
 
 Explain that \`docker context show\` must print \`colima\`, and that a Homebrew Compose installation may need \`cliPluginsExtraDirs\` to include \`/opt/homebrew/opt/docker-compose/lib/docker/cli-plugins\` in \`~/.docker/config.json\`; existing Docker configuration must be preserved.
 
-- [ ] **Step 4: Run configuration and documentation verification**
+- [x] **Step 4: Run configuration and documentation verification**
 
 Run: \`uv run pytest --basetemp /private/tmp/friendly-bot-config tests/unit/config/test_settings.py -q\`
 
@@ -157,7 +157,7 @@ Run: \`docker context show && docker compose version && docker compose -p friend
 
 Expected: configuration tests PASS; context prints \`colima\`; Compose reports a version; the guarded Compose file validates without output.
 
-- [ ] **Step 5: Commit and push the verified operator corrections**
+- [x] **Step 5: Commit and push the verified operator corrections**
 
 \`\`\`bash
 git add .env.example README.md tests/unit/config/test_settings.py
@@ -175,7 +175,7 @@ git push origin main
 - Consumes: pushed source changes, ignored local \`.env\`, Colima Docker context, and fixed guarded PostgreSQL namespace.
 - Produces: evidence that static checks, tests, migrations, direct lock integration, and a stable live runtime startup completed before the operator sends \`/start\`.
 
-- [ ] **Step 1: Run full automated verification**
+- [x] **Step 1: Run full automated verification**
 
 Run: \`uv run pytest --basetemp /private/tmp/friendly-bot-full-tests -q\`
 
@@ -205,6 +205,13 @@ Run: \`uv run python -m friendly_bot\`
 
 Expected: it stays running through the first scheduler interval without \`TelegramRuntimeLockLostError\`; no credentials appear in output. Stop only if it crashes. Once stable, leave it running and ask the operator to send \`/start\` from the controlled Telegram account.
 
-- [ ] **Step 5: Commit and push final verification documentation only if it changes**
+- [x] **Step 5: Commit and push final verification documentation only if it changes**
 
 If a verification note is added, stage only that note and commit it with \`docs: record Colima runtime verification\`; otherwise leave the verified source commits as the final pushed state.
+
+## Execution Status
+
+- Runtime-lock regression: complete and pushed in `a8df15c`.
+- Colima runbook, dotenv template, and portable guard-canary coverage: complete and pushed in `1a4b6f3`.
+- Full local verification: 328 passed, 109 skipped because they require unavailable external services or the fixed `ryanthe` runtime profile.
+- Guarded database, migration, lock integration, and live Telegram smoke test: blocked outside the fixed UID-501 `/Users/ryanthe/Dev/ZoneExperience` runtime. Do not bypass this guard from another account or checkout.
