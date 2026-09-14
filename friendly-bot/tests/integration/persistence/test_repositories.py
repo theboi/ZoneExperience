@@ -657,6 +657,112 @@ async def test_match_reservation_can_rematch_after_releasing_a_prior_assignment(
     assert retried.responder_profile_id == second_profile_id
 
 
+async def test_match_eligibility_uses_role_owner_and_active_telegram_login(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A role owner's profile must deliver to the distinct active Telegram identity."""
+
+    service_id = await _seed_service(session_factory, key="zone_x_login_identity")
+    requester_id = await _seed_user(session_factory)
+    role_owner_id = await _seed_user(session_factory, role=OperationalRole.SERVER)
+    login_user_id = await _seed_user(session_factory, telegram_user_id=818)
+    profile_id = await _seed_profile(
+        session_factory, user_id=role_owner_id, name="attached-server"
+    )
+    detached_owner_id = await _seed_user(
+        session_factory, role=OperationalRole.SERVER, telegram_user_id=819
+    )
+    detached_profile_id = await _seed_profile(
+        session_factory, user_id=detached_owner_id, name="detached-server"
+    )
+
+    async with uow_factory() as uow:
+        await uow.operational_logins.attach(profile_id, login_user_id, at=NOW)
+        await uow.attendances.start_or_switch(
+            login_user_id, service_id, attendee_kind="ordinary", started_at=NOW
+        )
+        await uow.attendances.start_or_switch(
+            detached_owner_id, service_id, attendee_kind="ordinary", started_at=NOW
+        )
+        request = await uow.matches.get_or_create_active_request(
+            requester_user_id=requester_id,
+            service_id=service_id,
+            kind="normal",
+            now=NOW,
+        )
+        candidates = await uow.matches.list_eligible_normal(service_id, request.id)
+
+    assert [
+        (candidate.profile_id, candidate.user_id, candidate.role)
+        for candidate in candidates
+    ] == [(profile_id, login_user_id, OperationalRole.SERVER)]
+    assert detached_profile_id not in {candidate.profile_id for candidate in candidates}
+
+
+async def test_request_lifecycle_exposes_only_owned_typed_responder_contact(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """I04 needs no ORM access to create, confirm, notify, release, or exclude a match."""
+
+    service_id = await _seed_service(session_factory, key="zone_x_request_lifecycle")
+    requester_id = await _seed_user(session_factory)
+    stranger_id = await _seed_user(session_factory)
+    owner_id = await _seed_user(session_factory, role=OperationalRole.SERVER)
+    recipient_id = await _seed_user(session_factory, telegram_user_id=820)
+    profile_id = await _seed_profile(
+        session_factory, user_id=owner_id, name="reachable-server"
+    )
+
+    async with uow_factory() as uow:
+        await uow.operational_logins.attach(profile_id, recipient_id, at=NOW)
+        await uow.lock_user(requester_id)
+        request = await uow.matches.get_or_create_active_request(
+            requester_user_id=requester_id,
+            service_id=service_id,
+            kind="normal",
+            now=NOW,
+        )
+        interested = await uow.matches.set_interest(
+            request.id,
+            requester_user_id=requester_id,
+            interest="music",
+            now=NOW,
+        )
+        assignment = await uow.matches.reserve_ranked(request.id, [profile_id], now=NOW)
+        assert assignment is not None
+        confirmed = await uow.matches.confirm(
+            request.id,
+            requester_user_id=requester_id,
+            meeting_preference="nbnc_joins_human",
+            now=NOW,
+        )
+        responder = await uow.matches.current_responder(
+            request.id, requester_user_id=requester_id
+        )
+        released = await uow.matches.release_active(
+            request.id,
+            requester_user_id=requester_id,
+            reason="rematch",
+            now=NOW,
+        )
+        await uow.matches.exclude_responder(
+            request.id,
+            profile_id,
+            requester_user_id=requester_id,
+            now=NOW,
+        )
+        with pytest.raises(LookupError):
+            await uow.matches.require_request(request.id, requester_user_id=stranger_id)
+
+    assert interested.interest == "music"
+    assert confirmed.meeting_preference == "nbnc_joins_human"
+    assert responder is not None and responder.recipient_user_id == recipient_id
+    assert responder.telegram_chat_id == 820
+    assert released == responder
+
+
 async def test_service_expiry_releases_only_its_active_match_capacity_once(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],

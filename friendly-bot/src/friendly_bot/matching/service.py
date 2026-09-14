@@ -45,8 +45,27 @@ class MatchingService:
         """Rank only eligible exact-server candidates and reserve through F01."""
 
         async with self._uow_factory() as uow:
-            await uow.lock_user(self._requester_user_for(request_id))
-            return await self._reserve_normal_locked(uow, request_id, service_id, now)
+            return await self.reserve_normal_in_uow(
+                uow,
+                requester_user_id=self._requester_user_for(request_id),
+                request_id=request_id,
+                service_id=service_id,
+                now=now,
+            )
+
+    async def reserve_normal_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        requester_user_id: UUID,
+        request_id: UUID,
+        service_id: UUID,
+        now: datetime,
+    ) -> MatchAssignmentRecord | None:
+        """Reserve inside the ingress transaction instead of opening a second UoW."""
+
+        await uow.lock_user(requester_user_id)
+        return await self._reserve_normal_locked(uow, request_id, service_id, now)
 
     async def rematch_normal(
         self,
@@ -60,11 +79,34 @@ class MatchingService:
         """Release and exclude before re-ranking so a declined responder cannot recur."""
 
         async with self._uow_factory() as uow:
-            await uow.lock_user(self._requester_user_for(request_id))
-            await uow.matches.release_and_exclude(
-                request_id, previous_profile_id, reason=reason, now=now
+            return await self.rematch_normal_in_uow(
+                uow,
+                requester_user_id=self._requester_user_for(request_id),
+                request_id=request_id,
+                previous_profile_id=previous_profile_id,
+                service_id=service_id,
+                now=now,
+                reason=reason,
             )
-            return await self._reserve_normal_locked(uow, request_id, service_id, now)
+
+    async def rematch_normal_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        requester_user_id: UUID,
+        request_id: UUID,
+        previous_profile_id: UUID,
+        service_id: UUID,
+        now: datetime,
+        reason: str = "rematch",
+    ) -> MatchAssignmentRecord | None:
+        """Release/exclude/re-rank under the caller-owned user serialization lock."""
+
+        await uow.lock_user(requester_user_id)
+        await uow.matches.release_and_exclude(
+            request_id, previous_profile_id, reason=reason, now=now
+        )
+        return await self._reserve_normal_locked(uow, request_id, service_id, now)
 
     async def reserve_safety(
         self, request_id: UUID, service_id: UUID | None, *, now: datetime
@@ -72,17 +114,34 @@ class MatchingService:
         """Reserve only eligible leader/staff responders; never fall back to normal."""
 
         async with self._uow_factory() as uow:
-            await uow.lock_user(self._requester_user_for(request_id))
-            candidates = await uow.matches.list_eligible_safety(service_id, request_id)
-            eligible = [
-                candidate for candidate in candidates if _is_safety_eligible(candidate)
-            ]
-            if not eligible:
-                return None
-            ranked_profile_ids = await self._rank_profile_ids(eligible)
-            return await uow.matches.reserve_ranked(
-                request_id, ranked_profile_ids, now=now
+            return await self.reserve_safety_in_uow(
+                uow,
+                requester_user_id=self._requester_user_for(request_id),
+                request_id=request_id,
+                service_id=service_id,
+                now=now,
             )
+
+    async def reserve_safety_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        requester_user_id: UUID,
+        request_id: UUID,
+        service_id: UUID | None,
+        now: datetime,
+    ) -> MatchAssignmentRecord | None:
+        """Reserve safety capacity in the existing ingress UoW only."""
+
+        await uow.lock_user(requester_user_id)
+        candidates = await uow.matches.list_eligible_safety(service_id, request_id)
+        eligible = [
+            candidate for candidate in candidates if _is_safety_eligible(candidate)
+        ]
+        if not eligible:
+            return None
+        ranked_profile_ids = await self._rank_profile_ids(eligible)
+        return await uow.matches.reserve_ranked(request_id, ranked_profile_ids, now=now)
 
     async def _reserve_normal_locked(
         self, uow: UnitOfWork, request_id: UUID, service_id: UUID, now: datetime

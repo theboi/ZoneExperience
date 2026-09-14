@@ -140,3 +140,27 @@ async def test_rematch_releases_and_excludes_before_new_reservation() -> None:
     assert uow.calls == ["release", "list", "reserve"]
     assert uow.released_profile_id == old_profile_id
     assert uow.release_reason == "declined"
+
+
+async def test_caller_owned_uow_reservation_never_opens_a_second_transaction() -> None:
+    """I04 executes inside Telegram ingress and must reuse that locked transaction."""
+
+    candidate = _candidate(OperationalRole.SERVER)
+    assignment = MatchAssignmentRecord(uuid4(), REQUEST, candidate.profile_id, NOW)
+    uow = FakeUow([candidate], assignment)
+    service = MatchingService(
+        lambda: (_ for _ in ()).throw(AssertionError("must not open a second UoW")),
+        Ranker([]),
+        lambda _request_id: REQUESTER,
+    )
+
+    result = await service.reserve_normal_in_uow(
+        uow,
+        requester_user_id=REQUESTER,
+        request_id=REQUEST,
+        service_id=SERVICE,
+        now=NOW,
+    )
+
+    assert result == assignment
+    assert uow.locked_user_ids == [REQUESTER]

@@ -13,6 +13,7 @@ from pydantic import JsonValue
 from sqlalchemy import Select, and_, delete, exists, false, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import (
@@ -52,6 +53,9 @@ from friendly_bot.persistence.models import (
 
 type LoginAttachmentKind = Literal["attached", "occupied", "not_found"]
 type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
+type MatchRequestKind = Literal["normal", "safety"]
+type MatchRequestStatus = Literal["pending", "reserved", "confirmed", "resolved"]
+type MeetingPreference = Literal["nbnc_joins_human", "human_joins_nbnc"]
 DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
 _NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL = datetime(1970, 1, 1, tzinfo=UTC)
 SERVICE_INTERACTION_END_RELEASE_REASON = "service_interaction_ended"
@@ -191,6 +195,34 @@ class MatchAssignmentRecord:
     request_id: UUID
     responder_profile_id: UUID
     assigned_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class MatchRequestRecord:
+    """One requester-owned human-match state without an ORM object escape."""
+
+    id: UUID
+    requester_user_id: UUID
+    service_id: UUID | None
+    kind: MatchRequestKind
+    interest: str | None
+    meeting_preference: MeetingPreference | None
+    status: MatchRequestStatus
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class MatchResponderRecord:
+    """The actively attached Telegram recipient for one current/previous assignment."""
+
+    assignment: MatchAssignmentRecord
+    profile_id: UUID
+    recipient_user_id: UUID
+    telegram_chat_id: int
+    display_name: str | None
+    cg_name: str | None
+    telegram_contact_url: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,6 +410,59 @@ class PersonaRepository(Protocol):
 
 
 class MatchRepository(Protocol):
+    async def get_or_create_active_request(
+        self,
+        *,
+        requester_user_id: UUID,
+        service_id: UUID | None,
+        kind: MatchRequestKind,
+        now: datetime,
+    ) -> MatchRequestRecord: ...
+
+    async def require_request(
+        self, request_id: UUID, *, requester_user_id: UUID
+    ) -> MatchRequestRecord: ...
+
+    async def set_interest(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        interest: str,
+        now: datetime,
+    ) -> MatchRequestRecord: ...
+
+    async def confirm(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        meeting_preference: MeetingPreference,
+        now: datetime,
+    ) -> MatchRequestRecord: ...
+
+    async def current_responder(
+        self, request_id: UUID, *, requester_user_id: UUID
+    ) -> MatchResponderRecord | None: ...
+
+    async def release_active(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        reason: str,
+        now: datetime,
+    ) -> MatchResponderRecord | None: ...
+
+    async def exclude_responder(
+        self,
+        request_id: UUID,
+        profile_id: UUID,
+        *,
+        requester_user_id: UUID,
+        now: datetime,
+    ) -> None: ...
+
     async def list_eligible_normal(
         self, service_id: UUID, request_id: UUID
     ) -> list[MatchCandidateRecord]: ...
@@ -643,11 +728,13 @@ def _cursor_record(row: PersonaCursor) -> PersonaCursorRecord:
     )
 
 
-def _candidate_record(profile: OperationalProfile, user: User) -> MatchCandidateRecord:
+def _candidate_record(
+    profile: OperationalProfile, role_owner: User, recipient: User
+) -> MatchCandidateRecord:
     return MatchCandidateRecord(
         profile_id=profile.id,
-        user_id=user.id,
-        role=user.role,
+        user_id=recipient.id,
+        role=role_owner.role,
         interests=tuple(cast(list[str], profile.interests)),
         cg_name=profile.cg_name,
         always_available=profile.always_available,
@@ -662,6 +749,32 @@ def _assignment_record(row: HumanMatchAssignment) -> MatchAssignmentRecord:
         request_id=row.request_id,
         responder_profile_id=row.responder_profile_id,
         assigned_at=row.assigned_at,
+    )
+
+
+def _match_request_record(row: HumanMatchRequest) -> MatchRequestRecord:
+    """Freeze the only F01 request fields consumed by matching composition."""
+
+    if row.kind not in {"normal", "safety"}:
+        raise RuntimeError("human match request kind is invalid")
+    if row.status not in {"pending", "reserved", "confirmed", "resolved"}:
+        raise RuntimeError("human match request status is invalid")
+    if row.meeting_preference not in {
+        None,
+        "nbnc_joins_human",
+        "human_joins_nbnc",
+    }:
+        raise RuntimeError("human match request meeting preference is invalid")
+    return MatchRequestRecord(
+        id=row.id,
+        requester_user_id=row.requester_user_id,
+        service_id=row.service_id,
+        kind=cast(MatchRequestKind, row.kind),
+        interest=row.interest,
+        meeting_preference=cast(MeetingPreference | None, row.meeting_preference),
+        status=cast(MatchRequestStatus, row.status),
+        created_at=row.created_at,
+        resolved_at=row.resolved_at,
     )
 
 
@@ -1300,12 +1413,20 @@ class SqlAlchemyMatchRepository:
                 HumanMatchExclusion.responder_profile_id == OperationalProfile.id,
             )
         )
+        role_owner = aliased(User)
+        recipient = aliased(User)
         rows = await self._session.execute(
-            select(OperationalProfile, User)
-            .join(User, User.id == OperationalProfile.user_id)
-            .join(ServiceAttendance, ServiceAttendance.user_id == User.id)
+            select(OperationalProfile, role_owner, recipient)
+            .join(role_owner, role_owner.id == OperationalProfile.user_id)
+            .join(
+                OperationalLogin,
+                OperationalLogin.operational_profile_id == OperationalProfile.id,
+            )
+            .join(recipient, recipient.id == OperationalLogin.user_id)
+            .join(ServiceAttendance, ServiceAttendance.user_id == recipient.id)
             .where(
-                User.role == OperationalRole.SERVER,
+                role_owner.role == OperationalRole.SERVER,
+                OperationalLogin.detached_at.is_(None),
                 ServiceAttendance.service_id == service_id,
                 ServiceAttendance.ended_at.is_(None),
                 OperationalProfile.reserved_capacity < OperationalProfile.capacity,
@@ -1313,7 +1434,10 @@ class SqlAlchemyMatchRepository:
             )
             .order_by(OperationalProfile.id)
         )
-        return [_candidate_record(profile, user) for profile, user in rows.tuples()]
+        return [
+            _candidate_record(profile, owner, attached)
+            for profile, owner, attached in rows.tuples()
+        ]
 
     async def list_eligible_safety(
         self, service_id: UUID | None, request_id: UUID
@@ -1324,10 +1448,12 @@ class SqlAlchemyMatchRepository:
                 HumanMatchExclusion.responder_profile_id == OperationalProfile.id,
             )
         )
+        role_owner = aliased(User)
+        recipient = aliased(User)
         attendance_exists = (
             exists(
                 select(ServiceAttendance.id).where(
-                    ServiceAttendance.user_id == User.id,
+                    ServiceAttendance.user_id == recipient.id,
                     ServiceAttendance.service_id == service_id,
                     ServiceAttendance.ended_at.is_(None),
                 )
@@ -1336,22 +1462,182 @@ class SqlAlchemyMatchRepository:
             else false()
         )
         rows = await self._session.execute(
-            select(OperationalProfile, User)
-            .join(User, User.id == OperationalProfile.user_id)
+            select(OperationalProfile, role_owner, recipient)
+            .join(role_owner, role_owner.id == OperationalProfile.user_id)
+            .join(
+                OperationalLogin,
+                OperationalLogin.operational_profile_id == OperationalProfile.id,
+            )
+            .join(recipient, recipient.id == OperationalLogin.user_id)
             .where(
-                User.role.in_((OperationalRole.LEADER, OperationalRole.STAFF)),
+                role_owner.role.in_((OperationalRole.LEADER, OperationalRole.STAFF)),
+                OperationalLogin.detached_at.is_(None),
+                recipient.telegram_user_id.is_not(None),
                 OperationalProfile.reserved_capacity < OperationalProfile.capacity,
                 or_(OperationalProfile.always_available.is_(True), attendance_exists),
                 ~excluded,
             )
             .order_by(OperationalProfile.id)
         )
-        return [_candidate_record(profile, user) for profile, user in rows.tuples()]
+        return [
+            _candidate_record(profile, owner, attached)
+            for profile, owner, attached in rows.tuples()
+        ]
+
+    async def get_or_create_active_request(
+        self,
+        *,
+        requester_user_id: UUID,
+        service_id: UUID | None,
+        kind: MatchRequestKind,
+        now: datetime,
+    ) -> MatchRequestRecord:
+        if kind not in {"normal", "safety"}:
+            raise ValueError("human match request kind is invalid")
+        if service_id is not None:
+            await _lock_open_service(self._session, service_id, at=now)
+        service_filter = (
+            HumanMatchRequest.service_id.is_(None)
+            if service_id is None
+            else HumanMatchRequest.service_id == service_id
+        )
+        active = await self._session.scalar(
+            select(HumanMatchRequest)
+            .where(
+                HumanMatchRequest.requester_user_id == requester_user_id,
+                service_filter,
+                HumanMatchRequest.kind == kind,
+                HumanMatchRequest.status.in_(("pending", "reserved", "confirmed")),
+            )
+            .order_by(HumanMatchRequest.created_at.desc(), HumanMatchRequest.id)
+            .with_for_update()
+        )
+        if active is not None:
+            return _match_request_record(active)
+        request = HumanMatchRequest(
+            id=uuid4(),
+            requester_user_id=requester_user_id,
+            service_id=service_id,
+            kind=kind,
+            status="pending",
+            created_at=now,
+        )
+        self._session.add(request)
+        await self._session.flush()
+        return _match_request_record(request)
+
+    async def require_request(
+        self, request_id: UUID, *, requester_user_id: UUID
+    ) -> MatchRequestRecord:
+        request = await self._session.scalar(
+            select(HumanMatchRequest).where(
+                HumanMatchRequest.id == request_id,
+                HumanMatchRequest.requester_user_id == requester_user_id,
+            )
+        )
+        if request is None:
+            raise LookupError("human match request was not found")
+        return _match_request_record(request)
+
+    async def set_interest(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        interest: str,
+        now: datetime,
+    ) -> MatchRequestRecord:
+        if type(interest) is not str or not interest:
+            raise ValueError("human match interest must be nonempty")
+        request = await self._owned_locked_request(request_id, requester_user_id, now)
+        if request.status == "resolved":
+            raise ValueError("human match request is resolved")
+        request.interest = interest
+        return _match_request_record(request)
+
+    async def confirm(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        meeting_preference: MeetingPreference,
+        now: datetime,
+    ) -> MatchRequestRecord:
+        if meeting_preference not in {"nbnc_joins_human", "human_joins_nbnc"}:
+            raise ValueError("human match meeting preference is invalid")
+        request = await self._owned_locked_request(request_id, requester_user_id, now)
+        assignment = await self._active_assignment(request_id)
+        if assignment is None:
+            raise ValueError("human match request has no active assignment")
+        if request.meeting_preference not in {None, meeting_preference}:
+            raise ValueError("human match meeting preference conflicts")
+        request.meeting_preference = meeting_preference
+        request.status = "confirmed"
+        return _match_request_record(request)
+
+    async def current_responder(
+        self, request_id: UUID, *, requester_user_id: UUID
+    ) -> MatchResponderRecord | None:
+        await self.require_request(request_id, requester_user_id=requester_user_id)
+        assignment = await self._active_assignment(request_id)
+        return (
+            await self._responder_for_assignment(assignment)
+            if assignment is not None
+            else None
+        )
+
+    async def release_active(
+        self,
+        request_id: UUID,
+        *,
+        requester_user_id: UUID,
+        reason: str,
+        now: datetime,
+    ) -> MatchResponderRecord | None:
+        if type(reason) is not str or not reason:
+            raise ValueError("human match release reason is invalid")
+        request = await self._owned_locked_request(request_id, requester_user_id, now)
+        assignment = await self._active_assignment(request_id)
+        if assignment is None:
+            return None
+        responder = await self._responder_for_assignment(assignment)
+        if responder is None:
+            raise RuntimeError("active human match responder is unavailable")
+        await self._release_assignment(assignment, reason=reason, at=now)
+        request.status = "pending"
+        return responder
+
+    async def exclude_responder(
+        self,
+        request_id: UUID,
+        profile_id: UUID,
+        *,
+        requester_user_id: UUID,
+        now: datetime,
+    ) -> None:
+        await self._owned_locked_request(request_id, requester_user_id, now)
+        assigned = await self._session.scalar(
+            select(HumanMatchAssignment.id).where(
+                HumanMatchAssignment.request_id == request_id,
+                HumanMatchAssignment.responder_profile_id == profile_id,
+            )
+        )
+        if assigned is None:
+            raise ValueError("human match responder was not assigned to this request")
+        await self._session.execute(
+            pg_insert(HumanMatchExclusion)
+            .values(
+                request_id=request_id,
+                responder_profile_id=profile_id,
+                created_at=now,
+            )
+            .on_conflict_do_nothing()
+        )
 
     async def reserve_ranked(
         self, request_id: UUID, ranked_profile_ids: list[UUID], *, now: datetime
     ) -> MatchAssignmentRecord | None:
-        await _locked_match_request(self._session, request_id, now=now)
+        request = await _locked_match_request(self._session, request_id, now=now)
         active_assignment = await self._session.scalar(
             select(HumanMatchAssignment)
             .where(
@@ -1414,6 +1700,7 @@ class SqlAlchemyMatchRepository:
                 .returning(HumanMatchAssignment)
             )
             if assignment is not None:
+                request.status = "reserved"
                 return _assignment_record(assignment)
             await self._session.execute(
                 update(CapacityReservation)
@@ -1508,8 +1795,13 @@ class SqlAlchemyMatchRepository:
             )
         )
         for assignment in assignments:
+            request = next(
+                request for request in requests if request.id == assignment.request_id
+            )
             assignment.released_at = at
             assignment.release_reason = SERVICE_INTERACTION_END_RELEASE_REASON
+            request.status = "resolved"
+            request.resolved_at = at
             reservation = await self._session.scalar(
                 select(CapacityReservation)
                 .where(
@@ -1535,6 +1827,92 @@ class SqlAlchemyMatchRepository:
                     "active capacity reservation has no reserved capacity"
                 )
         return len(assignments)
+
+    async def _owned_locked_request(
+        self, request_id: UUID, requester_user_id: UUID, now: datetime
+    ) -> HumanMatchRequest:
+        request = await _locked_match_request(self._session, request_id, now=now)
+        if request.requester_user_id != requester_user_id:
+            raise LookupError("human match request was not found")
+        return request
+
+    async def _active_assignment(self, request_id: UUID) -> HumanMatchAssignment | None:
+        return cast(
+            HumanMatchAssignment | None,
+            await self._session.scalar(
+                select(HumanMatchAssignment)
+                .where(
+                    HumanMatchAssignment.request_id == request_id,
+                    HumanMatchAssignment.released_at.is_(None),
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def _responder_for_assignment(
+        self, assignment: HumanMatchAssignment
+    ) -> MatchResponderRecord | None:
+        recipient = aliased(User)
+        row = (
+            await self._session.execute(
+                select(OperationalProfile, recipient)
+                .join(
+                    OperationalLogin,
+                    OperationalLogin.operational_profile_id == OperationalProfile.id,
+                )
+                .join(recipient, recipient.id == OperationalLogin.user_id)
+                .where(
+                    OperationalProfile.id == assignment.responder_profile_id,
+                    OperationalLogin.detached_at.is_(None),
+                    recipient.telegram_user_id.is_not(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        profile, user = row.tuple()
+        assert user.telegram_user_id is not None
+        return MatchResponderRecord(
+            assignment=_assignment_record(assignment),
+            profile_id=profile.id,
+            recipient_user_id=user.id,
+            telegram_chat_id=user.telegram_user_id,
+            display_name=user.display_name,
+            cg_name=profile.cg_name,
+            telegram_contact_url=profile.telegram_contact_url,
+        )
+
+    async def _release_assignment(
+        self,
+        assignment: HumanMatchAssignment,
+        *,
+        reason: str,
+        at: datetime,
+    ) -> None:
+        assignment.released_at = at
+        assignment.release_reason = reason
+        reservation = await self._session.scalar(
+            select(CapacityReservation)
+            .where(
+                CapacityReservation.id == assignment.capacity_reservation_id,
+                CapacityReservation.released_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if reservation is None:
+            return
+        reservation.released_at = at
+        released_profile_id = await self._session.scalar(
+            update(OperationalProfile)
+            .where(
+                OperationalProfile.id == reservation.operational_profile_id,
+                OperationalProfile.reserved_capacity > 0,
+            )
+            .values(reserved_capacity=OperationalProfile.reserved_capacity - 1)
+            .returning(OperationalProfile.id)
+        )
+        if released_profile_id is None:
+            raise RuntimeError("active capacity reservation has no reserved capacity")
 
 
 class SqlAlchemyOpenSelectionRepository:
