@@ -273,6 +273,30 @@ async def test_maps_durable_buttons_and_photo_only_after_the_started_commit() ->
     ]
 
 
+async def test_maps_a_persisted_empty_button_tuple_as_a_plain_message() -> None:
+    """A JSON array frozen by the repository must not make a text delivery invalid."""
+
+    claim = replace(
+        _claim(),
+        message=OutboundDeliveryMessage(
+            chat_id=73,
+            kind="message",
+            payload=MappingProxyType({"text": "Welcome", "buttons": ()}),
+        ),
+    )
+    deliveries = RecordingDeliveries(claim)
+    gateway = RecordingGateway(TelegramSendConfirmed(901))
+
+    assert await OutboundDeliveryWorker(
+        RecordingUnitOfWorkFactory(deliveries), gateway, clock=lambda: NOW
+    ).run_once()
+
+    assert gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:welcome:73")
+    ]
+    assert deliveries.finish_calls[0]["outcome"] == "sent"
+
+
 @pytest.mark.parametrize(
     ("telegram_outcome", "expected", "retry_at", "safe_error"),
     [

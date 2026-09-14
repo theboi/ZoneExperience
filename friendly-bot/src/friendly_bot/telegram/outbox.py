@@ -301,7 +301,7 @@ def _photo_request(
 
 
 def _buttons_from(value: object) -> tuple[TelegramInlineButton, ...] | None:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         return None
     buttons: list[TelegramInlineButton] = []
     for item in value:
