@@ -170,8 +170,8 @@ class TelegramPoller:
 def _normalized_body(message: TelegramMessage) -> str:
     """Store the incoming user choice, retaining no Telegram envelope."""
 
-    if message.callback_data is not None:
-        return message.callback_data
+    if message.callback is not None:
+        return message.callback.button_id
     if message.text is not None:
         return message.text
     raise ValueError("Telegram message has no supported normalized body")
@@ -185,6 +185,6 @@ def _source_event_id(update: IncomingTelegramUpdate, message: TelegramMessage) -
     making the two event identities collision-free in the signed bigint key.
     """
 
-    if message.callback_data is not None:
+    if message.callback is not None:
         return -update.update_id
     return message.message_id

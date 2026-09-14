@@ -125,6 +125,40 @@ def test_runtime_service_choice_buttons_have_no_embedded_service_list() -> None:
     }
 
 
+def test_button_payload_is_closed_to_the_canonical_service_key_context() -> None:
+    action = parse_action(
+        {
+            "type": "send_buttons",
+            "service_bound": True,
+            "buttons": [
+                {
+                    "button_id": "zone_x.attendance.here",
+                    "text": "Check in",
+                    "payload": {"service_key": "zone_x_2026_10_18"},
+                }
+            ],
+        }
+    )
+
+    assert action.buttons[0].payload is not None
+    assert action.buttons[0].payload.service_key == "zone_x_2026_10_18"
+
+    with pytest.raises(ValidationError):
+        parse_action(
+            {
+                "type": "send_buttons",
+                "service_bound": True,
+                "buttons": [
+                    {
+                        "button_id": "zone_x.attendance.here",
+                        "text": "Check in",
+                        "payload": {"arbitrary": ["untrusted", "json"]},
+                    }
+                ],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "data",
     [

@@ -12,7 +12,11 @@ from pydantic import SecretStr
 from friendly_bot.telegram.client import TelegramApiClient
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    ResolvedTelegramPhoto,
+    TelegramActivityConfirmed,
     TelegramApiError,
+    TelegramInlineButton,
     TelegramResponseUncertain,
     TelegramSendConfirmed,
     TelegramSendRejected,
@@ -46,6 +50,63 @@ async def test_send_confirms_only_a_positive_message_identifier() -> None:
     client = _client(httpx.MockTransport(telegram))
 
     assert await client.send(_outbound()) == TelegramSendConfirmed(17)
+    await client.aclose()
+
+
+async def test_send_serializes_inline_buttons_and_photo_without_retaining_source_path() -> (
+    None
+):
+    button = TelegramInlineButton("Check in", "zone_x.attendance.here")
+    photo = ResolvedTelegramPhoto("zone_x_poster_2026.png", "image/png", b"png-bytes")
+    seen: list[str] = []
+
+    async def telegram(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("sendMessage"):
+            assert json.loads(request.content) == {
+                "chat_id": 42,
+                "text": "Are you here?",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Check in",
+                                "callback_data": "zone_x.attendance.here",
+                            }
+                        ]
+                    ]
+                },
+            }
+        else:
+            assert request.headers["content-type"].startswith("multipart/form-data")
+            assert b"zone_x_poster_2026.png" in request.content
+            assert b"Come along" in request.content
+            assert b"zone_x.attendance.here" in request.content
+            assert b"png-bytes" in request.content
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 17}})
+
+    client = _client(httpx.MockTransport(telegram))
+    assert await client.send(
+        OutboundTelegramMessage(42, "Are you here?", "text-1", (button,))
+    ) == TelegramSendConfirmed(17)
+    assert await client.send(
+        OutboundTelegramPhoto(42, photo, "Come along", "photo-1", (button,))
+    ) == TelegramSendConfirmed(17)
+    assert seen == ["/bottest-token/sendMessage", "/bottest-token/sendPhoto"]
+    await client.aclose()
+
+
+async def test_send_activity_uses_the_typed_non_durable_telegram_operation() -> None:
+    async def telegram(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/bottest-token/sendChatAction"
+        assert json.loads(request.content) == {"chat_id": 42, "action": "typing"}
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    client = _client(httpx.MockTransport(telegram))
+    assert (
+        await client.send_activity(chat_id=42, activity="typing")
+        == TelegramActivityConfirmed()
+    )
     await client.aclose()
 
 

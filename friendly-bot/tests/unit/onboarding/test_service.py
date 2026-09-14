@@ -119,7 +119,7 @@ def message(message_id: int, text: str) -> TelegramMessage:
         sender=TelegramUser(id=81),
         text=text,
         reply_text=None,
-        callback_data=None,
+        callback=None,
     )
 
 

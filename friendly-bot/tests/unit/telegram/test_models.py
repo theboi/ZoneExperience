@@ -6,9 +6,13 @@ from datetime import UTC, datetime
 
 import pytest
 
+from friendly_bot.telegram.callback import TelegramCallback
 from friendly_bot.telegram.models import (
     IncomingTelegramUpdate,
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    ResolvedTelegramPhoto,
+    TelegramInlineButton,
     TelegramResponseUncertain,
     parse_update,
 )
@@ -39,7 +43,7 @@ def test_private_text_update_is_normalized_for_command_matching() -> None:
     assert update.message.chat.kind == "private"
     assert update.message.sender.id == 42
     assert update.message.text == "/login"
-    assert update.message.callback_data is None
+    assert update.message.callback is None
 
 
 def test_callback_and_reply_are_normalized_without_raw_payload() -> None:
@@ -64,11 +68,12 @@ def test_callback_and_reply_are_normalized_without_raw_payload() -> None:
 
     assert isinstance(update, IncomingTelegramUpdate)
     assert update.message is not None
-    assert update.message.callback_data == "zone_x.attendance.here"
+    assert update.message.callback == TelegramCallback("zone_x.attendance.here")
     assert update.message.reply_text == "Earlier bot prompt"
     assert update.message.sent_at == datetime(2026, 9, 10, 0, 26, 41, tzinfo=UTC)
     assert not hasattr(update, "raw_payload")
     assert not hasattr(update.message, "raw_payload")
+    assert not hasattr(update.message, "callback_data")
 
 
 @pytest.mark.parametrize(
@@ -133,3 +138,18 @@ def test_outbound_message_rejects_invalid_transport_fields(
             text=text,  # type: ignore[arg-type]
             idempotency_key=idempotency_key,  # type: ignore[arg-type]
         )
+
+
+def test_outbound_text_and_photo_keep_only_typed_button_and_asset_data() -> None:
+    button = TelegramInlineButton("Check in", "zone_x.attendance.here")
+    photo = ResolvedTelegramPhoto("zone_x_poster_2026.png", "image/png", b"png")
+
+    assert OutboundTelegramMessage(
+        42, "Are you here?", "delivery-1", (button,)
+    ).buttons == (button,)
+    assert OutboundTelegramPhoto(
+        42, photo, "Come along", "delivery-2", (button,)
+    ).photo == (photo)
+
+    with pytest.raises(ValueError):
+        TelegramInlineButton("Check in", "x" * 65)

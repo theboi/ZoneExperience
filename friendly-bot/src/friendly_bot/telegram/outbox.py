@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import TracebackType
@@ -19,8 +19,12 @@ from friendly_bot.persistence.repositories import (
     OutboundDeliveryMessage,
     OutboundDeliveryRecord,
 )
+from friendly_bot.telegram.assets import TelegramAssetResolver
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    OutboundTelegramRequest,
+    TelegramInlineButton,
     TelegramResponseUncertain,
     TelegramSendConfirmed,
     TelegramSendOutcome,
@@ -36,7 +40,7 @@ _RETRY_BACKOFF_SECONDS = (5, 30, 120)
 class TelegramDeliveryGateway(Protocol):
     """The direct Telegram send boundary needed by durable delivery."""
 
-    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
+    async def send(self, request: OutboundTelegramRequest) -> TelegramSendOutcome:
         """Attempt exactly one typed Telegram message delivery."""
 
 
@@ -116,10 +120,12 @@ class OutboundDeliveryWorker:
         unit_of_work_factory: TelegramDeliveryUnitOfWorkFactory,
         gateway: TelegramDeliveryGateway,
         *,
+        asset_resolver: TelegramAssetResolver | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._gateway = gateway
+        self._asset_resolver = asset_resolver
         self._clock = clock or _utc_now
 
     async def run_once(self) -> bool:
@@ -141,7 +147,9 @@ class OutboundDeliveryWorker:
         except DeliveryClaimLostError:
             return False
 
-        request = _telegram_request_from(claim.message, claim.idempotency_key)
+        request = _telegram_request_from(
+            claim.message, claim.idempotency_key, self._asset_resolver
+        )
         if request is None:
             await self._finish(
                 claim.id,
@@ -217,27 +225,97 @@ class OutboundDeliveryWorker:
 
 
 def _telegram_request_from(
-    message: OutboundDeliveryMessage, idempotency_key: str
-) -> OutboundTelegramMessage | None:
+    message: OutboundDeliveryMessage,
+    idempotency_key: str,
+    asset_resolver: TelegramAssetResolver | None,
+) -> OutboundTelegramRequest | None:
     """Map an immutable provider-neutral F01 message only after its claim commits."""
 
     if (
-        message.kind != "message"
-        or set(message.payload) != {"text"}
-        or type(message.chat_id) is not int
+        type(message.chat_id) is not int
         or message.chat_id <= 0
         or type(idempotency_key) is not str
         or not idempotency_key
     ):
         return None
-    text = message.payload.get("text")
+    if message.kind == "message":
+        return _text_request(message, idempotency_key)
+    if message.kind == "photo":
+        return _photo_request(message, idempotency_key, asset_resolver)
+    return None
+
+
+def _text_request(
+    message: OutboundDeliveryMessage, idempotency_key: str
+) -> OutboundTelegramMessage | None:
+    payload = message.payload
+    if set(payload) == {"text"}:
+        buttons: tuple[TelegramInlineButton, ...] = ()
+    elif set(payload) == {"text", "buttons"}:
+        parsed_buttons = _buttons_from(payload.get("buttons"))
+        if parsed_buttons is None:
+            return None
+        buttons = parsed_buttons
+    else:
+        return None
+    text = payload.get("text")
     if type(text) is not str or not text:
         return None
-    return OutboundTelegramMessage(
-        chat_id=message.chat_id,
-        text=text,
-        idempotency_key=idempotency_key,
-    )
+    try:
+        return OutboundTelegramMessage(
+            chat_id=message.chat_id,
+            text=text,
+            idempotency_key=idempotency_key,
+            buttons=buttons,
+        )
+    except ValueError:
+        return None
+
+
+def _photo_request(
+    message: OutboundDeliveryMessage,
+    idempotency_key: str,
+    asset_resolver: TelegramAssetResolver | None,
+) -> OutboundTelegramPhoto | None:
+    payload = message.payload
+    if set(payload) != {"asset_key", "caption", "buttons"} or asset_resolver is None:
+        return None
+    asset_key = payload.get("asset_key")
+    caption = payload.get("caption")
+    buttons = _buttons_from(payload.get("buttons"))
+    if type(asset_key) is not str or type(caption) is not str or buttons is None:
+        return None
+    photo = asset_resolver.resolve_photo(asset_key)
+    if photo is None:
+        return None
+    try:
+        return OutboundTelegramPhoto(
+            chat_id=message.chat_id,
+            photo=photo,
+            caption=caption,
+            idempotency_key=idempotency_key,
+            buttons=buttons,
+        )
+    except ValueError:
+        return None
+
+
+def _buttons_from(value: object) -> tuple[TelegramInlineButton, ...] | None:
+    if not isinstance(value, list):
+        return None
+    buttons: list[TelegramInlineButton] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"text", "callback_data"}:
+            return None
+        text = item.get("text")
+        callback_data = item.get("callback_data")
+        if type(text) is not str or type(callback_data) is not str:
+            return None
+        try:
+            buttons.append(TelegramInlineButton(text, callback_data))
+        except ValueError:
+            return None
+    return tuple(buttons)
 
 
 def _classify_outcome(

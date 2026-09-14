@@ -92,6 +92,6 @@ def _message_body(message: TelegramMessage) -> str:
 
     if message.text is not None:
         return message.text
-    if message.callback_data is not None:
-        return message.callback_data
+    if message.callback is not None:
+        return message.callback.button_id
     raise ValueError("Telegram message has no supported normalized body")

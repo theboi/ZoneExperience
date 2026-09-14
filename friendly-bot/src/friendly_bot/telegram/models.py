@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, TypeGuard
 
+from friendly_bot.telegram.callback import TelegramCallback, decode_callback
+
 type TelegramUncertainCode = Literal[
     "telegram_transport_error", "telegram_response_malformed"
 ]
@@ -49,7 +51,7 @@ class TelegramMessage:
     sender: TelegramUser
     text: str | None
     reply_text: str | None
-    callback_data: str | None
+    callback: TelegramCallback | None
 
     def __post_init__(self) -> None:
         if not _positive_int(self.message_id):
@@ -60,11 +62,11 @@ class TelegramMessage:
             type(self.reply_text) is not str or not self.reply_text
         ):
             raise ValueError("Telegram reply text must be nonempty when present")
-        if self.callback_data is not None and (
-            type(self.callback_data) is not str or not self.callback_data
+        if self.callback is not None and not isinstance(
+            self.callback, TelegramCallback
         ):
-            raise ValueError("Telegram callback data must be nonempty when present")
-        if self.text is None and self.callback_data is None:
+            raise ValueError("Telegram callback must be typed when present")
+        if self.text is None and self.callback is None:
             raise ValueError("Telegram input needs text or callback data")
 
 
@@ -95,11 +97,12 @@ class TelegramUpdates:
 
 @dataclass(frozen=True, slots=True)
 class OutboundTelegramMessage:
-    """An immutable operation that the durable delivery worker may send once."""
+    """An immutable text operation that the durable delivery worker may send once."""
 
     chat_id: int
     text: str
     idempotency_key: str
+    buttons: tuple[TelegramInlineButton, ...] = ()
 
     def __post_init__(self) -> None:
         if not _positive_int(self.chat_id):
@@ -108,6 +111,79 @@ class OutboundTelegramMessage:
             raise ValueError("Telegram text must be nonempty plain text")
         if type(self.idempotency_key) is not str or not self.idempotency_key:
             raise ValueError("Telegram idempotency key must be nonempty")
+        if type(self.buttons) is not tuple or not all(
+            isinstance(button, TelegramInlineButton) for button in self.buttons
+        ):
+            raise ValueError("Telegram buttons must be an immutable typed tuple")
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramInlineButton:
+    """One inline keyboard button reduced to display copy and a bounded callback."""
+
+    text: str
+    callback_data: str
+
+    def __post_init__(self) -> None:
+        if type(self.text) is not str or not self.text:
+            raise ValueError("Telegram inline button text must be nonempty")
+        if type(self.callback_data) is not str or not self.callback_data:
+            raise ValueError("Telegram inline button callback data must be nonempty")
+        callback_size = len(self.callback_data.encode("utf-8"))
+        if not 1 <= callback_size <= 64:
+            raise ValueError("Telegram inline button callback data exceeds 64 bytes")
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedTelegramPhoto:
+    """A verified local photo with no retained source path."""
+
+    filename: str
+    media_type: Literal["image/png", "image/jpeg"]
+    content: bytes
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.filename) is not str
+            or not self.filename
+            or "/" in self.filename
+            or "\\" in self.filename
+        ):
+            raise ValueError("Telegram photo filename must be a basename")
+        if self.media_type not in {"image/png", "image/jpeg"}:
+            raise ValueError("Telegram photo media type is unsupported")
+        if type(self.content) is not bytes or not self.content:
+            raise ValueError("Telegram photo content must be nonempty bytes")
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundTelegramPhoto:
+    """An immutable resolved-photo operation that the durable worker may send once."""
+
+    chat_id: int
+    photo: ResolvedTelegramPhoto
+    caption: str
+    idempotency_key: str
+    buttons: tuple[TelegramInlineButton, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not _positive_int(self.chat_id):
+            raise ValueError("Telegram chat id must be positive")
+        if not isinstance(self.photo, ResolvedTelegramPhoto):
+            raise TypeError("Telegram photo must be resolved before sending")
+        if type(self.caption) is not str or not self.caption:
+            raise ValueError("Telegram photo caption must be nonempty plain text")
+        if type(self.idempotency_key) is not str or not self.idempotency_key:
+            raise ValueError("Telegram idempotency key must be nonempty")
+        if type(self.buttons) is not tuple or not all(
+            isinstance(button, TelegramInlineButton) for button in self.buttons
+        ):
+            raise ValueError("Telegram buttons must be an immutable typed tuple")
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramActivityConfirmed:
+    """Telegram accepted one ephemeral activity indicator."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +267,13 @@ type TelegramSendOutcome = (
     | TelegramSendRejected
     | TelegramSendUncertain
 )
+type OutboundTelegramRequest = OutboundTelegramMessage | OutboundTelegramPhoto
+type TelegramActivityOutcome = (
+    TelegramActivityConfirmed
+    | TelegramSendRetry
+    | TelegramSendRejected
+    | TelegramSendUncertain
+)
 type TelegramApiFailure = TelegramApiError | TelegramResponseUncertain
 
 
@@ -231,9 +314,7 @@ def _parse_message_update(
     sender = _parse_sender(value.get("from"))
     if isinstance(sender, TelegramResponseUncertain):
         return sender
-    message = _parse_message(
-        value, sender=sender, callback_data=None, require_text=True
-    )
+    message = _parse_message(value, sender=sender, callback=None, require_text=True)
     if isinstance(message, TelegramResponseUncertain):
         return message
     return IncomingTelegramUpdate(update_id=update_id, message=message)
@@ -247,13 +328,17 @@ def _parse_callback_update(
     sender = _parse_sender(value.get("from"))
     if isinstance(sender, TelegramResponseUncertain):
         return sender
-    callback_data = value.get("data")
-    if type(callback_data) is not str or not callback_data:
+    raw_callback_data = value.get("data")
+    if type(raw_callback_data) is not str or not raw_callback_data:
+        return _malformed()
+    try:
+        callback = decode_callback(raw_callback_data)
+    except ValueError:
         return _malformed()
     message = _parse_message(
         value.get("message"),
         sender=sender,
-        callback_data=callback_data,
+        callback=callback,
         require_text=False,
     )
     if isinstance(message, TelegramResponseUncertain):
@@ -274,7 +359,7 @@ def _parse_message(
     value: object,
     *,
     sender: TelegramUser,
-    callback_data: str | None,
+    callback: TelegramCallback | None,
     require_text: bool,
 ) -> TelegramMessage | TelegramResponseUncertain:
     if not isinstance(value, dict):
@@ -306,7 +391,7 @@ def _parse_message(
             sender=sender,
             text=normalize_command(text) if isinstance(text, str) else None,
             reply_text=reply_text,
-            callback_data=callback_data,
+            callback=callback,
         )
     except (OverflowError, OSError, ValueError):
         return _malformed()

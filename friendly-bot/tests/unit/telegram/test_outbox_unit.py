@@ -23,6 +23,10 @@ from friendly_bot.persistence.repositories import (
 from friendly_bot.telegram.client import TelegramApiClient
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    OutboundTelegramRequest,
+    ResolvedTelegramPhoto,
+    TelegramInlineButton,
     TelegramResponseUncertain,
     TelegramSendConfirmed,
     TelegramSendOutcome,
@@ -39,10 +43,10 @@ class RecordingGateway:
     """A typed gateway double that observes only immutable mapped requests."""
 
     outcome: TelegramSendOutcome | BaseException
-    requests: list[OutboundTelegramMessage] = field(default_factory=list)
+    requests: list[OutboundTelegramRequest] = field(default_factory=list)
     requires_started_commit: Callable[[], bool] | None = None
 
-    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
+    async def send(self, request: OutboundTelegramRequest) -> TelegramSendOutcome:
         if self.requires_started_commit is not None:
             assert self.requires_started_commit()
         self.requests.append(request)
@@ -176,6 +180,15 @@ def _claim() -> OutboundDeliveryRecord:
     )
 
 
+@dataclass(frozen=True)
+class StaticAssetResolver:
+    photo: ResolvedTelegramPhoto | None
+
+    def resolve_photo(self, asset_key: str) -> ResolvedTelegramPhoto | None:
+        assert asset_key == "zone_x_poster_2026"
+        return self.photo
+
+
 async def test_commits_claim_and_started_attempt_before_exactly_one_send() -> None:
     """Sending before either commit could duplicate a delivery after a crash."""
 
@@ -200,6 +213,64 @@ async def test_commits_claim_and_started_attempt_before_exactly_one_send() -> No
     assert finish["retry_at"] is None
     assert finish["safe_error"] is None
     assert finish["confirmed_telegram_message_id"] == 901
+
+
+async def test_maps_durable_buttons_and_photo_only_after_the_started_commit() -> None:
+    """Keyboard/media payloads must retain the same no-send-before-commit fencing."""
+
+    button = TelegramInlineButton("Continue", "zone_x.menu.connect")
+    text_claim = replace(
+        _claim(),
+        message=OutboundDeliveryMessage(
+            chat_id=73,
+            kind="message",
+            payload=MappingProxyType(
+                {
+                    "text": "Welcome",
+                    "buttons": [
+                        {"text": "Continue", "callback_data": "zone_x.menu.connect"}
+                    ],
+                }
+            ),
+        ),
+    )
+    photo_claim = replace(
+        _claim(),
+        message=OutboundDeliveryMessage(
+            chat_id=73,
+            kind="photo",
+            payload=MappingProxyType(
+                {
+                    "asset_key": "zone_x_poster_2026",
+                    "caption": "Come along",
+                    "buttons": [],
+                }
+            ),
+        ),
+    )
+    photo = ResolvedTelegramPhoto("zone_x_poster_2026.png", "image/png", b"png")
+
+    text_gateway = RecordingGateway(TelegramSendConfirmed(901))
+    text_deliveries = RecordingDeliveries(text_claim)
+    assert await OutboundDeliveryWorker(
+        RecordingUnitOfWorkFactory(text_deliveries), text_gateway, clock=lambda: NOW
+    ).run_once()
+
+    photo_gateway = RecordingGateway(TelegramSendConfirmed(902))
+    photo_deliveries = RecordingDeliveries(photo_claim)
+    assert await OutboundDeliveryWorker(
+        RecordingUnitOfWorkFactory(photo_deliveries),
+        photo_gateway,
+        asset_resolver=StaticAssetResolver(photo),
+        clock=lambda: NOW,
+    ).run_once()
+
+    assert text_gateway.requests == [
+        OutboundTelegramMessage(73, "Welcome", "outbox:welcome:73", (button,))
+    ]
+    assert photo_gateway.requests == [
+        OutboundTelegramPhoto(73, photo, "Come along", "outbox:welcome:73")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -313,7 +384,9 @@ async def test_rate_limit_extends_the_account_wide_pause_even_when_retry_exhaust
             message=OutboundDeliveryMessage(
                 chat_id=73,
                 kind="message",
-                payload=MappingProxyType({"text": "Welcome", "buttons": ["Continue"]}),
+                payload=MappingProxyType(
+                    {"text": "Welcome", "buttons": [{"text": "Continue"}]}
+                ),
             ),
         ),
         replace(_claim(), message=replace(_claim().message, chat_id=0)),

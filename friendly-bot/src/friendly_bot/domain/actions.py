@@ -8,7 +8,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    JsonValue,
     PositiveInt,
     StringConstraints,
     TypeAdapter,
@@ -34,7 +33,15 @@ class ButtonDefinition(BaseModel):
 
     button_id: StableButtonId
     text: NonEmptyText
-    payload: dict[str, JsonValue] | None = None
+    payload: ServiceKeyButtonPayload | None = None
+
+
+class ServiceKeyButtonPayload(BaseModel):
+    """The one published button context that I04 may resolve to a service UUID."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_key: StableKey
 
 
 class SendMessageAction(DiscussionActionBase):

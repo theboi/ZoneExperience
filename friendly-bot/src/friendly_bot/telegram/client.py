@@ -12,8 +12,13 @@ from pydantic import SecretStr
 
 from friendly_bot.telegram.models import (
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    OutboundTelegramRequest,
+    TelegramActivityConfirmed,
+    TelegramActivityOutcome,
     TelegramApiError,
     TelegramApiFailure,
+    TelegramInlineButton,
     TelegramResponseUncertain,
     TelegramSendConfirmed,
     TelegramSendOutcome,
@@ -119,31 +124,59 @@ class TelegramApiClient:
             updates.append(update)
         return TelegramUpdates(tuple(updates))
 
-    async def send(self, request: OutboundTelegramMessage) -> TelegramSendOutcome:
+    async def send(self, request: OutboundTelegramRequest) -> TelegramSendOutcome:
         """Send an immutable message once, without generic retry behavior or logging."""
 
+        if isinstance(request, OutboundTelegramMessage):
+            response = await self._post("sendMessage", _text_payload(request))
+        else:
+            response = await self._post_photo(request)
+        return _message_outcome(response)
+
+    async def send_activity(
+        self, *, chat_id: int, activity: str
+    ) -> TelegramActivityOutcome:
+        """Send one short-lived activity indicator without adding durable backlog."""
+
+        if not _positive_int(chat_id) or activity != "typing":
+            raise ValueError("Telegram activity request is invalid")
         response = await self._post(
-            "sendMessage", {"chat_id": request.chat_id, "text": request.text}
+            "sendChatAction", {"chat_id": chat_id, "action": activity}
         )
         envelope = _parse_envelope(response)
         if isinstance(envelope, TelegramResponseUncertain):
             return envelope
         if isinstance(envelope, TelegramApiError):
-            if envelope.error_code == 429:
-                retry_after_seconds = _retry_after(response)
-                if retry_after_seconds is None:
-                    return _malformed()
-                return TelegramSendRetry(429, retry_after_seconds)
-            if 500 <= envelope.error_code <= 599:
-                return TelegramSendRetry(envelope.error_code)
-            return TelegramSendRejected(envelope.error_code)
-        result = envelope.get("result")
-        if not isinstance(result, dict):
+            return _api_error_outcome(envelope, response)
+        if envelope.get("result") is not True:
             return _malformed()
-        message_id = result.get("message_id")
-        if not _positive_int(message_id):
-            return _malformed()
-        return TelegramSendConfirmed(message_id)
+        return TelegramActivityConfirmed()
+
+    async def _post_photo(
+        self, request: OutboundTelegramPhoto
+    ) -> httpx.Response | TelegramResponseUncertain:
+        data: dict[str, str] = {
+            "chat_id": str(request.chat_id),
+            "caption": request.caption,
+        }
+        if request.buttons:
+            data["reply_markup"] = json.dumps(
+                _reply_markup(request.buttons), separators=(",", ":")
+            )
+        try:
+            return await self._client.post(
+                self._endpoint("sendPhoto"),
+                data=data,
+                files={
+                    "photo": (
+                        request.photo.filename,
+                        request.photo.content,
+                        request.photo.media_type,
+                    )
+                },
+            )
+        except (httpx.TimeoutException, httpx.TransportError):
+            return TelegramResponseUncertain("telegram_transport_error")
 
     def _endpoint(self, method: str) -> str:
         return (
@@ -171,6 +204,54 @@ class TelegramApiClient:
             return await self._client.post(self._endpoint(method), json=payload)
         except (httpx.TimeoutException, httpx.TransportError):
             return TelegramResponseUncertain("telegram_transport_error")
+
+
+def _message_outcome(
+    response: httpx.Response | TelegramResponseUncertain,
+) -> TelegramSendOutcome:
+    """Reduce a content-operation response to the durable worker's existing outcomes."""
+
+    envelope = _parse_envelope(response)
+    if isinstance(envelope, TelegramResponseUncertain):
+        return envelope
+    if isinstance(envelope, TelegramApiError):
+        return _api_error_outcome(envelope, response)
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return _malformed()
+    message_id = result.get("message_id")
+    if not _positive_int(message_id):
+        return _malformed()
+    return TelegramSendConfirmed(message_id)
+
+
+def _api_error_outcome(
+    error: TelegramApiError, response: httpx.Response | TelegramResponseUncertain
+) -> TelegramSendRetry | TelegramSendRejected | TelegramResponseUncertain:
+    if error.error_code == 429:
+        retry_after_seconds = _retry_after(response)
+        if retry_after_seconds is None:
+            return _malformed()
+        return TelegramSendRetry(429, retry_after_seconds)
+    if 500 <= error.error_code <= 599:
+        return TelegramSendRetry(error.error_code)
+    return TelegramSendRejected(error.error_code)
+
+
+def _text_payload(request: OutboundTelegramMessage) -> dict[str, object]:
+    payload: dict[str, object] = {"chat_id": request.chat_id, "text": request.text}
+    if request.buttons:
+        payload["reply_markup"] = _reply_markup(request.buttons)
+    return payload
+
+
+def _reply_markup(buttons: tuple[TelegramInlineButton, ...]) -> dict[str, object]:
+    return {
+        "inline_keyboard": [
+            [{"text": button.text, "callback_data": button.callback_data}]
+            for button in buttons
+        ]
+    }
 
 
 def _parse_envelope(

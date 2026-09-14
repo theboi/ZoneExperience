@@ -24,6 +24,10 @@ from friendly_bot.persistence.models import (
 )
 from friendly_bot.persistence.repositories import NewOutboundDelivery
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.telegram.callback import (
+    TelegramCallback,
+    TelegramCallbackContextKind,
+)
 from friendly_bot.telegram.models import (
     IncomingTelegramUpdate,
     TelegramApiError,
@@ -184,7 +188,7 @@ def _message_update(
             sender=TelegramUser(id=73),
             text=text,
             reply_text=reply_text,
-            callback_data=None,
+            callback=None,
         ),
     )
 
@@ -193,7 +197,7 @@ def _callback_update(
     update_id: int,
     *,
     message_id: int = 92,
-    callback_data: str = "zone_x.attendance.here",
+    callback: TelegramCallback | None = None,
 ) -> IncomingTelegramUpdate:
     return IncomingTelegramUpdate(
         update_id=update_id,
@@ -204,7 +208,7 @@ def _callback_update(
             sender=TelegramUser(id=73),
             text="Prompt shown to the user",
             reply_text="Earlier question",
-            callback_data=callback_data,
+            callback=callback or TelegramCallback("zone_x.attendance.here"),
         ),
     )
 
@@ -394,11 +398,15 @@ async def test_distinct_callback_presses_on_one_message_are_both_recorded(
     ingress = TelegramIngress(uow_factory, dispatcher)
 
     await ingress.process(
-        _callback_update(51, message_id=92, callback_data="zone_x.attendance.here"),
+        _callback_update(
+            51, message_id=92, callback=TelegramCallback("zone_x.attendance.here")
+        ),
         received_at=NOW,
     )
     await ingress.process(
-        _callback_update(52, message_id=92, callback_data="zone_x.attendance.late"),
+        _callback_update(
+            52, message_id=92, callback=TelegramCallback("zone_x.attendance.late")
+        ),
         received_at=NOW,
     )
 
@@ -423,7 +431,9 @@ async def test_callback_and_message_with_same_numeric_id_are_distinct_events(
     ingress = TelegramIngress(uow_factory, dispatcher)
 
     await ingress.process(
-        _callback_update(100, message_id=92, callback_data="zone_x.attendance.here"),
+        _callback_update(
+            100, message_id=92, callback=TelegramCallback("zone_x.attendance.here")
+        ),
         received_at=NOW,
     )
     await ingress.process(
@@ -438,6 +448,28 @@ async def test_callback_and_message_with_same_numeric_id_are_distinct_events(
     ]
     assert dispatcher.dispatched_message_ids == [92, 100]
     assert await _processed_update_count(session_factory) == 2
+
+
+async def test_contextual_callback_persists_only_its_stable_button_id(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A local match UUID must not become routing or conversation text."""
+
+    request_id = uuid4()
+    callback = TelegramCallback(
+        "zone_x.connect.not_responding",
+        TelegramCallbackContextKind.MATCH_REQUEST,
+        request_id,
+    )
+
+    await TelegramIngress(uow_factory, RecordingDispatcher()).process(
+        _callback_update(53, callback=callback), received_at=NOW
+    )
+
+    row = (await _conversation_rows(session_factory))[0]
+    assert row.body == "zone_x.connect.not_responding"
+    assert str(request_id) not in row.body
 
 
 async def test_unsupported_update_is_claimed_and_advances_without_dispatching(

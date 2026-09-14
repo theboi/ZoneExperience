@@ -2,13 +2,29 @@
 
 from typing import Protocol
 
+from friendly_bot.telegram.assets import (
+    LocalTelegramAssetResolver,
+    TelegramAssetResolver,
+)
+from friendly_bot.telegram.callback import (
+    TelegramCallback,
+    TelegramCallbackContextKind,
+    decode_callback,
+    encode_callback,
+)
 from friendly_bot.telegram.client import TelegramApiClient
 from friendly_bot.telegram.models import (
     IncomingTelegramUpdate,
     OutboundTelegramMessage,
+    OutboundTelegramPhoto,
+    OutboundTelegramRequest,
+    ResolvedTelegramPhoto,
+    TelegramActivityConfirmed,
+    TelegramActivityOutcome,
     TelegramApiError,
     TelegramApiFailure,
     TelegramChat,
+    TelegramInlineButton,
     TelegramMessage,
     TelegramResponseUncertain,
     TelegramSendConfirmed,
@@ -52,14 +68,24 @@ class TelegramGateway(
 
 __all__ = [
     "IncomingTelegramUpdate",
+    "LocalTelegramAssetResolver",
     "OutboundDeliveryWorker",
     "OutboundTelegramMessage",
+    "OutboundTelegramPhoto",
+    "OutboundTelegramRequest",
+    "ResolvedTelegramPhoto",
+    "TelegramActivityConfirmed",
+    "TelegramActivityOutcome",
     "TelegramApiClient",
     "TelegramApiError",
     "TelegramApiFailure",
+    "TelegramAssetResolver",
+    "TelegramCallback",
+    "TelegramCallbackContextKind",
     "TelegramChat",
     "TelegramGateway",
     "TelegramIngress",
+    "TelegramInlineButton",
     "TelegramMessage",
     "TelegramPoller",
     "TelegramPreflight",
@@ -78,6 +104,8 @@ __all__ = [
     "TelegramWebhookCleared",
     "TelegramWebhookGateway",
     "TelegramWebhookInfo",
+    "decode_callback",
+    "encode_callback",
     "normalize_command",
     "parse_update",
 ]
