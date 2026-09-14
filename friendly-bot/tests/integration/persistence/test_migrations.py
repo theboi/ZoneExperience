@@ -518,6 +518,14 @@ def test_runtime_guard_verify_only_checks_compose_configuration(
     """Verify validates the resolved namespace without creating Compose state."""
 
     db_runtime_check = runtime_guard_module()
+    monkeypatch.setattr(db_runtime_check, "EXPECTED_UID", os.getuid())
+    monkeypatch.setattr(
+        db_runtime_check, "EXPECTED_CHECKOUT", PROJECT_DIRECTORY.parent.resolve()
+    )
+    monkeypatch.setattr(db_runtime_check, "FRIENDLY_BOT_DIRECTORY", PROJECT_DIRECTORY)
+    monkeypatch.setattr(
+        db_runtime_check, "COMPOSE_FILE", PROJECT_DIRECTORY / "compose.yaml"
+    )
 
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(
