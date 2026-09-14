@@ -1,13 +1,13 @@
-name: friendly-bot-u504
+name: friendly-bot-ryanthe
 
 services:
   postgres:
     image: postgres:16-alpine
     env_file:
-      - path: .runtime/u504/postgres.env
+      - path: .runtime/ryanthe/postgres.env
         required: false
     ports:
-      - "127.0.0.1:5832:5432"
+      - "127.0.0.1:5833:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
@@ -15,14 +15,14 @@ services:
       retries: 30
       start_period: 2s
     networks:
-      - friendly-bot-u504
+      - friendly-bot-ryanthe
     volumes:
-      - friendly-bot-u504-postgres:/var/lib/postgresql/data
+      - friendly-bot-ryanthe-postgres:/var/lib/postgresql/data
 
 networks:
-  friendly-bot-u504:
-    name: friendly-bot-u504
+  friendly-bot-ryanthe:
+    name: friendly-bot-ryanthe
 
 volumes:
-  friendly-bot-u504-postgres:
-    name: friendly-bot-u504-postgres
+  friendly-bot-ryanthe-postgres:
+    name: friendly-bot-ryanthe-postgres

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "worker": "I04",
+  "phase": "execution",
+  "status": "source-and-local-acceptance-complete-coordinator-gate-unclaimed",
+  "date": "2026-09-14",
+  "scope": {
+    "implemented": [
+      "closed 24-action executor registry and direct-only event harness",
+      "single-Unit-of-Work command, callback, and constrained-text dispatcher",
+      "typed service and requester-owned match callback revalidation",
+      "F01 selection/checkpoint and automatic timestamp-root composition",
+      "canonical Zone X seed publication and semantic YAML/JSON verifier",
+      "local process composition and python -m friendly_bot entry point"
+    ],
+    "upstream_repairs_consumed": [
+      "T02 native photo/button/activity output, typed callbacks, and asset catalog",
+      "R03 caller-owned routing and matching methods",
+      "F01 seed service/timestamp APIs and terminal-timestamp closure fencing"
+    ],
+    "authority_impact": "No product or living-authority behavior was changed."
+  },
+  "verification": {
+    "unit_and_end_to_end": "317 passed",
+    "routing_matching_services_onboarding_telegram_integration": "46 passed against loopback PostgreSQL",
+    "persistence_integration": "72 passed, 1 skipped",
+    "static": "Ruff, formatting, mypy all passed",
+    "semantic_seed": "Ruby Psych/JSON semantic verifier passed",
+    "privacy": "No live Telegram or OpenRouter request was made; the account holder's privacy attestation was accepted as directed."
+  },
+  "runtime_namespace": {
+    "account": "ryanthe",
+    "uid": 501,
+    "compose_project": "friendly-bot-ryanthe",
+    "loopback_postgres_port": 5833,
+    "port_collision_check": "no listener was present",
+    "canary": "not run: Docker Compose v2 is unavailable on this machine, and the guard stopped before any Compose action"
+  },
+  "gate_posture": "This evidence is ready for coordinator review. It does not declare G2 or G3 passed."
+}

@@ -270,6 +270,23 @@ async def test_child_context_preserves_parent_delivery_idempotency_sequence(
     ]
 
 
+async def test_parent_after_direct_child_keeps_shared_delivery_sequence(
+    now: datetime,
+) -> None:
+    """Return actions after an event child must not reuse an already queued suffix."""
+
+    context, uow = _context(now)
+    child = context.for_child(context.flow, event_payload=None)
+
+    await child.enqueue_text("event child")
+    await context.enqueue_text("return action")
+
+    assert [
+        delivery.idempotency_key.rsplit(":", maxsplit=1)[-1]
+        for delivery in uow.deliveries.enqueued
+    ] == ["1", "2"]
+
+
 async def test_explicit_presentation_executors_use_typed_callbacks_and_activity(
     now: datetime,
 ) -> None:

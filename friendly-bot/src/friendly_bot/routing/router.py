@@ -151,13 +151,27 @@ class ConstrainedRouter:
         """Select configured keys until the gateway returns one reserved terminal."""
 
         async with self._uow_factory() as uow:
-            selections = await uow.open_selections.list_for_user(user_id, now=now)
-            valid_selections = await _valid_selections(uow, selections, now)
-            cursor = await uow.personas.get_or_create(user_id)
-            unsummarized = await uow.conversations.list_after(
-                user_id, cursor.last_message_id
+            return await self.route_update_in_uow(
+                uow, user_id=user_id, incoming=incoming, now=now
             )
-            definitions = await _load_definitions(uow, valid_selections)
+
+    async def route_update_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        incoming: IncomingText,
+        now: datetime,
+    ) -> RoutingResult:
+        """Route in T02's locked ingress transaction without opening a second session."""
+
+        selections = await uow.open_selections.list_for_user(user_id, now=now)
+        valid_selections = await _valid_selections(uow, selections, now)
+        cursor = await uow.personas.get_or_create(user_id)
+        unsummarized = await uow.conversations.list_after(
+            user_id, cursor.last_message_id
+        )
+        definitions = await _load_definitions(uow, valid_selections)
 
         candidates = self._candidate_assembler.assemble(
             valid_selections, definitions, now=now

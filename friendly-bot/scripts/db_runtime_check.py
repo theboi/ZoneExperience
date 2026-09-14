@@ -11,15 +11,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-EXPECTED_UID = 504
-EXPECTED_CHECKOUT = Path("/Users/bot2/Dev/ZoneExperience")
+EXPECTED_UID = 501
+EXPECTED_CHECKOUT = Path("/Users/ryanthe/Dev/ZoneExperience")
 FRIENDLY_BOT_DIRECTORY = EXPECTED_CHECKOUT / "friendly-bot"
 COMPOSE_FILE = FRIENDLY_BOT_DIRECTORY / "compose.yaml"
-POSTGRES_ENV_FILE = FRIENDLY_BOT_DIRECTORY / ".runtime/u504/postgres.env"
-PROJECT_NAME = "friendly-bot-u504"
-NETWORK_NAME = "friendly-bot-u504"
-VOLUME_NAME = "friendly-bot-u504-postgres"
-POSTGRES_PORT = 5832
+POSTGRES_ENV_FILE = FRIENDLY_BOT_DIRECTORY / ".runtime/ryanthe/postgres.env"
+PROJECT_NAME = "friendly-bot-ryanthe"
+NETWORK_NAME = "friendly-bot-ryanthe"
+VOLUME_NAME = "friendly-bot-ryanthe-postgres"
+POSTGRES_PORT = 5833
 
 
 class RuntimeGuardError(ValueError):
@@ -129,6 +129,16 @@ def require_postgres_env() -> None:
 def run_compose(arguments: tuple[str, ...]) -> None:
     """Run Docker Compose with the only project and file this guard permits."""
 
+    if (
+        subprocess.run(
+            ("docker", "compose", "version"),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        != 0
+    ):
+        raise RuntimeGuardError("Docker Compose v2 plugin is unavailable")
     subprocess.run(
         (
             "docker",

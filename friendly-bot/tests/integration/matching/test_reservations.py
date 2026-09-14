@@ -23,6 +23,7 @@ from friendly_bot.persistence.models import (
     CapacityReservation,
     HumanMatchAssignment,
     HumanMatchRequest,
+    OperationalLogin,
     OperationalProfile,
     OperationalRole,
     Service,
@@ -183,7 +184,11 @@ async def test_one_capacity_slot_has_one_concurrent_winner(
             [
                 User(id=requester_one, role=OperationalRole.NBNC),
                 User(id=requester_two, role=OperationalRole.NBNC),
-                User(id=responder_user, role=OperationalRole.SERVER),
+                User(
+                    id=responder_user,
+                    telegram_user_id=76,
+                    role=OperationalRole.SERVER,
+                ),
                 Service(
                     id=service_id,
                     key=f"r03-capacity-{uuid4().hex}",
@@ -220,6 +225,14 @@ async def test_one_capacity_slot_has_one_concurrent_winner(
             ]
         )
         await session.flush()
+        session.add(
+            OperationalLogin(
+                id=uuid4(),
+                operational_profile_id=responder_profile,
+                user_id=responder_user,
+                attached_at=NOW,
+            )
+        )
         session.add_all(
             [
                 HumanMatchRequest(

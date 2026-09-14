@@ -680,6 +680,46 @@ async def _lock_open_service(
     return service
 
 
+async def _lock_timestamp_delivery_service(
+    session: AsyncSession, timestamp: ServiceTimestamp, *, at: datetime
+) -> Service:
+    """Allow only the configured terminal timestamp to enter the closure transaction."""
+
+    service = await _lock_service(session, timestamp.service_id)
+    is_terminal_timestamp = timestamp.occurs_at == service.interaction_ends_at
+    if service.interaction_closed_at is not None or (
+        at >= service.interaction_ends_at and not is_terminal_timestamp
+    ):
+        raise ServiceInteractionClosedError(service.id)
+    return service
+
+
+async def _lock_root_service(
+    session: AsyncSession,
+    *,
+    flow_version_id: UUID,
+    service_id: UUID,
+    at: datetime,
+) -> Service:
+    """Permit an unclosed service's exact terminal timestamp root, and nothing else."""
+
+    service = await _lock_service(session, service_id)
+    if service.interaction_closed_at is not None:
+        raise ServiceInteractionClosedError(service.id)
+    if at < service.interaction_ends_at:
+        return service
+    terminal_timestamp_id = await session.scalar(
+        select(ServiceTimestamp.id).where(
+            ServiceTimestamp.service_id == service.id,
+            ServiceTimestamp.flow_version_id == flow_version_id,
+            ServiceTimestamp.occurs_at == service.interaction_ends_at,
+        )
+    )
+    if terminal_timestamp_id is None:
+        raise ServiceInteractionClosedError(service.id)
+    return service
+
+
 async def _lock_service(session: AsyncSession, service_id: UUID) -> Service:
     """Lock one service row without rejecting the lifecycle's own closed work."""
 
@@ -705,7 +745,7 @@ async def _locked_match_request(
     ).one_or_none()
     if service_scope is None:
         raise LookupError("human match request was not found")
-    service_id = service_scope.tuple()[0]
+    service_id = service_scope._tuple()[0]
     if service_id is not None:
         await _lock_open_service(session, service_id, at=now)
     request = await session.scalar(
@@ -1170,8 +1210,11 @@ class SqlAlchemyServiceRepository:
             .join(Service, Service.id == ServiceTimestamp.service_id)
             .where(
                 ServiceTimestamp.occurs_at <= now,
-                Service.interaction_ends_at > now,
                 Service.interaction_closed_at.is_(None),
+                or_(
+                    Service.interaction_ends_at > now,
+                    ServiceTimestamp.occurs_at == Service.interaction_ends_at,
+                ),
             )
             .order_by(ServiceTimestamp.occurs_at, ServiceTimestamp.id)
         )
@@ -2070,7 +2113,12 @@ class SqlAlchemyOpenSelectionRepository:
         if not root.is_current:
             raise ValueError("root selection must be current when opened")
         if root.service_id is not None:
-            await _lock_open_service(self._session, root.service_id, at=at)
+            await _lock_root_service(
+                self._session,
+                flow_version_id=root.flow_version_id,
+                service_id=root.service_id,
+                at=at,
+            )
 
         row = await self._session.scalar(
             pg_insert(OpenFlowSelection)
@@ -2189,7 +2237,7 @@ class SqlAlchemyOpenSelectionRepository:
         ).one_or_none()
         if row is None:
             raise LookupError("selection transition source was not found")
-        return row.tuple()
+        return row._tuple()
 
     async def expire_service_bound(
         self, service_id: UUID, *, at: datetime
@@ -2274,7 +2322,7 @@ class SqlAlchemyDeliveryRepository:
         )
         if timestamp is None:
             raise LookupError("service timestamp was not found")
-        await _lock_open_service(self._session, timestamp.service_id, at=now)
+        await _lock_timestamp_delivery_service(self._session, timestamp, at=now)
         row = await self._session.scalar(
             pg_insert(TimestampDeliveryClaim)
             .values(

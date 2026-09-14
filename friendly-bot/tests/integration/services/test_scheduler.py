@@ -36,7 +36,11 @@ from friendly_bot.persistence.repositories import (
     ServiceTimestampRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
-from friendly_bot.services.scheduler import AudienceResolver, ServiceDeliveryScheduler
+from friendly_bot.services.scheduler import (
+    AudienceResolver,
+    ServiceDeliveryScheduler,
+    TimestampRootPreparation,
+)
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 _SESSION_FACTORY = async_sessionmaker[AsyncSession]
@@ -124,7 +128,7 @@ class RecordingTimestampRoots:
         user_id: UUID,
         *,
         now: datetime,
-    ) -> NewOutboundDelivery:
+    ) -> TimestampRootPreparation:
         delivery = NewOutboundDelivery(
             idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
             user_id=user_id,
@@ -134,7 +138,8 @@ class RecordingTimestampRoots:
             eligible_at=now,
         )
         self.calls.append((uow, timestamp, user_id, now, delivery))
-        return delivery
+        await uow.deliveries.enqueue(delivery)
+        return TimestampRootPreparation(enqueued_delivery_count=1)
 
 
 class PersistingTimestampRoots:
@@ -147,7 +152,7 @@ class PersistingTimestampRoots:
         user_id: UUID,
         *,
         now: datetime,
-    ) -> NewOutboundDelivery:
+    ) -> TimestampRootPreparation:
         await uow.lock_user(user_id)
         await uow.open_selections.open_root(
             OpenSelectionState(
@@ -165,14 +170,17 @@ class PersistingTimestampRoots:
             ),
             at=now,
         )
-        return NewOutboundDelivery(
-            idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
-            user_id=user_id,
-            telegram_chat_id=73,
-            kind="message",
-            payload={"text": "Service timestamp"},
-            eligible_at=now,
+        await uow.deliveries.enqueue(
+            NewOutboundDelivery(
+                idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
+                user_id=user_id,
+                telegram_chat_id=73,
+                kind="message",
+                payload={"text": "Service timestamp"},
+                eligible_at=now,
+            )
         )
+        return TimestampRootPreparation(enqueued_delivery_count=1)
 
 
 @dataclass
@@ -578,3 +586,69 @@ async def test_closed_service_after_due_listing_cannot_claim_prepare_or_enqueue_
     assert roots.calls == []
     assert claims == []
     assert deliveries == []
+
+
+async def test_terminal_timestamp_can_close_its_service_exactly_at_interaction_end(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Zone X's seventh root must run once before its own closure locks the service."""
+
+    service_id = uuid4()
+    user_id = uuid4()
+    timestamp_id = uuid4()
+    root_flow_key = "service.task8.timestamp.interaction_ends"
+    async with session_factory.begin() as session:
+        session.add_all(
+            [
+                Service(
+                    id=service_id,
+                    key="task8-terminal-timestamp",
+                    name="Task 8 terminal timestamp",
+                    timezone="UTC",
+                    highkey=True,
+                    doors_open_at=NOW - timedelta(hours=2),
+                    doors_close_at=NOW - timedelta(hours=1),
+                    service_starts_at=NOW - timedelta(hours=1),
+                    service_ends_at=NOW - timedelta(minutes=30),
+                    interaction_ends_at=NOW,
+                ),
+                User(id=user_id, telegram_user_id=75, role=OperationalRole.NBNC),
+            ]
+        )
+    async with uow_factory() as uow:
+        version = await uow.flow_versions.publish(
+            PublishedFlowDefinition(
+                document={"key": root_flow_key},
+                flow_key_index={root_flow_key: ()},
+            ),
+            scope_kind=FlowScopeKind.TIMESTAMP,
+            service_id=service_id,
+            published_by_user_id=None,
+        )
+    async with session_factory.begin() as session:
+        session.add(
+            ServiceTimestamp(
+                id=timestamp_id,
+                service_id=service_id,
+                key="interaction-ends",
+                occurs_at=NOW,
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key=root_flow_key,
+            )
+        )
+
+    scheduler = ServiceDeliveryScheduler(
+        uow_factory,
+        AudienceResolver(uow_factory, clock=lambda: NOW),
+        PersistingTimestampRoots(),
+    )
+
+    result = await scheduler.run_once(now=NOW)
+
+    assert result.claimed_delivery_count == 1
+    assert result.enqueued_delivery_count == 1
+    async with uow_factory() as uow:
+        selections = await uow.open_selections.list_for_user(user_id, now=NOW)
+    assert [selection.parent_flow_key for selection in selections] == [root_flow_key]

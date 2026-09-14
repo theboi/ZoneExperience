@@ -36,7 +36,7 @@ class TelegramUpdateDispatcher(Protocol):
         user_id: UUID,
         incoming: TelegramMessage,
         unit_of_work: UnitOfWork,
-    ) -> None:
+    ) -> object:
         """Apply configured dispatch work without committing the supplied UoW."""
 
 

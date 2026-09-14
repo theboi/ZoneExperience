@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Self
+from typing import Self, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,6 +18,7 @@ from friendly_bot.domain.triggers import (
     MessageDiscussionFlowTrigger,
 )
 from friendly_bot.persistence.repositories import PersonaCursorRecord
+from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.routing.router import (
     CandidateAssembler,
     ConstrainedRouter,
@@ -242,3 +243,31 @@ async def test_ambiguous_and_no_match_are_terminals() -> None:
 
     assert clarify.terminal is RoutingTerminal.CLARIFY
     assert no_match.terminal is RoutingTerminal.NO_MATCH
+
+
+async def test_router_can_use_the_caller_owned_ingress_unit_of_work() -> None:
+    """I04 dispatch must not open a nested transaction while routing normal text."""
+
+    version = uuid4()
+    uow = FakeUow(
+        [_selection(version, "system.current", current=True)],
+        {
+            version: SimpleNamespace(
+                definition=_definition(
+                    "system.current", "flow.current", gist="now"
+                ).document
+            )
+        },
+    )
+    router = ConstrainedRouter(
+        lambda: cast(UnitOfWork, uow), StubGateway(["system.done"])
+    )
+
+    result = await router.route_update_in_uow(
+        cast(UnitOfWork, uow),
+        user_id=USER,
+        incoming=IncomingText(body="help"),
+        now=NOW,
+    )
+
+    assert result.terminal is RoutingTerminal.DONE

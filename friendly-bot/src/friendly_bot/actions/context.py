@@ -46,6 +46,13 @@ class OrphanPresentationButtonsError(ValueError):
     """Raised when a textless button action has no preceding visible presentation."""
 
 
+@dataclass(slots=True)
+class _DeliverySequence:
+    """Mutable per-run sequence shared by direct-event child contexts."""
+
+    value: int = 0
+
+
 class ActionNavigation(Protocol):
     """Application-owned selection transitions invoked by explicit navigation actions."""
 
@@ -115,7 +122,9 @@ class ActionContext:
     diagnostics: DiagnosticRepository
     navigation: ActionNavigation | None = None
     _terminal_event: ActionEvent | None = field(default=None, init=False)
-    _delivery_index: int = field(default=0, init=False)
+    _delivery_sequence: _DeliverySequence = field(
+        default_factory=_DeliverySequence, init=False
+    )
     _match_assignment: MatchAssignmentRecord | None = field(default=None, init=False)
     _match_request: MatchRequestRecord | None = field(default=None, init=False)
     _matched_responder: MatchResponderRecord | None = field(default=None, init=False)
@@ -213,11 +222,11 @@ class ActionContext:
         chat_id = self.user.telegram_user_id
         if type(chat_id) is not int or chat_id <= 0:
             raise ValueError("a Telegram user id is required for outbound delivery")
-        self._delivery_index += 1
+        self._delivery_sequence.value += 1
         await self.unit_of_work.deliveries.enqueue(
             NewOutboundDelivery(
                 idempotency_key=(
-                    f"action:{self.correlation_id}:{self._delivery_index}"
+                    f"action:{self.correlation_id}:{self._delivery_sequence.value}"
                 ),
                 user_id=self.user.id,
                 telegram_chat_id=chat_id,
@@ -239,11 +248,11 @@ class ActionContext:
         if type(text) is not str or not text:
             raise ValueError("outbound text must be nonempty")
         await self.flush_presentation()
-        self._delivery_index += 1
+        self._delivery_sequence.value += 1
         await self.unit_of_work.deliveries.enqueue(
             NewOutboundDelivery(
                 idempotency_key=(
-                    f"action:{self.correlation_id}:{self._delivery_index}"
+                    f"action:{self.correlation_id}:{self._delivery_sequence.value}"
                 ),
                 user_id=user_id,
                 telegram_chat_id=telegram_chat_id,
@@ -356,7 +365,7 @@ class ActionContext:
         child_context._matched_responder = self._matched_responder
         child_context._previous_responder = self._previous_responder
         child_context._service_choices = self._service_choices
-        child_context._delivery_index = self._delivery_index
+        child_context._delivery_sequence = self._delivery_sequence
         return child_context
 
     @property
@@ -395,6 +404,12 @@ class ActionContext:
         """Return the one emitted terminal event, if any."""
 
         return self._terminal_event
+
+    @property
+    def queued_delivery_count(self) -> int:
+        """Expose the local action-run outbox count to runtime composition only."""
+
+        return self._delivery_sequence.value
 
     def _render_value(self, name: str, *, optional: bool = False) -> str:
         if name in {"user.display_name", "user.name"}:

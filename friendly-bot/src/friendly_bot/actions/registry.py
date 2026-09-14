@@ -52,7 +52,7 @@ class ActionDependencies:
     services: ServiceAttendanceService
     lifecycle: ServiceLifecycleService
     matching: MatchingService
-    diagnostics: DiagnosticRepository
+    diagnostics: DiagnosticRepository | None = None
 
 
 class ActionExecutorRegistry:

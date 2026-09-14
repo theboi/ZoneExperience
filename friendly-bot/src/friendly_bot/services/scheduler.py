@@ -10,7 +10,6 @@ from uuid import UUID
 
 from friendly_bot.persistence.models import ServiceAudience
 from friendly_bot.persistence.repositories import (
-    NewOutboundDelivery,
     ServiceInteractionClosedError,
     ServiceTimestampRecord,
 )
@@ -27,7 +26,7 @@ class AudienceResolution(Protocol):
 
 
 class TimestampRootPreparer(Protocol):
-    """I04-owned composition of one timestamp root and its outbox delivery."""
+    """I04-owned composition of one timestamp root and all of its durable output."""
 
     async def open_for_recipient(
         self,
@@ -36,8 +35,19 @@ class TimestampRootPreparer(Protocol):
         user_id: UUID,
         *,
         now: datetime,
-    ) -> NewOutboundDelivery:
-        """Open an independent root and return its immutable delivery in ``uow``."""
+    ) -> TimestampRootPreparation:
+        """Open the root and enqueue every composed delivery in the supplied UoW."""
+
+
+@dataclass(frozen=True, slots=True)
+class TimestampRootPreparation:
+    """Count I04-owned outbox rows without leaking their provider payloads."""
+
+    enqueued_delivery_count: int
+
+    def __post_init__(self) -> None:
+        if self.enqueued_delivery_count < 0:
+            raise ValueError("timestamp preparation delivery count cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,11 +118,10 @@ class ServiceDeliveryScheduler:
                     if not claimed:
                         continue
                     claimed_delivery_count += 1
-                    delivery = await self._timestamp_roots.open_for_recipient(
+                    prepared = await self._timestamp_roots.open_for_recipient(
                         uow, timestamp, user_id, now=now
                     )
-                    await uow.deliveries.enqueue(delivery)
-                    enqueued_delivery_count += 1
+                    enqueued_delivery_count += prepared.enqueued_delivery_count
 
         return SchedulerRunResult(
             due_timestamp_count=len(due_timestamps),

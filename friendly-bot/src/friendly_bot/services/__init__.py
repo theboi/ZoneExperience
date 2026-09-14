@@ -9,6 +9,7 @@ from friendly_bot.services.scheduler import (
     AudienceResolver,
     SchedulerRunResult,
     ServiceDeliveryScheduler,
+    TimestampRootPreparation,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "ServiceDeliveryScheduler",
     "ServiceLifecycleOutcome",
     "ServiceLifecycleService",
+    "TimestampRootPreparation",
 ]

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "T02",
   "phase": "execution",
-  "status": "reopened-telegram-native-output-contract-incomplete",
+  "status": "reopened-telegram-native-output-and-terminal-timestamp-contract-complete",
   "date": "2026-09-14",
   "f01_g1_prerequisite": {
     "commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
@@ -67,13 +67,24 @@
     "minor_follow_up": "The regression's task scheduling sleeps could later be replaced by explicit barriers; this is not a correctness blocker."
   },
   "g2_handoff": {
-    "status": "blocked-by-i04-integration-evidence",
-    "limit": "The prior T02 evidence validates text delivery and service durability only. I04 proved that buttons, photos, and activity are unsupported, so this manifest cannot supply complete G2 handoff evidence."
+    "status": "source-evidence-ready-for-coordinator-review",
+    "limit": "This manifest records completed source and local verification only. It does not declare a coordinator G2 or G3 decision."
   },
   "reopened_by_i04": {
-    "reason": "OutboundDeliveryWorker accepts only kind=message with payload={text}; it rejects Telegram-native buttons, photo, and activity output as telegram_message_unsupported. No callback-payload or asset-resolution seam exists.",
-    "authority": "The product specification requires Telegram private messages, inline buttons, photos, and activity indicators. I04 may not replace those actions with text-only output.",
-    "required_repair": "Publish a typed durable Telegram-native operation contract, actual client/outbox mappings, callback encoding/decoding ownership, and a sanctioned asset-resolution boundary; add integration evidence before restoring the T02 handoff."
+    "reason": "Resolved: T02 now supports typed native text/buttons/photos/activity, typed callback decoding, and catalog-backed asset resolution.",
+    "authority": "The product specification requires Telegram private messages, inline buttons, photos, and activity indicators; the repair implements that existing requirement without a text-only fallback.",
+    "required_repair": "Completed: I04 composes the typed callback, outbox, asset, and scheduler-root contracts directly."
+  },
+  "completion_update": {
+    "terminal_timestamp": "The exact timestamp whose occurs_at equals interaction_ends_at remains claimable once while the service is unclosed. Ordinary post-end timestamps remain rejected. The automatic timestamp root may open only for that exact persisted terminal timestamp version.",
+    "scheduler_root_contract": "TimestampRootPreparer now enqueues every I04-composed outbox row in the claimed UnitOfWork and returns only a count; the scheduler no longer forces a rich flow to one synthetic text delivery.",
+    "fresh_verification": [
+      "317 unit and end-to-end tests passed.",
+      "46 routing, matching, service, onboarding, and Telegram integration tests passed against loopback PostgreSQL.",
+      "72 persistence integration tests passed and 1 was skipped because it requires a separate external migration fixture.",
+      "Ruff, format, and mypy passed with no remaining SQLAlchemy Row.tuple deprecation warning."
+    ],
+    "live_boundaries": "No live Telegram or OpenRouter request was made."
   },
   "remote_evidence": {
     "remote": "origin/main",

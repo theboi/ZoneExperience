@@ -17,7 +17,11 @@ from friendly_bot.persistence.repositories import (
     ServiceInteractionClosedError,
     ServiceTimestampRecord,
 )
-from friendly_bot.services.scheduler import AudienceResolver, ServiceDeliveryScheduler
+from friendly_bot.services.scheduler import (
+    AudienceResolver,
+    ServiceDeliveryScheduler,
+    TimestampRootPreparation,
+)
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 SERVICE_ID = uuid4()
@@ -127,22 +131,25 @@ class RecordingTimestampRoots:
 
     async def open_for_recipient(
         self,
-        uow: object,
+        uow: FakeUow,
         timestamp: ServiceTimestampRecord,
         user_id: UUID,
         *,
         now: datetime,
-    ) -> NewOutboundDelivery:
+    ) -> TimestampRootPreparation:
         self.calls.append((uow, timestamp, user_id, now))
         self.current_parent_keys.setdefault(user_id, set()).add(timestamp.root_flow_key)
-        return NewOutboundDelivery(
-            idempotency_key=f"timestamp:{timestamp.id}:{user_id}",
-            user_id=user_id,
-            telegram_chat_id=900_001,
-            kind="message",
-            payload={"text": "Timestamp notice"},
-            eligible_at=now,
+        await uow.deliveries.enqueue(
+            NewOutboundDelivery(
+                idempotency_key=f"timestamp:{timestamp.id}:{user_id}",
+                user_id=user_id,
+                telegram_chat_id=900_001,
+                kind="message",
+                payload={"text": "Timestamp notice"},
+                eligible_at=now,
+            )
         )
+        return TimestampRootPreparation(enqueued_delivery_count=1)
 
 
 def scheduler_fixture(
