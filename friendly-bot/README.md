@@ -26,7 +26,16 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
 - Run as the macOS `ryanthe` user (`id -u` must print `501`).
 - Install Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
-- Install and start Docker Desktop with the Docker Compose v2 plugin. `docker compose version` must succeed.
+- Install Colima, the Docker CLI, and Docker Compose with Homebrew; Docker Desktop is not required:
+
+  ```sh
+  brew install colima docker docker-compose
+  colima start
+  docker context show
+  docker compose version
+  ```
+
+  `docker context show` must print `colima`. If `docker compose version` reports an unknown command after the Homebrew install, merge a `cliPluginsExtraDirs` entry for `$(brew --prefix docker-compose)/lib/docker/cli-plugins` into `~/.docker/config.json`, preserving its existing settings, then rerun the command.
 - Have a dedicated Telegram bot token and an OpenRouter API key ready. Never commit either value.
 - Confirm the OpenRouter account/key privacy setting excludes Friendly Bot input/output logging (or logging is disabled globally). The application fails closed without the attestation below.
 
@@ -39,7 +48,7 @@ Do not override these values, change the port, or point the bot at an arbitrary 
    uv run python scripts/db_runtime_check.py verify
    ```
 
-   If this reports `Docker Compose v2 plugin is unavailable`, enable or install the Compose v2 plugin in Docker Desktop and rerun the command. Do not work around the guard with a differently named Compose project or another database.
+   If this reports `Docker Compose v2 plugin is unavailable`, start Colima, confirm `docker context show` prints `colima`, then install or register the Homebrew Compose plugin as described above and rerun the command. Do not work around the guard with a differently named Compose project or another database.
 
 2. Start the local PostgreSQL container. On its first run, the guard creates a mode-`600`, ignored credential file at `.runtime/ryanthe/postgres.env`.
 
@@ -105,7 +114,7 @@ uv run python scripts/db_runtime_check.py reset --confirm-reset
 
 | Symptom | Correct response |
 | --- | --- |
-| `Docker Compose v2 plugin is unavailable` | Enable/install the Docker Compose v2 plugin in Docker Desktop, then rerun the guarded command. |
+| `Docker Compose v2 plugin is unavailable` | Start Colima, confirm the `colima` Docker context, then install/register the Homebrew Compose plugin and rerun the guarded command. Docker Desktop is not required. |
 | `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run as `ryanthe` from `/Users/ryanthe/Dev/ZoneExperience/friendly-bot`; do not pass overrides to bypass the guard. |
 | Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
 | `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |

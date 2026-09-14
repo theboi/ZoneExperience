@@ -554,11 +554,24 @@ def _docker_compose_is_available() -> bool:
     )
 
 
+def _guarded_runtime_is_available() -> bool:
+    """Run the real Compose canary only inside its fixed account and checkout."""
+
+    if not _docker_compose_is_available():
+        return False
+    db_runtime_check = runtime_guard_module()
+    return (
+        os.getuid() == db_runtime_check.EXPECTED_UID
+        and Path(db_runtime_check.__file__).resolve().parents[2]
+        == db_runtime_check.EXPECTED_CHECKOUT.resolve()
+    )
+
+
 def test_runtime_guard_verify_succeeds_without_a_runtime_env_file() -> None:
     """Fresh verification must be read-only and valid before the first startup."""
 
-    if not _docker_compose_is_available():
-        pytest.skip("docker compose CLI is unavailable on this host")
+    if not _guarded_runtime_is_available():
+        pytest.skip("the fixed guarded runtime profile is unavailable on this host")
 
     db_runtime_check = runtime_guard_module()
     environment_file = db_runtime_check.POSTGRES_ENV_FILE

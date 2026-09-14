@@ -103,7 +103,7 @@ def test_complete_example_loads_all_settings_from_one_shared_dotenv(
     database_settings = loaded_settings[0]
     assert isinstance(database_settings, DatabaseSettings)
     assert database_settings.redacted_url() == (
-        "postgresql+asyncpg://friendly_bot_user:***@127.0.0.1:5432/friendly_bot"
+        "postgresql+asyncpg://friendly_bot:***@127.0.0.1:5833/friendly_bot"
     )
 
     telegram_settings = loaded_settings[1]
