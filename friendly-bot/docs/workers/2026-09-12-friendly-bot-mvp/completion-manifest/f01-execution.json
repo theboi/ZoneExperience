@@ -2,8 +2,8 @@
   "schema_version": 1,
   "worker": "F01",
   "phase": "execution",
-  "status": "delivery-contract-review-repair-recorded",
-  "date": "2026-09-13",
+  "status": "delivery-contract-and-runtime-guard-test-repair-recorded",
+  "date": "2026-09-14",
   "accepted_source_and_review": {
     "commit": "e34e7ee26a9ac4f2e32990b3b73c7ee0ecafca00",
     "summary": "Task 7 migration source and review repair accepted on origin/main before Task 8 acceptance work."
@@ -37,6 +37,12 @@
         "refreshed F01 provenance with the published implementation commit and reconciliation evidence"
       ],
       "authority_impact": "Product and architecture masterplans require no change: this review repair makes the already-approved durable-delivery implementation contract complete. T02 ownership and scope remain unchanged."
+    },
+    "runtime_guard_test_repair": {
+      "commit": "58e1ddfd3b03f94d8db4117374cc07e10119c58d",
+      "root_cause": "The verify-only unit test mocked the Docker Compose call but still invoked the production guard's fixed bot2/UID-504 checkout validation, making the test fail on a normal development account before it could test verify behavior.",
+      "implemented": "The test binds only its freshly loaded guard module to the current test checkout and UID, then invokes the real namespace validator and mocked Compose boundary. The production bot2/UID-504 guard constants are unchanged.",
+      "authority_impact": "This is a deterministic F01 test-fixture repair only. It changes no production runtime boundary, product behavior, or downstream contract."
     },
     "excluded": [
       "bot and routing behavior",
@@ -145,6 +151,11 @@
     {
       "command": "uv run alembic upgrade head && uv run alembic check && uv run alembic downgrade base && uv run ruff check . && uv run ruff format --check . && uv run mypy src/friendly_bot && uv lock --check",
       "result": "exit 0; upgraded through 0002, no Alembic operations detected, downgraded to base, Ruff clean with 31 formatted files, mypy clean over 15 source files, and 26 packages resolved"
+    },
+    {
+      "command": "uv run pytest tests/integration/persistence/test_migrations.py -q && uv run ruff check tests/integration/persistence/test_migrations.py && uv run ruff format --check tests/integration/persistence/test_migrations.py",
+      "result": "exit 0; 7 passed, 8 skipped because FRIENDLY_BOT_DATABASE_URL is absent; Ruff clean and the changed file formatted",
+      "coverage": "runtime guard verify behavior is now deterministic under a simulated valid local namespace without weakening the production bot2/UID-504 fence"
     }
   ],
   "isolated_runtime": {
@@ -335,6 +346,11 @@
       "commit": "13df44abd8045d640bed9779e843a61908e6749d",
       "pre_commit_reconciliation": "HEAD and origin/main were both 5b28c2ea0a135b0bdbde59e0b1bb08b026634500; no T02 external source had landed.",
       "remote_reachability": "git push/fetch and merge-base succeeded; origin/main resolved to 13df44abd8045d640bed9779e843a61908e6749d."
+    },
+    "runtime_guard_test_repair": {
+      "commit": "58e1ddfd3b03f94d8db4117374cc07e10119c58d",
+      "proof_command": "git fetch origin main --prune && git merge-base --is-ancestor 58e1ddfd3b03f94d8db4117374cc07e10119c58d origin/main && git rev-parse 58e1ddfd3b03f94d8db4117374cc07e10119c58d origin/main",
+      "result": "exit 0; both compared SHA values were 58e1ddfd3b03f94d8db4117374cc07e10119c58d."
     },
     "remote_reachability": {
       "command": "git push --quiet origin main; git fetch --quiet origin main; git merge-base --is-ancestor fa06b773c50d72e4a2fce5bea28a7f7df1cba8f6 origin/main",
