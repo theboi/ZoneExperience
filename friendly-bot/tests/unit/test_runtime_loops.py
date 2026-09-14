@@ -53,7 +53,9 @@ class RuntimeWithPoller:
 
 
 @pytest.mark.asyncio
-async def test_poll_loop_waits_before_retrying_a_returned_telegram_failure() -> None:
+async def test_poll_loop_waits_before_retrying_a_returned_telegram_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Removing the safe-failure wait would begin the second poll immediately."""
 
     stop_event = asyncio.Event()
@@ -77,3 +79,5 @@ async def test_poll_loop_waits_before_retrying_a_returned_telegram_failure() -> 
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+
+    assert caplog.messages == ["telegram polling failure: api_error status=502"]

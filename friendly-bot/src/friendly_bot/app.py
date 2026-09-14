@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import signal
 from collections.abc import Callable
 from contextlib import suppress
@@ -82,15 +83,19 @@ from friendly_bot.telegram import (
     LocalTelegramAssetResolver,
     OutboundDeliveryWorker,
     TelegramApiClient,
+    TelegramApiError,
     TelegramCallback,
     TelegramCallbackContextKind,
     TelegramIngress,
     TelegramMessage,
     TelegramPoller,
     TelegramPreflight,
+    TelegramResponseUncertain,
     TelegramRuntimeLock,
     normalize_command,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 _ZONE_X_TEMPLATE_CONTEXT: Final = TemplateContextSchema(
     {
@@ -874,6 +879,7 @@ class FriendlyBotApplication:
         now: datetime,
         reason_code: str,
     ) -> DispatchResult:
+        LOGGER.error("routing provider failure: %s", reason_code)
         diagnostic = await unit_of_work.diagnostics.record(
             correlation_id=correlation_id,
             severity="error",
@@ -1351,6 +1357,7 @@ async def _poll_forever(
         await runtime_lock.ensure_healthy()
         result = await runtime.poller.run_once(now=datetime.now(UTC))
         if result.gateway_failure is not None:
+            _log_telegram_poll_failure(result.gateway_failure)
             await _wait_for_stop(stop_event, seconds=0.5)
 
 
@@ -1382,6 +1389,19 @@ async def _wait_for_stop(stop_event: asyncio.Event, *, seconds: float) -> None:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
     except TimeoutError:
         return
+
+
+def _log_telegram_poll_failure(
+    failure: TelegramApiError | TelegramResponseUncertain,
+) -> None:
+    """Emit a stable failure category without retaining Telegram payloads."""
+
+    if isinstance(failure, TelegramApiError):
+        LOGGER.warning(
+            "telegram polling failure: api_error status=%s", failure.error_code
+        )
+        return
+    LOGGER.warning("telegram polling failure: response_uncertain code=%s", failure.code)
 
 
 async def _raise_when_stopped(stop_event: asyncio.Event) -> None:

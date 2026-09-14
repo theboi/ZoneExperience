@@ -520,7 +520,9 @@ async def test_existing_start_opens_the_system_path_without_model_routing() -> N
     ],
 )
 async def test_routing_failure_commits_a_redacted_fallback(
-    error: GatewayTransportError | GatewayProtocolError, reason_code: str
+    error: GatewayTransportError | GatewayProtocolError,
+    reason_code: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """An exhausted provider must not terminate the Telegram runtime task group."""
 
@@ -574,6 +576,8 @@ async def test_routing_failure_commits_a_redacted_fallback(
         {"text": "Sorry, an error occurred. Error log: 77."}
     ]
     assert uow.diagnostics.reason_codes == [reason_code]
+    assert caplog.messages == [f"routing provider failure: {reason_code}"]
+    assert str(error) not in caplog.text
 
 
 async def test_dispatch_persists_event_child_for_its_later_button_callback() -> None:
