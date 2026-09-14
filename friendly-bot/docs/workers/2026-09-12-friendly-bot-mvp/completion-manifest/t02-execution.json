@@ -2,7 +2,7 @@
   "schema_version": 1,
   "worker": "T02",
   "phase": "execution",
-  "status": "execution-complete-reviewed-g2-ready",
+  "status": "reopened-telegram-native-output-contract-incomplete",
   "date": "2026-09-14",
   "f01_g1_prerequisite": {
     "commit": "d7db17a5061e0e351a6fc1996f56105c194acaf0",
@@ -67,8 +67,13 @@
     "minor_follow_up": "The regression's task scheduling sleeps could later be replaced by explicit barriers; this is not a correctness blocker."
   },
   "g2_handoff": {
-    "status": "ready-for-coordinator-decision",
-    "limit": "T02 validates Telegram/service durability only. It does not authorize OpenRouter use or claim account privacy evidence."
+    "status": "blocked-by-i04-integration-evidence",
+    "limit": "The prior T02 evidence validates text delivery and service durability only. I04 proved that buttons, photos, and activity are unsupported, so this manifest cannot supply complete G2 handoff evidence."
+  },
+  "reopened_by_i04": {
+    "reason": "OutboundDeliveryWorker accepts only kind=message with payload={text}; it rejects Telegram-native buttons, photo, and activity output as telegram_message_unsupported. No callback-payload or asset-resolution seam exists.",
+    "authority": "The product specification requires Telegram private messages, inline buttons, photos, and activity indicators. I04 may not replace those actions with text-only output.",
+    "required_repair": "Publish a typed durable Telegram-native operation contract, actual client/outbox mappings, callback encoding/decoding ownership, and a sanctioned asset-resolution boundary; add integration evidence before restoring the T02 handoff."
   },
   "remote_evidence": {
     "remote": "origin/main",
