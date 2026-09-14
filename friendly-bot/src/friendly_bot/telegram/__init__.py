@@ -57,10 +57,20 @@ from friendly_bot.telegram.runtime_lock import (
 )
 
 
+class TelegramActivityGateway(Protocol):
+    """The ephemeral Telegram activity boundary used by configured I04 actions."""
+
+    async def send_activity(
+        self, *, chat_id: int, activity: str
+    ) -> TelegramActivityOutcome:
+        """Attempt one short-lived activity indication without durable replay."""
+
+
 class TelegramGateway(
     TelegramPollingGateway,
     TelegramDeliveryGateway,
     TelegramWebhookGateway,
+    TelegramActivityGateway,
     Protocol,
 ):
     """The complete typed Telegram boundary consumed by I04 composition."""
@@ -75,6 +85,7 @@ __all__ = [
     "OutboundTelegramRequest",
     "ResolvedTelegramPhoto",
     "TelegramActivityConfirmed",
+    "TelegramActivityGateway",
     "TelegramActivityOutcome",
     "TelegramApiClient",
     "TelegramApiError",

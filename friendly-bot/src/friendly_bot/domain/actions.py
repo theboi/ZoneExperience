@@ -59,6 +59,7 @@ class SendButtonsAction(DiscussionActionBase):
 class SendServiceChoiceButtonsAction(DiscussionActionBase):
     type: Literal["send_service_choice_buttons"]
     button_id: StableButtonId
+    text: NonEmptyText
     choice_source: Literal["resolved_service_options"] = "resolved_service_options"
     service_bound: Literal[True] = True
 

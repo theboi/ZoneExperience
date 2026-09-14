@@ -6,6 +6,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -16,6 +17,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
+from friendly_bot.app import load_zone_x_seed, publish_zone_x_seed
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import (
     CheckpointReturnTransition,
@@ -45,6 +47,8 @@ from friendly_bot.persistence.models import (
 from friendly_bot.persistence.repositories import (
     DeliveryClaimLostError,
     NewOutboundDelivery,
+    NewService,
+    NewServiceTimestamp,
     ServiceInteractionClosedError,
 )
 from friendly_bot.persistence.uow import UnitOfWork
@@ -670,6 +674,13 @@ async def test_match_eligibility_uses_role_owner_and_active_telegram_login(
     profile_id = await _seed_profile(
         session_factory, user_id=role_owner_id, name="attached-server"
     )
+    unreachable_owner_id = await _seed_user(
+        session_factory, role=OperationalRole.SERVER
+    )
+    unreachable_login_user_id = await _seed_user(session_factory)
+    unreachable_profile_id = await _seed_profile(
+        session_factory, user_id=unreachable_owner_id, name="unreachable-server"
+    )
     detached_owner_id = await _seed_user(
         session_factory, role=OperationalRole.SERVER, telegram_user_id=819
     )
@@ -679,8 +690,17 @@ async def test_match_eligibility_uses_role_owner_and_active_telegram_login(
 
     async with uow_factory() as uow:
         await uow.operational_logins.attach(profile_id, login_user_id, at=NOW)
+        await uow.operational_logins.attach(
+            unreachable_profile_id, unreachable_login_user_id, at=NOW
+        )
         await uow.attendances.start_or_switch(
             login_user_id, service_id, attendee_kind="ordinary", started_at=NOW
+        )
+        await uow.attendances.start_or_switch(
+            unreachable_login_user_id,
+            service_id,
+            attendee_kind="ordinary",
+            started_at=NOW,
         )
         await uow.attendances.start_or_switch(
             detached_owner_id, service_id, attendee_kind="ordinary", started_at=NOW
@@ -698,6 +718,105 @@ async def test_match_eligibility_uses_role_owner_and_active_telegram_login(
         for candidate in candidates
     ] == [(profile_id, login_user_id, OperationalRole.SERVER)]
     assert detached_profile_id not in {candidate.profile_id for candidate in candidates}
+    assert unreachable_profile_id not in {
+        candidate.profile_id for candidate in candidates
+    }
+
+
+async def test_seed_service_upsert_and_timestamp_binding_are_idempotent(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """I04 may publish immutable roots without reaching through F01 to ORM models."""
+
+    service_input = NewService(
+        key="zone_x_seed_upsert",
+        name="Zone X Seed",
+        timezone="Asia/Singapore",
+        highkey=True,
+        doors_open_at=NOW,
+        doors_close_at=NOW + timedelta(minutes=50),
+        service_starts_at=NOW + timedelta(hours=1),
+        service_ends_at=NOW + timedelta(hours=2),
+        interaction_ends_at=NOW + timedelta(hours=3),
+    )
+    definition = PublishedFlowDefinition(
+        document={
+            "key": "service.zone_x.seed.timestamp",
+            "trigger": None,
+            "actions": [],
+            "next_flow_mode": "one_and_once_only",
+            "return_actions": [],
+            "next_flows": [],
+        },
+        flow_key_index={"service.zone_x.seed.timestamp": ()},
+    )
+    async with uow_factory() as uow:
+        service = await uow.services.upsert(service_input)
+        version = await uow.flow_versions.publish(
+            definition,
+            scope_kind=FlowScopeKind.TIMESTAMP,
+            service_id=service.id,
+            published_by_user_id=None,
+        )
+        timestamp = await uow.services.upsert_timestamp(
+            NewServiceTimestamp(
+                key="zone_x.seed.notice",
+                occurs_at=NOW + timedelta(minutes=1),
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key="service.zone_x.seed.timestamp",
+            ),
+            service_id=service.id,
+        )
+    async with uow_factory() as uow:
+        reread = await uow.services.get_by_key(service_input.key)
+        repeated = await uow.services.upsert_timestamp(
+            NewServiceTimestamp(
+                key="zone_x.seed.notice",
+                occurs_at=NOW + timedelta(minutes=2),
+                audience=ServiceAudience.ALL_NBNCS,
+                flow_version_id=version.id,
+                root_flow_key="service.zone_x.seed.timestamp",
+            ),
+            service_id=reread.id,
+        )
+
+    assert reread.id == service.id
+    assert reread.name == "Zone X Seed"
+    assert repeated.id == timestamp.id
+    assert repeated.occurs_at == NOW + timedelta(minutes=2)
+
+
+async def test_zone_x_seed_publishes_immutable_roots_and_seven_timestamp_bindings(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """The canonical seed may be repeated without duplicating any active root binding."""
+
+    seed = load_zone_x_seed(
+        Path(__file__).resolve().parents[3] / "seeds" / "zone-x.json"
+    )
+    async with uow_factory() as uow:
+        first = await publish_zone_x_seed(seed, uow)
+    async with uow_factory() as uow:
+        second = await publish_zone_x_seed(seed, uow)
+
+    assert first.service.id == second.service.id
+    assert first.service.key == "zone_x_2026_10_18"
+    assert len(first.timestamps) == len(second.timestamps) == 7
+    assert {timestamp.key for timestamp in first.timestamps} == {
+        "zone_x.marketing_starts",
+        "zone_x.one_day_before",
+        "zone_x.doors_open",
+        "zone_x.service_starts",
+        "zone_x.service_ends",
+        "zone_x.thank_you",
+        "zone_x.interaction_ends",
+    }
+    assert [timestamp.id for timestamp in first.timestamps] == [
+        timestamp.id for timestamp in second.timestamps
+    ]
 
 
 async def test_request_lifecycle_exposes_only_owned_typed_responder_contact(

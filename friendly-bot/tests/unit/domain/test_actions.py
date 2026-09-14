@@ -19,6 +19,7 @@ from friendly_bot.domain.events import ActionEvent
         {
             "type": "send_service_choice_buttons",
             "button_id": "service.attendance.select",
+            "text": "Choose a service",
         },
         {"type": "send_photo", "asset_key": "zone_x.poster", "caption": "Come along"},
         {"type": "show_activity", "activity": "typing"},
@@ -107,11 +108,14 @@ def test_event_emitting_actions_expose_only_documented_outcomes() -> None:
     )
 
 
-def test_runtime_service_choice_buttons_have_no_embedded_service_list() -> None:
+def test_runtime_service_choice_buttons_have_copy_but_no_embedded_service_list() -> (
+    None
+):
     action = parse_action(
         {
             "type": "send_service_choice_buttons",
             "button_id": "service.attendance.select",
+            "text": "Choose a service",
         }
     )
 
@@ -120,6 +124,7 @@ def test_runtime_service_choice_buttons_have_no_embedded_service_list() -> None:
     assert action.model_dump() == {
         "type": "send_service_choice_buttons",
         "button_id": "service.attendance.select",
+        "text": "Choose a service",
         "choice_source": "resolved_service_options",
         "service_bound": True,
     }
@@ -171,6 +176,7 @@ def test_button_payload_is_closed_to_the_canonical_service_key_context() -> None
         {
             "type": "send_service_choice_buttons",
             "button_id": "service.attendance.select",
+            "text": "Choose a service",
             "service_ids": ["zone_x"],
         },
         {"type": "find_and_reserve_server", "service_id": "id", "capacity_required": 0},

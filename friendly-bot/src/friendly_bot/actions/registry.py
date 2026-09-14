@@ -106,3 +106,99 @@ def concrete_action_types(
     if not action_types:
         raise TypeError("discussion-action union contains no concrete action classes")
     return action_types
+
+
+def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorRegistry:
+    """Register every concrete F01 action explicitly at application composition time."""
+
+    del dependencies
+    from friendly_bot.actions.executors import (
+        add_service_attendance,
+        confirm_human_match,
+        end_service_interactions,
+        enter_selected_service_checkpoint,
+        enter_selected_service_latecomer_flow,
+        enter_service_checkpoint,
+        exclude_previous_human_from_next_attempt,
+        find_and_reserve_safety_responder,
+        find_and_reserve_server,
+        mark_safety_request_pending,
+        notify_all_admins,
+        notify_matched_human,
+        notify_previous_human,
+        release_human_match,
+        resolve_service_switch_options,
+        return_to_nearest_checkpoint,
+        save_incoming,
+        select_service_attendance,
+        send_buttons,
+        send_message,
+        send_photo,
+        send_service_choice_buttons,
+        share_human_contact,
+        show_activity,
+    )
+    from friendly_bot.domain.actions import (
+        AddServiceAttendanceAction,
+        ConfirmHumanMatchAction,
+        EndServiceInteractionsAction,
+        EnterSelectedServiceCheckpointAction,
+        EnterSelectedServiceLatecomerFlowAction,
+        EnterServiceCheckpointAction,
+        ExcludePreviousHumanFromNextAttemptAction,
+        FindAndReserveSafetyResponderAction,
+        FindAndReserveServerAction,
+        MarkSafetyRequestPendingAction,
+        NotifyAllAdminsAction,
+        NotifyMatchedHumanAction,
+        NotifyPreviousHumanAction,
+        ReleaseHumanMatchAction,
+        ResolveServiceSwitchOptionsAction,
+        ReturnToNearestCheckpointAction,
+        SaveIncomingAction,
+        SelectServiceAttendanceAction,
+        SendButtonsAction,
+        SendMessageAction,
+        SendPhotoAction,
+        SendServiceChoiceButtonsAction,
+        ShareHumanContactAction,
+        ShowActivityAction,
+    )
+
+    registry = ActionExecutorRegistry()
+    registry.register(SendMessageAction, send_message)
+    registry.register(SendButtonsAction, send_buttons)
+    registry.register(SendServiceChoiceButtonsAction, send_service_choice_buttons)
+    registry.register(SendPhotoAction, send_photo)
+    registry.register(ShowActivityAction, show_activity)
+    registry.register(SaveIncomingAction, save_incoming)
+    registry.register(AddServiceAttendanceAction, add_service_attendance)
+    registry.register(SelectServiceAttendanceAction, select_service_attendance)
+    registry.register(EnterServiceCheckpointAction, enter_service_checkpoint)
+    registry.register(
+        EnterSelectedServiceCheckpointAction, enter_selected_service_checkpoint
+    )
+    registry.register(
+        EnterSelectedServiceLatecomerFlowAction,
+        enter_selected_service_latecomer_flow,
+    )
+    registry.register(ResolveServiceSwitchOptionsAction, resolve_service_switch_options)
+    registry.register(FindAndReserveServerAction, find_and_reserve_server)
+    registry.register(
+        FindAndReserveSafetyResponderAction, find_and_reserve_safety_responder
+    )
+    registry.register(ConfirmHumanMatchAction, confirm_human_match)
+    registry.register(ReleaseHumanMatchAction, release_human_match)
+    registry.register(NotifyMatchedHumanAction, notify_matched_human)
+    registry.register(NotifyPreviousHumanAction, notify_previous_human)
+    registry.register(NotifyAllAdminsAction, notify_all_admins)
+    registry.register(
+        ExcludePreviousHumanFromNextAttemptAction,
+        exclude_previous_human_from_next_attempt,
+    )
+    registry.register(ShareHumanContactAction, share_human_contact)
+    registry.register(MarkSafetyRequestPendingAction, mark_safety_request_pending)
+    registry.register(EndServiceInteractionsAction, end_service_interactions)
+    registry.register(ReturnToNearestCheckpointAction, return_to_nearest_checkpoint)
+    registry.assert_complete(concrete_action_types(DiscussionAction))
+    return registry

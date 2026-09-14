@@ -116,6 +116,7 @@ system_global_root_excerpt:
 service:
   key: zone_x_2026_10_18
   name: Zone X
+  map_url: "https://maps.google.com/?q=The+Star+Performing+Arts+Centre"
   timezone: Asia/Singapore
   highkey: true
   doors_open_at: "2026-10-18T13:30:00+08:00"
@@ -470,6 +471,7 @@ service:
             actions:
               - type: send_service_choice_buttons
                 button_id: service.attendance.select
+                text: "Which service would you like to attend?"
             next_flow_mode: ONE_AND_ONCE_ONLY
             return_actions: []
             next_flows:

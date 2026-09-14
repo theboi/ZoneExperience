@@ -64,6 +64,9 @@ class RecordingContext:
     async def enqueue_text(self, text: str) -> None:
         self.texts.append(text)
 
+    async def flush_presentation(self) -> None:
+        return None
+
     def for_child(
         self, child: DiscussionFlow, *, event_payload: dict[str, JsonValue] | None
     ) -> RecordingContext:

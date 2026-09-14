@@ -11,6 +11,7 @@ from friendly_bot.actions.registry import (
     ActionRegistryCompletenessError,
     DuplicateActionExecutorError,
     UnregisteredActionExecutorError,
+    build_action_registry,
     concrete_action_types,
 )
 from friendly_bot.actions.runner import (
@@ -36,6 +37,7 @@ __all__ = [
     "RetryableActionExecutionError",
     "TerminalActionEventAlreadyEmittedError",
     "UnregisteredActionExecutorError",
+    "build_action_registry",
     "concrete_action_types",
     "send_unhandled_action_error",
 ]

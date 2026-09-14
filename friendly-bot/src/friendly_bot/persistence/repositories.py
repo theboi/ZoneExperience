@@ -113,6 +113,32 @@ class LoginAttachmentResult:
 
 
 @dataclass(frozen=True, slots=True)
+class NewService:
+    """The complete mutable service facts accepted from an approved seed publisher."""
+
+    key: str
+    name: str
+    timezone: str
+    highkey: bool
+    doors_open_at: datetime
+    doors_close_at: datetime
+    service_starts_at: datetime
+    service_ends_at: datetime
+    interaction_ends_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class NewServiceTimestamp:
+    """One timestamp-to-immutable-flow binding from an approved service seed."""
+
+    key: str
+    occurs_at: datetime
+    audience: ServiceAudience
+    flow_version_id: UUID
+    root_flow_key: str
+
+
+@dataclass(frozen=True, slots=True)
 class ServiceRecord:
     id: UUID
     key: str
@@ -121,6 +147,7 @@ class ServiceRecord:
     doors_close_at: datetime
     interaction_ends_at: datetime
     interaction_closed_at: datetime | None = None
+    name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,7 +357,15 @@ class OperationalLoginRepository(Protocol):
 
 
 class ServiceRepository(Protocol):
+    async def get_by_key(self, service_key: str) -> ServiceRecord: ...
+
     async def get(self, service_id: UUID) -> ServiceRecord: ...
+
+    async def upsert(self, service: NewService) -> ServiceRecord: ...
+
+    async def upsert_timestamp(
+        self, timestamp: NewServiceTimestamp, *, service_id: UUID
+    ) -> ServiceTimestampRecord: ...
 
     async def list_ongoing(self, *, now: datetime) -> list[ServiceRecord]: ...
 
@@ -630,6 +665,7 @@ def _service_record(row: Service) -> ServiceRecord:
         doors_close_at=row.doors_close_at,
         interaction_ends_at=row.interaction_ends_at,
         interaction_closed_at=row.interaction_closed_at,
+        name=row.name,
     )
 
 
@@ -1010,11 +1046,93 @@ class SqlAlchemyServiceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get_by_key(self, service_key: str) -> ServiceRecord:
+        if type(service_key) is not str or not service_key:
+            raise ValueError("service key must be nonempty")
+        row = await self._session.scalar(
+            select(Service).where(Service.key == service_key)
+        )
+        if row is None:
+            raise LookupError("service was not found")
+        return _service_record(row)
+
     async def get(self, service_id: UUID) -> ServiceRecord:
         row = await self._session.get(Service, service_id)
         if row is None:
             raise LookupError("service was not found")
         return _service_record(row)
+
+    async def upsert(self, service: NewService) -> ServiceRecord:
+        """Insert or refresh the non-closure fields of one stable service seed record."""
+
+        if not isinstance(service, NewService):
+            raise TypeError("service seed input is invalid")
+        row = await self._session.scalar(
+            pg_insert(Service)
+            .values(
+                key=service.key,
+                name=service.name,
+                timezone=service.timezone,
+                highkey=service.highkey,
+                doors_open_at=service.doors_open_at,
+                doors_close_at=service.doors_close_at,
+                service_starts_at=service.service_starts_at,
+                service_ends_at=service.service_ends_at,
+                interaction_ends_at=service.interaction_ends_at,
+            )
+            .on_conflict_do_update(
+                index_elements=[Service.key],
+                set_={
+                    "name": service.name,
+                    "timezone": service.timezone,
+                    "highkey": service.highkey,
+                    "doors_open_at": service.doors_open_at,
+                    "doors_close_at": service.doors_close_at,
+                    "service_starts_at": service.service_starts_at,
+                    "service_ends_at": service.service_ends_at,
+                    "interaction_ends_at": service.interaction_ends_at,
+                },
+            )
+            .returning(Service)
+        )
+        if row is None:
+            raise RuntimeError("service seed could not be upserted")
+        return _service_record(row)
+
+    async def upsert_timestamp(
+        self, timestamp: NewServiceTimestamp, *, service_id: UUID
+    ) -> ServiceTimestampRecord:
+        """Keep one stable timestamp key bound to its current immutable root version."""
+
+        if not isinstance(timestamp, NewServiceTimestamp):
+            raise TypeError("service timestamp seed input is invalid")
+        await _lock_service(self._session, service_id)
+        row = await self._session.scalar(
+            select(ServiceTimestamp)
+            .where(
+                ServiceTimestamp.service_id == service_id,
+                ServiceTimestamp.key == timestamp.key,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            row = ServiceTimestamp(
+                id=uuid4(),
+                service_id=service_id,
+                key=timestamp.key,
+                occurs_at=timestamp.occurs_at,
+                audience=timestamp.audience,
+                flow_version_id=timestamp.flow_version_id,
+                root_flow_key=timestamp.root_flow_key,
+            )
+            self._session.add(row)
+            await self._session.flush()
+        else:
+            row.occurs_at = timestamp.occurs_at
+            row.audience = timestamp.audience
+            row.flow_version_id = timestamp.flow_version_id
+            row.root_flow_key = timestamp.root_flow_key
+        return _timestamp_record(row)
 
     async def list_ongoing(self, *, now: datetime) -> list[ServiceRecord]:
         rows = await self._session.scalars(
@@ -1427,6 +1545,7 @@ class SqlAlchemyMatchRepository:
             .where(
                 role_owner.role == OperationalRole.SERVER,
                 OperationalLogin.detached_at.is_(None),
+                recipient.telegram_user_id.is_not(None),
                 ServiceAttendance.service_id == service_id,
                 ServiceAttendance.ended_at.is_(None),
                 OperationalProfile.reserved_capacity < OperationalProfile.capacity,
@@ -1870,7 +1989,7 @@ class SqlAlchemyMatchRepository:
         ).one_or_none()
         if row is None:
             return None
-        profile, user = row.tuple()
+        profile, user = row._tuple()
         assert user.telegram_user_id is not None
         return MatchResponderRecord(
             assignment=_assignment_record(assignment),

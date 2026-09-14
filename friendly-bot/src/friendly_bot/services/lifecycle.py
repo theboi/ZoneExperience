@@ -9,7 +9,7 @@ from typing import Literal
 from uuid import UUID
 
 from friendly_bot.persistence.repositories import ServiceRecord
-from friendly_bot.persistence.uow import UnitOfWorkFactory
+from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
 
 type LifecycleOutcomeKind = Literal["ended"]
 
@@ -37,6 +37,18 @@ class ServiceLifecycleService:
     ) -> ServiceLifecycleOutcome:
         """Expire each due service atomically and return users for I04 checkpoint work."""
 
+        async with self._uow_factory() as uow:
+            return await self.end_interactions_in_uow(uow, services=services, now=now)
+
+    async def end_interactions_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        services: Sequence[ServiceRecord],
+        now: datetime,
+    ) -> ServiceLifecycleOutcome:
+        """Expire due services inside T02 ingress without opening a nested transaction."""
+
         due_services = tuple(
             service for service in services if now >= service.interaction_ends_at
         )
@@ -45,24 +57,19 @@ class ServiceLifecycleService:
         expired_selection_count = 0
         released_match_count = 0
         ended_attendance_count = 0
-        async with self._uow_factory() as uow:
-            for service in due_services:
-                if not await uow.services.claim_interaction_closure(
-                    service.id, now=now
-                ):
-                    continue
-                ended_service_ids = ended_service_ids | {service.id}
-                expiry = await uow.open_selections.expire_service_bound(
-                    service.id, at=now
-                )
-                affected_user_ids = affected_user_ids | expiry.affected_user_ids
-                expired_selection_count += expiry.expired_selection_count
-                released_match_count += await uow.matches.release_service_bound(
-                    service.id, at=now
-                )
-                ended_attendance_count += await uow.attendances.end_active_for_service(
-                    service.id, ended_at=now
-                )
+        for service in due_services:
+            if not await uow.services.claim_interaction_closure(service.id, now=now):
+                continue
+            ended_service_ids = ended_service_ids | {service.id}
+            expiry = await uow.open_selections.expire_service_bound(service.id, at=now)
+            affected_user_ids = affected_user_ids | expiry.affected_user_ids
+            expired_selection_count += expiry.expired_selection_count
+            released_match_count += await uow.matches.release_service_bound(
+                service.id, at=now
+            )
+            ended_attendance_count += await uow.attendances.end_active_for_service(
+                service.id, ended_at=now
+            )
         return ServiceLifecycleOutcome(
             kind="ended",
             ended_service_ids=ended_service_ids,

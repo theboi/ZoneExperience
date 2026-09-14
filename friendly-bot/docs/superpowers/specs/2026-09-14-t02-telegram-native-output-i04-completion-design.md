@@ -86,6 +86,16 @@ child, or flow completion, the runner flushes the pending presentation. A textle
 action without a compatible pending presentation is a deterministic action error—never an
 invisible placeholder message.
 
+`send_service_choice_buttons` is itself a visible dynamic presentation, not a textless
+keyboard attachment: it carries required fixed `text` plus a stable button ID, while I04
+derives only the current service records and callback UUIDs locally. This closes the prior
+orphan-keyboard contradiction without embedding service IDs or executable behavior in JSON.
+
+The canonical source preserves its established uppercase YAML enum spellings. I04 normalizes
+only `next_flow_mode` and timestamp `audience` enum values to the already-existing lowercase
+F01 wire values while loading the semantic JSON copy; all user copy, keys, timestamps, action
+parameters, and ordering remain unchanged.
+
 ## Minimal F01 matching contract completion
 
 I04 needs public typed persistence operations to create a match request, prove requester

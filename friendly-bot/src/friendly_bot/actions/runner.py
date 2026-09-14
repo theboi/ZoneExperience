@@ -8,7 +8,13 @@ from pydantic import JsonValue
 
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.actions.registry import ActionExecutorRegistry
-from friendly_bot.domain.actions import DiscussionAction
+from friendly_bot.domain.actions import (
+    DiscussionAction,
+    SendButtonsAction,
+    SendMessageAction,
+    SendPhotoAction,
+    SendServiceChoiceButtonsAction,
+)
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.triggers import ActionEventDiscussionFlowTrigger
@@ -66,11 +72,14 @@ class ActionRunner:
     ) -> None:
         executed_flow_keys.append(str(flow.key))
         for action in flow.actions:
+            if not _is_presentation_action(action):
+                await context.flush_presentation()
             event = await self._run_action(action, context, flow)
             if event is None:
                 event = context.terminal_event
             if event is None:
                 continue
+            await context.flush_presentation()
             if is_error_recovery and event.key == "error":
                 await send_unhandled_action_error(context)
                 return
@@ -81,6 +90,7 @@ class ActionRunner:
                 executed_flow_keys,
             )
             return
+        await context.flush_presentation()
 
     async def _run_action(
         self,
@@ -194,4 +204,18 @@ async def send_unhandled_action_error(context: ActionContext) -> None:
         DEFAULT_UNHANDLED_ERROR_TEXT.format(
             telegram_user_id=context.user.telegram_user_id
         )
+    )
+
+
+def _is_presentation_action(action: DiscussionAction) -> bool:
+    """Only adjacent visible actions may be coalesced into one Telegram request."""
+
+    return isinstance(
+        action,
+        (
+            SendMessageAction,
+            SendButtonsAction,
+            SendServiceChoiceButtonsAction,
+            SendPhotoAction,
+        ),
     )
