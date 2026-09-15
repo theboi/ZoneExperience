@@ -23,6 +23,11 @@ from friendly_bot.persistence.repositories import (
     PersonaCursorRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.routing.contracts import (
+    MultiIntentMatches,
+    MultiIntentTerminal,
+    PlannedFlowMatch,
+)
 from friendly_bot.routing.router import (
     CandidateAssembler,
     ConstrainedRouter,
@@ -80,16 +85,25 @@ def _selection(
 
 @dataclass
 class StubGateway:
-    answers: list[str]
+    answers: list[MultiIntentMatches | MultiIntentTerminal]
     requests: list[object]
 
-    def __init__(self, answers: list[str]) -> None:
+    def __init__(self, answers: list[MultiIntentMatches | MultiIntentTerminal]) -> None:
         self.answers = answers
         self.requests = []
 
-    async def select_key(self, request: object) -> str:
+    async def route_and_plan(
+        self, request: object
+    ) -> MultiIntentMatches | MultiIntentTerminal:
         self.requests.append(request)
         return self.answers.pop(0)
+
+
+def _matches(*flow_ids: str) -> MultiIntentMatches:
+    return MultiIntentMatches(
+        kind="matches",
+        matches=tuple(PlannedFlowMatch(flow_id=flow_id) for flow_id in flow_ids),
+    )
 
 
 class FakeUow:
@@ -224,12 +238,12 @@ def test_candidate_assembly_includes_one_any_of_message_candidate() -> None:
     ]
 
 
-async def test_router_selects_two_distinct_keys_then_done() -> None:
-    """A selected key must disappear before the next model decision."""
+async def test_router_routes_all_matches_with_one_model_operation() -> None:
+    """One typed update must return all matches without a system.done call."""
 
     current_version = uuid4()
     global_version = uuid4()
-    gateway = StubGateway(["flow.current", "flow.global", "system.done"])
+    gateway = StubGateway([_matches("flow.current", "flow.global")])
     uow = FakeUow(
         [
             _selection(current_version, "system.current", current=True),
@@ -256,24 +270,20 @@ async def test_router_selects_two_distinct_keys_then_done() -> None:
         NOW,
     )
 
-    assert [decision.key for decision in result.selected_keys] == [
-        "flow.current",
-        "flow.global",
-    ]
-    assert result.terminal is RoutingTerminal.DONE
+    assert result.interactive is not None
+    assert result.interactive.candidate.key == "flow.current"
+    assert tuple(candidate.key for candidate in result.deferred) == ("flow.global",)
+    assert result.terminal is None
+    assert len(gateway.requests) == 1
     assert gateway.requests[0].reply_body == "old question"
-    assert gateway.requests[0].allowed_keys == {
+    assert tuple(candidate.flow_id for candidate in gateway.requests[0].candidates) == (
         "flow.current",
         "flow.global",
-        "system.done",
-        "system.no_match",
-        "system.clarify_ambiguous_context",
-    }
-    assert "flow.current" not in gateway.requests[1].allowed_keys
+    )
 
 
 async def test_ambiguous_and_no_match_are_terminals() -> None:
-    """Only the three reserved terminal keys may stop an update."""
+    """The one-shot model exposes only no-match and clarify terminals."""
 
     version = uuid4()
     definition = SimpleNamespace(
@@ -283,11 +293,13 @@ async def test_ambiguous_and_no_match_are_terminals() -> None:
 
     clarify = await ConstrainedRouter(
         lambda: FakeUow(selections, {version: definition}),
-        StubGateway(["system.clarify_ambiguous_context"]),
+        StubGateway(
+            [MultiIntentTerminal(kind="terminal", terminal="clarify_ambiguous_context")]
+        ),
     ).route_update(USER, IncomingText(body="which one"), NOW)
     no_match = await ConstrainedRouter(
         lambda: FakeUow(selections, {version: definition}),
-        StubGateway(["system.no_match"]),
+        StubGateway([MultiIntentTerminal(kind="terminal", terminal="no_match")]),
     ).route_update(USER, IncomingText(body="unknown"), NOW)
 
     assert clarify.terminal is RoutingTerminal.CLARIFY
@@ -309,7 +321,8 @@ async def test_router_can_use_the_caller_owned_ingress_unit_of_work() -> None:
         },
     )
     router = ConstrainedRouter(
-        lambda: cast(UnitOfWork, uow), StubGateway(["system.done"])
+        lambda: cast(UnitOfWork, uow),
+        StubGateway([MultiIntentTerminal(kind="terminal", terminal="no_match")]),
     )
 
     result = await router.route_update_in_uow(
@@ -319,14 +332,14 @@ async def test_router_can_use_the_caller_owned_ingress_unit_of_work() -> None:
         now=NOW,
     )
 
-    assert result.terminal is RoutingTerminal.DONE
+    assert result.terminal is RoutingTerminal.NO_MATCH
 
 
 async def test_router_in_uow_does_not_repeat_the_already_persisted_input() -> None:
     """T02 records input before routing, so the model sees it exactly once."""
 
     version = uuid4()
-    gateway = StubGateway(["system.done"])
+    gateway = StubGateway([MultiIntentTerminal(kind="terminal", terminal="no_match")])
     uow = FakeUow(
         [_selection(version, "system.current", current=True)],
         {

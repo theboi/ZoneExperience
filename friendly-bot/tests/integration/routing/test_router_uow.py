@@ -12,6 +12,7 @@ from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.domain.triggers import MessageDiscussionFlowTrigger
 from friendly_bot.persistence.repositories import PersonaCursorRecord
+from friendly_bot.routing.contracts import MultiIntentTerminal
 from friendly_bot.routing.router import ConstrainedRouter, IncomingText, RoutingTerminal
 
 NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -63,9 +64,9 @@ class RecordingUow:
         raise AssertionError(f"unexpected service lookup for {service_id}")
 
 
-class DoneGateway:
-    async def select_key(self, request: object) -> str:
-        return "system.done"
+class TerminalGateway:
+    async def route_and_plan(self, request: object) -> MultiIntentTerminal:
+        return MultiIntentTerminal(kind="terminal", terminal="no_match")
 
 
 async def test_router_reads_f01_uow_repositories_without_reply_identifier_state() -> (
@@ -103,11 +104,11 @@ async def test_router_reads_f01_uow_repositories_without_reply_identifier_state(
     )
     uow = RecordingUow(selection, definition.document)
 
-    result = await ConstrainedRouter(lambda: uow, DoneGateway()).route_update(
+    result = await ConstrainedRouter(lambda: uow, TerminalGateway()).route_update(
         USER,
         IncomingText(body="help", replied_to_body="earlier words"),
         NOW,
     )
 
-    assert result.terminal is RoutingTerminal.DONE
+    assert result.terminal is RoutingTerminal.NO_MATCH
     assert uow.calls == ["selections", "persona", "conversation", "flow_version"]

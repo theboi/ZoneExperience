@@ -545,7 +545,7 @@ git push origin main
 - Consumes: `ResponseModel.route_and_plan`, assembled candidates, validated model results, and `PendingIntentService`.
 - Produces: `RoutedAnswer`, `RoutedInteractive`, `MultiIntentRoutingResult`, and `MultiIntentPolicy.partition`.
 
-- [ ] **Step 1: Write failing one-call routing tests**
+- [x] **Step 1: Write failing one-call routing tests**
 
 Test zero, one, and five returned matches. For every successful case assert `gateway.calls == 1`. Delete expectations involving shrinking candidate sets and `system.done`.
 
@@ -566,7 +566,7 @@ class MultiIntentRoutingResult:
     terminal: RoutingTerminal | None
 ```
 
-- [ ] **Step 2: Write failing local-policy tests**
+- [x] **Step 2: Write failing local-policy tests**
 
 Cover all combinations:
 
@@ -580,25 +580,25 @@ duplicate key -> protocol failure
 
 Assert local candidate order follows model match order and the policy never opens two interactive flows.
 
-- [ ] **Step 3: Run routing tests and verify RED**
+- [x] **Step 3: Run routing tests and verify RED**
 
 Run: `uv run pytest tests/unit/routing/test_policy.py tests/unit/routing/test_router.py tests/integration/routing/test_router_uow.py -q`
 
 Expected: FAIL because routing remains iterative and has no multi-intent partition.
 
-- [ ] **Step 4: Replace the iterative loop**
+- [x] **Step 4: Replace the iterative loop**
 
 Build one `MultiIntentRequest`, call `route_and_plan` once, map validated flow IDs back to local candidates, and pass ordered matches to `MultiIntentPolicy.partition`. Remove `RoutingTerminal.DONE`, `_RESERVED_TERMINALS`, the shrinking candidate dictionary, and routing `max_attempts`.
 
 The router must not write pending intents. It returns deferred candidates so application dispatch can mutate pending state in the same user transaction as the selected flow.
 
-- [ ] **Step 5: Run routing tests and verify GREEN**
+- [x] **Step 5: Run routing tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/routing/test_policy.py tests/unit/routing/test_router.py tests/integration/routing/test_router_uow.py -q`
 
 Expected: PASS with exactly one model operation per typed update.
 
-- [ ] **Step 6: Commit and push Task 6**
+- [x] **Step 6: Commit and push Task 6**
 
 Run:
 
