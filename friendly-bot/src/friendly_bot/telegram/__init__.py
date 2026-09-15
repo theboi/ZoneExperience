@@ -50,10 +50,22 @@ from friendly_bot.telegram.preflight import (
     TelegramPreflightError,
     TelegramWebhookGateway,
 )
+from friendly_bot.telegram.presentations import (
+    PresentationBuffer,
+    TelegramPhotoPresentation,
+    TelegramPresentation,
+    TelegramTextPresentation,
+)
 from friendly_bot.telegram.runtime_lock import (
     TelegramRuntimeAlreadyRunningError,
     TelegramRuntimeLock,
     TelegramRuntimeLockLostError,
+)
+from friendly_bot.telegram.sender import (
+    BestEffortTelegramSender,
+    DirectSendResult,
+    TelegramPresentationSender,
+    TelegramSendGateway,
 )
 
 
@@ -77,12 +89,15 @@ class TelegramGateway(
 
 
 __all__ = [
+    "BestEffortTelegramSender",
+    "DirectSendResult",
     "IncomingTelegramUpdate",
     "LocalTelegramAssetResolver",
     "OutboundDeliveryWorker",
     "OutboundTelegramMessage",
     "OutboundTelegramPhoto",
     "OutboundTelegramRequest",
+    "PresentationBuffer",
     "ResolvedTelegramPhoto",
     "TelegramActivityConfirmed",
     "TelegramActivityGateway",
@@ -98,18 +113,23 @@ __all__ = [
     "TelegramIngress",
     "TelegramInlineButton",
     "TelegramMessage",
+    "TelegramPhotoPresentation",
     "TelegramPoller",
     "TelegramPreflight",
     "TelegramPreflightError",
+    "TelegramPresentation",
+    "TelegramPresentationSender",
     "TelegramResponseUncertain",
     "TelegramRuntimeAlreadyRunningError",
     "TelegramRuntimeLock",
     "TelegramRuntimeLockLostError",
     "TelegramSendConfirmed",
+    "TelegramSendGateway",
     "TelegramSendOutcome",
     "TelegramSendRejected",
     "TelegramSendRetry",
     "TelegramSendUncertain",
+    "TelegramTextPresentation",
     "TelegramUpdates",
     "TelegramUser",
     "TelegramWebhookCleared",

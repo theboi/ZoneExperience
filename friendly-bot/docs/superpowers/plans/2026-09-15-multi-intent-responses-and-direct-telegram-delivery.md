@@ -140,7 +140,7 @@ git push origin main
 - Consumes: `TelegramApiClient.send`, `TelegramAssetResolver`, `TelegramInlineButton`, and existing typed send outcomes.
 - Produces: `TelegramPresentation`, `PresentationBuffer`, `BestEffortTelegramSender`, and `DirectSendResult`.
 
-- [ ] **Step 1: Write failing presentation and sender tests**
+- [x] **Step 1: Write failing presentation and sender tests**
 
 Test immutable text and photo presentations, ordered buffering, photo resolution, and one send attempt. Assert all failure outcomes are returned as stable categories and are not raised:
 
@@ -158,13 +158,13 @@ assert len(gateway.requests) == 2
 
 Add cases for `TelegramSendRetry`, `TelegramSendRejected`, `TelegramSendUncertain`, `httpx.TransportError`, malformed assets, and cancellation. Cancellation propagates; every ordinary failure increments `failed` and permits the next presentation attempt.
 
-- [ ] **Step 2: Run sender tests and verify RED**
+- [x] **Step 2: Run sender tests and verify RED**
 
 Run: `uv run pytest tests/unit/telegram/test_sender.py -q`
 
 Expected: FAIL because direct presentation types and sender do not exist.
 
-- [ ] **Step 3: Implement the presentation boundary**
+- [x] **Step 3: Implement the presentation boundary**
 
 Use these concrete public shapes:
 
@@ -213,13 +213,13 @@ class TelegramPresentationSender(Protocol):
 
 `BestEffortTelegramSender.send_all` must make one send call per item, resolve a photo immediately before its call, generate only an ephemeral correlation key for the existing transport DTO, and log stable outcome codes through an injected logger. It must not sleep, retry, or retain a request.
 
-- [ ] **Step 4: Run sender tests and verify GREEN**
+- [x] **Step 4: Run sender tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/telegram/test_sender.py tests/unit/telegram/test_client.py -q`
 
 Expected: PASS with existing Telegram response parsing unchanged.
 
-- [ ] **Step 5: Commit and push Task 2**
+- [x] **Step 5: Commit and push Task 2**
 
 Run:
 
