@@ -14,6 +14,7 @@ from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.domain.triggers import (
+    AnyOfDiscussionFlowTrigger,
     ButtonDiscussionFlowTrigger,
     MessageDiscussionFlowTrigger,
 )
@@ -181,6 +182,46 @@ def test_candidate_assembly_rejects_duplicate_configured_keys() -> None:
             },
             now=NOW,
         )
+
+
+def test_candidate_assembly_includes_one_any_of_message_candidate() -> None:
+    version = uuid4()
+    root = DiscussionFlow(
+        key="system.home",
+        next_flow_mode=NextFlowMode.CHECKPOINT,
+        next_flows=[
+            DiscussionFlow(
+                key="system.home.directions",
+                trigger=AnyOfDiscussionFlowTrigger(
+                    type="any_of",
+                    triggers=[
+                        ButtonDiscussionFlowTrigger(
+                            type="button", button_id="menu.directions"
+                        ),
+                        MessageDiscussionFlowTrigger(
+                            type="message", llm_gist="asks for directions"
+                        ),
+                    ],
+                ),
+                next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
+            )
+        ],
+    )
+
+    candidates = CandidateAssembler().assemble(
+        [_selection(version, "system.home", current=True)],
+        {
+            version: PublishedFlowDefinition(
+                document=root.model_dump(mode="json"),
+                flow_key_index={},
+            )
+        },
+        now=NOW,
+    )
+
+    assert [(candidate.key, candidate.gists) for candidate in candidates] == [
+        ("system.home.directions", ("asks for directions",))
+    ]
 
 
 async def test_router_selects_two_distinct_keys_then_done() -> None:

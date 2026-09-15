@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class PromptDTO(BaseModel):
@@ -11,12 +13,44 @@ class PromptDTO(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class RoutingPromptCandidate(PromptDTO):
-    """A configured key and human-written routing hint, without durable identity."""
+class ReplyTemplateSlot(PromptDTO):
+    """One deterministic model-visible paraphrase slot for authored copy."""
 
-    key: str = Field(min_length=1)
-    gist: str = Field(min_length=1)
+    slot_id: str = Field(pattern=r"^r[0-9]+$")
+    template: str = Field(min_length=1)
+    template_tokens: tuple[str, ...] = ()
+    urls: tuple[str, ...] = ()
+
+
+class RoutingPromptCandidate(PromptDTO):
+    """One prompt-safe typed-routing candidate without durable identity."""
+
+    flow_id: str = Field(min_length=1, validation_alias=AliasChoices("flow_id", "key"))
+    gists: tuple[str, ...] = Field(
+        min_length=1, validation_alias=AliasChoices("gists", "gist")
+    )
     context_label: str = Field(min_length=1)
+    multi_intent_mode: Literal["answer", "interactive"] = "interactive"
+    reply_slots: tuple[ReplyTemplateSlot, ...] = ()
+
+    @field_validator("gists", mode="before")
+    @classmethod
+    def normalize_legacy_gist(cls, value: object) -> object:
+        """Accept legacy key-selection fixtures until the gateway migration lands."""
+
+        return (value,) if isinstance(value, str) else value
+
+    @property
+    def key(self) -> str:
+        """Expose the legacy key-selection name during the staged migration."""
+
+        return self.flow_id
+
+    @property
+    def gist(self) -> str:
+        """Expose the first typed-routing gist for the legacy key selector."""
+
+        return self.gists[0]
 
 
 class KeySelectionRequest(PromptDTO):

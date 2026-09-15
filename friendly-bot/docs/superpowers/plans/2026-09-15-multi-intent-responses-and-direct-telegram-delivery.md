@@ -333,7 +333,7 @@ git push origin main
 - Consumes: `DiscussionFlow`, `OpenSelectionState`, immutable published definitions, `MultiIntentMode`, and template-token inspection.
 - Produces: `message_gists`, `ReplySlot`, `ReplySlotBinding`, `CandidateResponsePlan`, and expanded `RoutingCandidate` values.
 
-- [ ] **Step 1: Write failing candidate tests for `any_of`**
+- [x] **Step 1: Write failing candidate tests for `any_of`**
 
 Add focused cases proving:
 
@@ -351,17 +351,17 @@ assert message_gists(
 
 Also assert multiple message alternatives become one candidate with ordered gists, a button-only `any_of` is excluded, and duplicate child keys across open selections remain rejected.
 
-- [ ] **Step 2: Write failing reply-slot tests**
+- [x] **Step 2: Write failing reply-slot tests**
 
 Given a selected child with one `send_message`, two mutually exclusive action-event children, and one checkpoint return message, assert the planner emits deterministic `r0`, `r1`, `r2`, and `r3` slots. Assert fixed messages create no slot and event-only cycles remain rejected by publication.
 
-- [ ] **Step 3: Run planner and router tests and verify RED**
+- [x] **Step 3: Run planner and router tests and verify RED**
 
 Run: `uv run pytest tests/unit/responses/test_planner.py tests/unit/routing/test_router.py -q`
 
 Expected: FAIL because `CandidateAssembler` still accepts only direct message triggers and reply planning does not exist.
 
-- [ ] **Step 4: Implement candidate and reply-slot types**
+- [x] **Step 4: Implement candidate and reply-slot types**
 
 Use these prompt-safe types:
 
@@ -416,13 +416,13 @@ class ReplyPlan:
         return matches[0] if matches else None
 ```
 
-- [ ] **Step 5: Run planner and router tests and verify GREEN**
+- [x] **Step 5: Run planner and router tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/responses/test_planner.py tests/unit/routing/test_router.py -q`
 
 Expected: PASS with all eleven current `any_of` flow shapes covered.
 
-- [ ] **Step 6: Commit and push Task 4**
+- [x] **Step 6: Commit and push Task 4**
 
 Run:
 

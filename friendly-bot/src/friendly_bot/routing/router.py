@@ -12,9 +12,13 @@ from uuid import UUID
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState
-from friendly_bot.domain.triggers import MessageDiscussionFlowTrigger
 from friendly_bot.hyperparameters import ROUTING_MAX_ATTEMPTS
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
+from friendly_bot.responses.planner import (
+    CandidateResponsePlan,
+    message_gists,
+    plan_candidate_responses,
+)
 from friendly_bot.routing.contracts import KeySelectionRequest, RoutingPromptCandidate
 
 _RESERVED_TERMINALS = frozenset(
@@ -55,10 +59,18 @@ class RoutingCandidate:
     """One configured message choice available for a single update."""
 
     key: str
-    gist: str
+    gists: tuple[str, ...]
     source: str
     is_current: bool
     service_id: UUID | None
+    multi_intent_mode: str
+    response_plan: CandidateResponsePlan
+
+    @property
+    def gist(self) -> str:
+        """Keep the staged key-selection transport on the first typed gist."""
+
+        return self.gists[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +120,8 @@ class CandidateAssembler:
                     "open selection parent is absent from its definition"
                 )
             for child in parent.next_flows:
-                trigger = child.trigger
-                if not isinstance(trigger, MessageDiscussionFlowTrigger):
+                gists = message_gists(child.trigger)
+                if not gists:
                     continue
                 key = str(child.key)
                 if key in seen_keys:
@@ -118,10 +130,15 @@ class CandidateAssembler:
                 candidates.append(
                     RoutingCandidate(
                         key=key,
-                        gist=trigger.llm_gist,
+                        gists=gists,
                         source=_source_label(selection),
                         is_current=selection.is_current,
                         service_id=selection.service_id,
+                        multi_intent_mode=child.multi_intent_mode.value,
+                        response_plan=plan_candidate_responses(
+                            child,
+                            checkpoint=_checkpoint_for(selection, root, parent, child),
+                        ),
                     )
                 )
         return candidates
@@ -212,9 +229,15 @@ class ConstrainedRouter:
                 reply_body=incoming.replied_to_body,
                 candidates=tuple(
                     RoutingPromptCandidate(
-                        key=candidate.key,
-                        gist=candidate.gist,
+                        flow_id=candidate.key,
+                        gists=candidate.gists,
                         context_label=candidate.source,
+                        multi_intent_mode=(
+                            "answer"
+                            if candidate.multi_intent_mode == "answer"
+                            else "interactive"
+                        ),
+                        reply_slots=candidate.response_plan.reply_slots,
                     )
                     for candidate in remaining.values()
                 ),
@@ -279,6 +302,26 @@ def _source_label(selection: OpenSelectionState) -> str:
     if selection.is_global_interruptive:
         return "system"
     return "reusable"
+
+
+def _checkpoint_for(
+    selection: OpenSelectionState,
+    root: DiscussionFlow,
+    parent: DiscussionFlow,
+    child: DiscussionFlow,
+) -> DiscussionFlow | None:
+    """Find the checkpoint whose return actions can follow this immediate closure."""
+
+    if child.next_flow_mode.value == "checkpoint":
+        return child
+    if parent.next_flow_mode.value == "checkpoint":
+        return parent
+    if not selection.checkpoint_flow_keys:
+        return None
+    checkpoint = _find_flow(root, selection.checkpoint_flow_keys[-1])
+    if checkpoint is None:
+        raise RoutingError("open selection checkpoint is absent from its definition")
+    return checkpoint
 
 
 def _terminal_for(key: str) -> RoutingTerminal | None:
