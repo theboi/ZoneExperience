@@ -135,7 +135,7 @@
       "actions": [
         {
           "type": "send_message",
-          "text": "You’re checked in for Zone X. What would you like to do?"
+          "text": "Hey {{ user.name }}! Welcome to Zone X! What would you like help with?"
         },
         {
           "type": "send_buttons",
@@ -164,7 +164,7 @@
       "return_actions": [
         {
           "type": "send_message",
-          "text": "Is there anything else you’d like help with at Zone X?"
+          "text": "Is there anything else I can help you with at Zone X?"
         },
         {
           "type": "send_buttons",
@@ -208,7 +208,7 @@
           "actions": [
             {
               "type": "send_message",
-              "text": "Zone X is at The Star Performing Arts Centre, 1 Vista Exchange Green. Take the MRT to Buona Vista and follow signs to The Star Vista. Our team will be near the venue entrance to guide you."
+              "text": "Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange Green! Take the MRT to Buona Vista and follow the signs to The Star Vista. You'll meet our friendly welcome team in blue near the venue entrance to guide you."
             },
             {
               "type": "send_buttons",
