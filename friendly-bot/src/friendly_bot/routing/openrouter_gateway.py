@@ -10,20 +10,30 @@ from typing import Literal, Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from pydantic import SecretStr, ValidationError, field_validator
+from pydantic import SecretStr, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from friendly_bot.config.settings import PROJECT_DOTENV_FILE
+from friendly_bot.domain.templates import TEMPLATE_TOKEN_PATTERN, template_tokens, urls
 from friendly_bot.hyperparameters import (
+    OPENROUTER_HTTP_MAX_ATTEMPTS,
     OPENROUTER_MAX_RESPONSE_BYTES,
     OPENROUTER_MODEL,
     OPENROUTER_TIMEOUT_SECONDS,
-    ROUTING_MAX_ATTEMPTS,
 )
 from friendly_bot.routing.contracts import (
     KeySelectionRequest,
+    KnownFlowRequest,
     MatchRankingRequest,
+    MultiIntentMatches,
+    MultiIntentModelResult,
+    MultiIntentRequest,
+    MultiIntentTerminal,
     PersonaSummaryRequest,
+    PlannedFlowMatch,
+    PlannedReply,
+    ReplyTemplateSlot,
+    RoutingPromptCandidate,
 )
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -34,6 +44,23 @@ _KEY_SELECTION_INSTRUCTION = (
     "an urgent request for a trusted adult; do not infer it from an ambiguous "
     "request for help. Return exactly one JSON object with one key named 'key'. "
     "Its value must be one of allowed_keys. Return no prose."
+)
+_MULTI_INTENT_RESPONSE_INSTRUCTION = (
+    "Return only a JSON object. Choose every configured flow whose gist clearly "
+    "matches the current message, in relevance order, with no duplicate flow_id. "
+    "Return kind matches with one to five matches, or kind terminal with only "
+    "no_match or clarify_ambiguous_context. For every reply slot on a selected "
+    "flow, provide exactly one reply with the same slot_id. Paraphrase casually, "
+    "mostly in lower case, like a real youth texting. Use abbreviations modestly "
+    "and naturally. Do not add exaggerated slang, phonetic misspellings, emojis, "
+    "facts, promises, contacts, links, or safety advice. Preserve every fact, "
+    "qualification, instruction, official name, acronym, template variable, and "
+    "URL exactly. Never use an em dash. A safety flow requires an explicit "
+    "disclosure of immediate danger, abuse, self-harm, or an urgent request for "
+    "a trusted adult. Do not infer safety from ambiguous requests for help."
+)
+_MULTI_INTENT_RESULT_ADAPTER: TypeAdapter[MultiIntentModelResult] = TypeAdapter(
+    MultiIntentModelResult
 )
 OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION = (
     "disabled-globally-or-friendly-bot-key-excluded"
@@ -103,7 +130,7 @@ class OpenRouterSettings(BaseSettings):
 class _DecodedProviderValue:
     """A provider result already validated for its intended gateway operation."""
 
-    value: str
+    value: object
     capability: object = field(repr=False, compare=False)
 
 
@@ -252,7 +279,7 @@ def _decode_stdlib_success_response(
 
 
 class OpenRouterGateway:
-    """Select exactly one allowed key without ever producing user-facing prose."""
+    """Safely route typed updates and paraphrase only locally authored templates."""
 
     def __init__(
         self,
@@ -262,7 +289,7 @@ class OpenRouterGateway:
         model: str = OPENROUTER_MODEL,
         enforce_zdr: bool = True,
         timeout_seconds: float = OPENROUTER_TIMEOUT_SECONDS,
-        max_attempts: int = ROUTING_MAX_ATTEMPTS,
+        max_attempts: int = OPENROUTER_HTTP_MAX_ATTEMPTS,
         input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False,
     ) -> None:
         if timeout_seconds <= 0:
@@ -320,6 +347,40 @@ class OpenRouterGateway:
             request.allowed_keys,
         )
 
+    async def route_and_plan(
+        self, request: MultiIntentRequest
+    ) -> MultiIntentModelResult:
+        """Return every valid typed-flow match from exactly one provider operation."""
+
+        return self._multi_intent_value_or_raise(
+            await self._post(
+                self._payload(
+                    request,
+                    _MULTI_INTENT_RESPONSE_INSTRUCTION,
+                    response_format={"type": "json_object"},
+                    reasoning={"effort": "none"},
+                    max_tokens=1024,
+                ),
+                self._multi_intent_decoder(request),
+            )
+        )
+
+    async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch:
+        """Paraphrase the reply slots of one already-selected configured flow."""
+
+        return self._known_flow_value_or_raise(
+            await self._post(
+                self._payload(
+                    request,
+                    _MULTI_INTENT_RESPONSE_INSTRUCTION,
+                    response_format={"type": "json_object"},
+                    reasoning={"effort": "none"},
+                    max_tokens=1024,
+                ),
+                self._known_flow_decoder(request),
+            )
+        )
+
     async def summarize_persona(self, request: PersonaSummaryRequest) -> str:
         """Return a nonempty private persona summary or fail without a fallback."""
 
@@ -363,13 +424,23 @@ class OpenRouterGateway:
 
     def _payload(
         self,
-        request: KeySelectionRequest | PersonaSummaryRequest | MatchRankingRequest,
+        request: (
+            KeySelectionRequest
+            | KnownFlowRequest
+            | MatchRankingRequest
+            | MultiIntentRequest
+            | PersonaSummaryRequest
+        ),
         instruction: str,
+        *,
+        response_format: dict[str, str] | None = None,
+        reasoning: dict[str, str] | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, object]:
         provider: dict[str, object] = {"data_collection": "deny"}
         if self._enforce_zdr:
             provider = {"zdr": True, **provider}
-        return {
+        payload: dict[str, object] = {
             "model": self._model,
             "provider": provider,
             "messages": [
@@ -380,6 +451,13 @@ class OpenRouterGateway:
                 },
             ],
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if reasoning is not None:
+            payload["reasoning"] = reasoning
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        return payload
 
     async def _post(
         self, payload: dict[str, object], decoder: _ProviderPayloadDecoder
@@ -464,6 +542,42 @@ class OpenRouterGateway:
         raise GatewayProtocolError("OpenRouter returned an empty persona summary")
 
     @staticmethod
+    def _multi_intent_value_or_raise(
+        result: _DecodedProviderResult,
+    ) -> MultiIntentModelResult:
+        """Return only a decoder-validated multi-intent result without raw content."""
+
+        transport_failed = isinstance(result, _ProviderTransportFailure)
+        value: object | None = (
+            result.value if isinstance(result, _DecodedProviderValue) else None
+        )
+        del result
+        if transport_failed:
+            raise GatewayTransportError("OpenRouter request exhausted")
+        if isinstance(value, (MultiIntentMatches, MultiIntentTerminal)):
+            return value
+        value = None
+        raise GatewayProtocolError("OpenRouter response was not a multi-intent plan")
+
+    @staticmethod
+    def _known_flow_value_or_raise(
+        result: _DecodedProviderResult,
+    ) -> PlannedFlowMatch:
+        """Return only one decoder-validated known-flow plan without raw content."""
+
+        transport_failed = isinstance(result, _ProviderTransportFailure)
+        value: object | None = (
+            result.value if isinstance(result, _DecodedProviderValue) else None
+        )
+        del result
+        if transport_failed:
+            raise GatewayTransportError("OpenRouter request exhausted")
+        if isinstance(value, PlannedFlowMatch):
+            return value
+        value = None
+        raise GatewayProtocolError("OpenRouter response was not a known-flow plan")
+
+    @staticmethod
     def _key_decoder(allowed_keys: frozenset[str]) -> _ProviderPayloadDecoder:
         capability = object()
 
@@ -481,6 +595,64 @@ class OpenRouterGateway:
             if not isinstance(key, str) or key not in allowed_keys:
                 return _ProviderProtocolFailure(capability)
             return _DecodedProviderValue(key, capability)
+
+        return _ProviderPayloadDecoder(capability, decode)
+
+    @staticmethod
+    def _multi_intent_decoder(
+        request: MultiIntentRequest,
+    ) -> _ProviderPayloadDecoder:
+        capability = object()
+        candidates = {candidate.flow_id: candidate for candidate in request.candidates}
+        has_duplicate_candidate_ids = len(candidates) != len(request.candidates)
+
+        def decode(payload: object, capability: object) -> _DecodedProviderResult:
+            content = OpenRouterGateway._assistant_content(payload)
+            if content is None:
+                return _ProviderProtocolFailure(capability)
+            try:
+                parsed = json.loads(content)
+                proposed = _MULTI_INTENT_RESULT_ADAPTER.validate_python(parsed)
+            except (json.JSONDecodeError, ValidationError):
+                return _ProviderProtocolFailure(capability)
+            if isinstance(proposed, MultiIntentTerminal):
+                return _DecodedProviderValue(proposed, capability)
+            if has_duplicate_candidate_ids:
+                return _ProviderProtocolFailure(capability)
+            normalized = _normalize_matches(proposed.matches, candidates)
+            if normalized is None:
+                return _ProviderProtocolFailure(capability)
+            return _DecodedProviderValue(
+                MultiIntentMatches(kind="matches", matches=normalized), capability
+            )
+
+        return _ProviderPayloadDecoder(capability, decode)
+
+    @staticmethod
+    def _known_flow_decoder(request: KnownFlowRequest) -> _ProviderPayloadDecoder:
+        capability = object()
+        candidate = RoutingPromptCandidate(
+            flow_id=request.flow_id,
+            gists=("known configured flow",),
+            context_label="known",
+            reply_slots=request.reply_slots,
+        )
+
+        def decode(payload: object, capability: object) -> _DecodedProviderResult:
+            content = OpenRouterGateway._assistant_content(payload)
+            if content is None:
+                return _ProviderProtocolFailure(capability)
+            try:
+                parsed = json.loads(content)
+                proposed = PlannedFlowMatch.model_validate(parsed)
+            except (json.JSONDecodeError, ValidationError):
+                return _ProviderProtocolFailure(capability)
+            if proposed.flow_id != request.flow_id:
+                return _ProviderProtocolFailure(capability)
+            normalized = _normalize_match(proposed, candidate)
+            if normalized is None:
+                return _ProviderProtocolFailure(capability)
+            return _DecodedProviderValue(normalized, capability)
 
         return _ProviderPayloadDecoder(capability, decode)
 
@@ -519,3 +691,68 @@ class OpenRouterGateway:
             return content
         except Exception:  # noqa: BLE001 - untrusted provider mappings must not escape
             return None
+
+
+def _normalize_matches(
+    proposed_matches: tuple[PlannedFlowMatch, ...],
+    candidates: Mapping[str, RoutingPromptCandidate],
+) -> tuple[PlannedFlowMatch, ...] | None:
+    """Validate every selected flow against its local candidate and reply slots."""
+
+    if len(candidates) == 0:
+        return None
+    normalized: list[PlannedFlowMatch] = []
+    seen_flow_ids: set[str] = set()
+    for proposed in proposed_matches:
+        if proposed.flow_id in seen_flow_ids:
+            return None
+        seen_flow_ids.add(proposed.flow_id)
+        candidate = candidates.get(proposed.flow_id)
+        if candidate is None:
+            return None
+        match = _normalize_match(proposed, candidate)
+        if match is None:
+            return None
+        normalized.append(match)
+    return tuple(normalized)
+
+
+def _normalize_match(
+    proposed: PlannedFlowMatch, candidate: RoutingPromptCandidate
+) -> PlannedFlowMatch | None:
+    """Require all and only expected slots, falling back only unsafe copy."""
+
+    slots = {slot.slot_id: slot for slot in candidate.reply_slots}
+    replies = {reply.slot_id: reply for reply in proposed.replies}
+    if (
+        len(slots) != len(candidate.reply_slots)
+        or len(replies) != len(proposed.replies)
+        or set(replies) != set(slots)
+    ):
+        return None
+    return PlannedFlowMatch(
+        flow_id=proposed.flow_id,
+        replies=tuple(
+            PlannedReply(
+                slot_id=slot.slot_id,
+                text=(
+                    reply.text
+                    if _reply_preserves_template(slot, reply.text)
+                    else slot.template
+                ),
+            )
+            for slot_id, slot in slots.items()
+            for reply in (replies[slot_id],)
+        ),
+    )
+
+
+def _reply_preserves_template(slot: ReplyTemplateSlot, text: str) -> bool:
+    """Accept only a bounded paraphrase that preserves protected local syntax."""
+
+    if chr(0x2014) in text:
+        return False
+    if template_tokens(text) != slot.template_tokens or urls(text) != slot.urls:
+        return False
+    remaining = TEMPLATE_TOKEN_PATTERN.sub("", text)
+    return "{{" not in remaining and "}}" not in remaining

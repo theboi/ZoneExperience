@@ -64,6 +64,54 @@ class KeySelectionRequest(PromptDTO):
     candidates: tuple[RoutingPromptCandidate, ...] = ()
 
 
+class PlannedReply(PromptDTO):
+    """One model-proposed replacement for a deterministic reply slot."""
+
+    slot_id: str = Field(pattern=r"^r[0-9]+$")
+    text: str = Field(min_length=1, max_length=4096)
+
+
+class PlannedFlowMatch(PromptDTO):
+    """One configured flow and every reply slot it must supply."""
+
+    flow_id: str = Field(min_length=1)
+    replies: tuple[PlannedReply, ...] = ()
+
+
+class MultiIntentMatches(PromptDTO):
+    """One ordered, bounded set of model-selected configured flow matches."""
+
+    kind: Literal["matches"]
+    matches: tuple[PlannedFlowMatch, ...] = Field(min_length=1, max_length=5)
+
+
+class MultiIntentTerminal(PromptDTO):
+    """The only terminal outcomes for a one-shot typed routing operation."""
+
+    kind: Literal["terminal"]
+    terminal: Literal["no_match", "clarify_ambiguous_context"]
+
+
+type MultiIntentModelResult = MultiIntentMatches | MultiIntentTerminal
+
+
+class MultiIntentRequest(PromptDTO):
+    """The complete safe input for one all-at-once typed routing operation."""
+
+    persona: str = ""
+    messages: tuple[str, ...] = ()
+    reply_body: str | None = None
+    candidates: tuple[RoutingPromptCandidate, ...] = Field(min_length=1)
+
+
+class KnownFlowRequest(PromptDTO):
+    """The safe request for paraphrasing one already-determined configured flow."""
+
+    flow_id: str = Field(min_length=1)
+    reply_slots: tuple[ReplyTemplateSlot, ...] = ()
+    messages: tuple[str, ...] = ()
+
+
 class PersonaSummaryRequest(PromptDTO):
     """The safe, content-only input for one durable persona summary."""
 

@@ -444,7 +444,7 @@ git push origin main
 - Consumes: `RoutingPromptCandidate`, `ReplyTemplateSlot`, existing privacy attestation, model setting, provider setting, and bounded-response transport decoder.
 - Produces: `MultiIntentRequest`, `KnownFlowRequest`, `PlannedReply`, `PlannedFlowMatch`, `MultiIntentMatches`, `MultiIntentTerminal`, `route_and_plan`, and `plan_known_flow`.
 
-- [ ] **Step 1: Write failing strict-decoder tests**
+- [x] **Step 1: Write failing strict-decoder tests**
 
 Define target DTOs:
 
@@ -484,7 +484,7 @@ class KnownFlowRequest(PromptDTO):
 
 Test unknown fields, duplicate flow IDs, unknown flow IDs, more than five matches, missing or extra slots, duplicate slots, changed template tokens, changed URL order, new brace syntax, oversized text, and em dash rejection. Assert a valid selected flow with one invalid paraphrase falls back only that slot to its authored template.
 
-- [ ] **Step 2: Write failing prompt-layout and request-count tests**
+- [x] **Step 2: Write failing prompt-layout and request-count tests**
 
 Capture two payloads with different histories and candidates. Assert:
 
@@ -498,13 +498,13 @@ assert first["messages"][1] != second["messages"][1]
 
 Assert candidate keys never appear in the system message or response-format declaration. Assert one valid provider response causes exactly one HTTP request.
 
-- [ ] **Step 3: Run gateway tests and verify RED**
+- [x] **Step 3: Run gateway tests and verify RED**
 
 Run: `uv run pytest tests/unit/routing/test_openrouter_gateway.py -q`
 
 Expected: FAIL because only key-only decoding is implemented.
 
-- [ ] **Step 4: Implement the stable instruction and local validator**
+- [x] **Step 4: Implement the stable instruction and local validator**
 
 Replace `_KEY_SELECTION_INSTRUCTION` with a byte-stable `_MULTI_INTENT_RESPONSE_INSTRUCTION`. It must encode every style and preservation rule from the design spec, including the ban on em dashes. Dynamic request JSON remains the second message.
 
@@ -512,17 +512,17 @@ Keep the existing bounded raw-response decoder and secret-clearing behavior. Use
 
 Split constants so provider transport retries use `OPENROUTER_HTTP_MAX_ATTEMPTS = 2`; remove routing-semantic reuse of `ROUTING_MAX_ATTEMPTS`.
 
-- [ ] **Step 5: Preserve other gateway capabilities**
+- [x] **Step 5: Preserve other gateway capabilities**
 
 Keep persona summary and match ranking operations working. Give each operation its own decoder capability token and static instruction. Do not route persona or match ranking through the multi-intent decoder.
 
-- [ ] **Step 6: Run gateway and privacy tests and verify GREEN**
+- [x] **Step 6: Run gateway and privacy tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/routing/test_openrouter_gateway.py tests/unit/persona tests/unit/routing -q`
 
 Expected: PASS with no raw response body, user text, or secret retained by raised errors.
 
-- [ ] **Step 7: Commit and push Task 5**
+- [x] **Step 7: Commit and push Task 5**
 
 Run:
 

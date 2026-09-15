@@ -17,14 +17,19 @@ import pytest
 from pydantic import ValidationError
 
 from friendly_bot.hyperparameters import (
+    OPENROUTER_HTTP_MAX_ATTEMPTS,
     OPENROUTER_MAX_RESPONSE_BYTES,
-    ROUTING_MAX_ATTEMPTS,
 )
 from friendly_bot.routing.contracts import (
     KeySelectionRequest,
     MatchPromptCandidate,
     MatchRankingRequest,
+    MultiIntentMatches,
+    MultiIntentRequest,
     PersonaSummaryRequest,
+    PlannedFlowMatch,
+    PlannedReply,
+    ReplyTemplateSlot,
     RoutingPromptCandidate,
 )
 from friendly_bot.routing.openrouter_gateway import (
@@ -181,6 +186,34 @@ def _gateway(client: FakeHttpxClient) -> OpenRouterGateway:
     )
 
 
+def _multi_intent_request() -> MultiIntentRequest:
+    return MultiIntentRequest(
+        messages=("where is the zone and what happens there?",),
+        candidates=(
+            RoutingPromptCandidate(
+                flow_id="system.directions",
+                gists=("asks for directions",),
+                context_label="current",
+                multi_intent_mode="answer",
+                reply_slots=(
+                    ReplyTemplateSlot(
+                        slot_id="r0",
+                        template="The Zone is at {{ service.name }}. Map: https://example.com/map",
+                        template_tokens=("service.name",),
+                        urls=("https://example.com/map",),
+                    ),
+                ),
+            ),
+            RoutingPromptCandidate(
+                flow_id="system.expect",
+                gists=("asks what to expect",),
+                context_label="current",
+                multi_intent_mode="answer",
+            ),
+        ),
+    )
+
+
 def _traceback_gateway_locals_hold_sentinel(
     error: BaseException, raw_sentinel: bytes
 ) -> bool:
@@ -236,6 +269,207 @@ def _assert_closed_error_has_no_provider_bytes(
     assert all(raw_text not in str(argument) for argument in error.args)
     assert vars(error) == {}
     assert not _traceback_gateway_locals_hold_sentinel(error, raw_sentinel)
+
+
+async def test_route_and_plan_returns_all_valid_matches_in_one_request() -> None:
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "kind": "matches",
+                                        "matches": [
+                                            {
+                                                "flow_id": "system.directions",
+                                                "replies": [
+                                                    {
+                                                        "slot_id": "r0",
+                                                        "text": "The Zone is at {{ service.name }}. Map: https://example.com/map",
+                                                    }
+                                                ],
+                                            },
+                                            {
+                                                "flow_id": "system.expect",
+                                                "replies": [],
+                                            },
+                                        ],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+
+    result = await _gateway(client).route_and_plan(_multi_intent_request())
+
+    assert result == MultiIntentMatches(
+        kind="matches",
+        matches=(
+            PlannedFlowMatch(
+                flow_id="system.directions",
+                replies=(
+                    PlannedReply(
+                        slot_id="r0",
+                        text="The Zone is at {{ service.name }}. Map: https://example.com/map",
+                    ),
+                ),
+            ),
+            PlannedFlowMatch(flow_id="system.expect"),
+        ),
+    )
+    assert len(client.requests) == 1
+    payload = client.requests[0]["json"]
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["reasoning"] == {"effort": "none"}
+    assert payload["max_tokens"] == 1024
+
+
+async def test_route_and_plan_falls_back_only_an_invalid_paraphrase_slot() -> None:
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "kind": "matches",
+                                        "matches": [
+                                            {
+                                                "flow_id": "system.directions",
+                                                "replies": [
+                                                    {
+                                                        "slot_id": "r0",
+                                                        "text": (
+                                                            "the zone is at {{ service.name }} "
+                                                            + chr(0x2014)
+                                                            + " check the map"
+                                                        ),
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+
+    result = await _gateway(client).route_and_plan(
+        MultiIntentRequest(
+            candidates=(_multi_intent_request().candidates[0],),
+        )
+    )
+
+    assert isinstance(result, MultiIntentMatches)
+    assert result.matches[0].replies[0].text == (
+        "The Zone is at {{ service.name }}. Map: https://example.com/map"
+    )
+
+
+async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
+    first_client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"kind":"terminal","terminal":"no_match"}'
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+    second_client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": '{"kind":"terminal","terminal":"no_match"}'
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+    first_request = _multi_intent_request()
+    second_request = MultiIntentRequest(
+        messages=("is there a toilet?",),
+        candidates=(
+            RoutingPromptCandidate(
+                flow_id="service.toilet",
+                gists=("asks for a toilet",),
+                context_label="service",
+                multi_intent_mode="answer",
+            ),
+        ),
+    )
+
+    await _gateway(first_client).route_and_plan(first_request)
+    await _gateway(second_client).route_and_plan(second_request)
+
+    first_payload = first_client.requests[0]["json"]
+    second_payload = second_client.requests[0]["json"]
+    assert first_payload["messages"][0] == second_payload["messages"][0]
+    assert first_payload["messages"][1] != second_payload["messages"][1]
+    assert "system.directions" not in first_payload["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"kind": "matches", "matches": []},
+        {
+            "kind": "matches",
+            "matches": [
+                {"flow_id": "system.directions", "replies": []},
+            ],
+        },
+        {
+            "kind": "matches",
+            "matches": [
+                {"flow_id": "unknown.flow", "replies": []},
+            ],
+        },
+        {"kind": "terminal", "terminal": "no_match", "extra": True},
+    ],
+)
+async def test_route_and_plan_rejects_malformed_or_incomplete_results(
+    content: dict[str, object],
+) -> None:
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {"choices": [{"message": {"content": json.dumps(content)}}]},
+            )
+        ]
+    )
+
+    with pytest.raises(GatewayProtocolError):
+        await _gateway(client).route_and_plan(_multi_intent_request())
 
 
 @pytest.mark.parametrize(
@@ -620,7 +854,7 @@ async def test_gateway_detaches_interrupted_stdlib_response_body_from_any_operat
     """Interrupted stdlib body reads must retry and not leak provider bytes."""
 
     raw_partial = b"raw-provider-incomplete-read-sentinel"
-    expected_attempts = ROUTING_MAX_ATTEMPTS
+    expected_attempts = OPENROUTER_HTTP_MAX_ATTEMPTS
     attempts = 0
     read_limits: list[int | None] = []
 
@@ -689,7 +923,7 @@ async def test_gateway_normalizes_stdlib_timeout_to_static_transport_error(
             KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
         )
 
-    assert attempts == ROUTING_MAX_ATTEMPTS
+    assert attempts == OPENROUTER_HTTP_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, timeout_detail.encode())
 
 
@@ -820,8 +1054,10 @@ async def test_gateway_does_not_read_or_retain_actual_http_error_body_in_traceba
     with pytest.raises(GatewayTransportError) as raised:
         await operation(gateway)
 
-    assert attempts == ROUTING_MAX_ATTEMPTS
-    assert [body.read_calls for body in error_bodies] == [0] * ROUTING_MAX_ATTEMPTS
+    assert attempts == OPENROUTER_HTTP_MAX_ATTEMPTS
+    assert [body.read_calls for body in error_bodies] == [
+        0
+    ] * OPENROUTER_HTTP_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
 
 
@@ -856,12 +1092,14 @@ async def test_gateway_normalizes_incomplete_json_without_traceback_retention(
     """An interrupted decoded response must become a detached transport error."""
 
     raw_body = b"raw-provider-json-incomplete-read-sentinel"
-    client = FakeHttpxClient([IncompleteJsonResponse(raw_body)] * ROUTING_MAX_ATTEMPTS)
+    client = FakeHttpxClient(
+        [IncompleteJsonResponse(raw_body)] * OPENROUTER_HTTP_MAX_ATTEMPTS
+    )
 
     with pytest.raises(GatewayTransportError) as raised:
         await operation(_gateway(client))
 
-    assert len(client.requests) == ROUTING_MAX_ATTEMPTS
+    assert len(client.requests) == OPENROUTER_HTTP_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_body)
 
 
@@ -1063,7 +1301,7 @@ async def test_gateway_closes_stdlib_discard_failure_without_raw_traceback(
     with pytest.raises(GatewayTransportError) as raised:
         await operation(gateway)
 
-    assert attempts == ROUTING_MAX_ATTEMPTS
+    assert attempts == OPENROUTER_HTTP_MAX_ATTEMPTS
     _assert_closed_error_has_no_provider_bytes(raised.value, raw_sentinel)
 
 
@@ -1383,7 +1621,7 @@ async def test_gateway_closes_without_attaching_raw_transport_data_after_retry_e
 ) -> None:
     """A transient provider failure must retry exactly the bounded count without leaks."""
 
-    client = FakeHttpxClient([outcome] * ROUTING_MAX_ATTEMPTS)
+    client = FakeHttpxClient([outcome] * OPENROUTER_HTTP_MAX_ATTEMPTS)
     gateway = _gateway(client)
 
     with pytest.raises(GatewayTransportError) as raised:
@@ -1391,7 +1629,7 @@ async def test_gateway_closes_without_attaching_raw_transport_data_after_retry_e
             KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
         )
 
-    assert len(client.requests) == ROUTING_MAX_ATTEMPTS
+    assert len(client.requests) == OPENROUTER_HTTP_MAX_ATTEMPTS
     assert "response-sentinel-503" not in str(raised.value)
     assert "transport-sentinel" not in str(raised.value)
     assert raised.value.__cause__ is None
@@ -1430,6 +1668,10 @@ async def test_gateway_clears_outbound_payload_after_transport_exhaustion() -> N
             KeySelectionRequest(allowed_keys={"flow.a"}, messages=["private prompt"])
         )
 
-    assert len(client.payloads) == ROUTING_MAX_ATTEMPTS
-    assert [dict(headers) for headers in client.headers] == [{}] * ROUTING_MAX_ATTEMPTS
-    assert [dict(payload) for payload in client.payloads] == [{}] * ROUTING_MAX_ATTEMPTS
+    assert len(client.payloads) == OPENROUTER_HTTP_MAX_ATTEMPTS
+    assert [dict(headers) for headers in client.headers] == [
+        {}
+    ] * OPENROUTER_HTTP_MAX_ATTEMPTS
+    assert [dict(payload) for payload in client.payloads] == [
+        {}
+    ] * OPENROUTER_HTTP_MAX_ATTEMPTS
