@@ -23,6 +23,7 @@ from friendly_bot.persistence.repositories import (
     OpenSelectionRepository,
     OperationalLoginRepository,
     OperationalProfileRepository,
+    PendingIntentRepository,
     PersonaRepository,
     PollStateRepository,
     ServiceRepository,
@@ -35,6 +36,7 @@ from friendly_bot.persistence.repositories import (
     SqlAlchemyOpenSelectionRepository,
     SqlAlchemyOperationalLoginRepository,
     SqlAlchemyOperationalProfileRepository,
+    SqlAlchemyPendingIntentRepository,
     SqlAlchemyPersonaRepository,
     SqlAlchemyPollStateRepository,
     SqlAlchemyServiceRepository,
@@ -64,6 +66,7 @@ class UnitOfWork:
         self._updates: UpdateRepository | None = None
         self._conversations: ConversationRepository | None = None
         self._personas: PersonaRepository | None = None
+        self._pending_intents: PendingIntentRepository | None = None
         self._matches: MatchRepository | None = None
         self._open_selections: OpenSelectionRepository | None = None
         self._deliveries: DeliveryRepository | None = None
@@ -87,6 +90,9 @@ class UnitOfWork:
         self._updates = SqlAlchemyUpdateRepository(self._session)
         self._conversations = SqlAlchemyConversationRepository(self._session)
         self._personas = SqlAlchemyPersonaRepository(self._session)
+        self._pending_intents = SqlAlchemyPendingIntentRepository(
+            self._session, self._locked_user_ids
+        )
         self._matches = SqlAlchemyMatchRepository(self._session)
         self._open_selections = SqlAlchemyOpenSelectionRepository(
             self._session, self._locked_user_ids
@@ -167,6 +173,10 @@ class UnitOfWork:
     @property
     def personas(self) -> PersonaRepository:
         return self._required_repository(self._personas)
+
+    @property
+    def pending_intents(self) -> PendingIntentRepository:
+        return self._required_repository(self._pending_intents)
 
     @property
     def matches(self) -> MatchRepository:

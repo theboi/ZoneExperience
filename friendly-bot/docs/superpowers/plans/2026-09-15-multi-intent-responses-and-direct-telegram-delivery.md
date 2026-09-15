@@ -247,7 +247,7 @@ git push origin main
 - Consumes: the existing user lock, published flow-version identity, service identity, and unit-of-work pattern.
 - Produces: `PendingFlowIntentRecord`, `NewPendingFlowIntent`, `PendingIntentRepository`, and `PendingIntentService`.
 
-- [ ] **Step 1: Write failing repository and service tests**
+- [x] **Step 1: Write failing repository and service tests**
 
 Cover ordered append, duplicate refresh, five-item cap, 24-hour expiry, user isolation, deletion, and required user locking. Use these records:
 
@@ -270,13 +270,13 @@ class PendingFlowIntentRecord(NewPendingFlowIntent):
 
 Assert a duplicate `(user_id, flow_version_id, flow_key)` moves to the end and refreshes expiry rather than creating another row.
 
-- [ ] **Step 2: Run pending-intent tests and verify RED**
+- [x] **Step 2: Run pending-intent tests and verify RED**
 
 Run: `uv run pytest tests/unit/intents/test_service.py tests/integration/persistence/test_pending_intents.py -q`
 
 Expected: FAIL because the table, repository, and service do not exist.
 
-- [ ] **Step 3: Add the table and repository**
+- [x] **Step 3: Add the table and repository**
 
 Create `pending_flow_intents` with UUID primary key, foreign keys to `users`, `flow_versions`, and nullable `services`, integer `position`, timezone-aware `created_at` and `expires_at`, a unique constraint on `(user_id, flow_version_id, flow_key)`, and an index on `(user_id, position)`.
 
@@ -299,7 +299,7 @@ class PendingIntentRepository(Protocol):
 
 All mutations verify that `UnitOfWork.lock_user(user_id)` has already run, matching open-selection mutation policy.
 
-- [ ] **Step 4: Implement the bounded service**
+- [x] **Step 4: Implement the bounded service**
 
 `PendingIntentService.enqueue` uses `expires_at = now + timedelta(hours=24)` and `max_per_user = 5`. When full, it drops the oldest active pending row before appending. `list_active` deletes expired rows first. `remove` deletes one exact record.
 

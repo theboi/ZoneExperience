@@ -461,6 +461,42 @@ class PersonaCursor(Base):
     )
 
 
+class PendingFlowIntent(Base):
+    """One bounded, ordered interactive flow reference awaiting later resumption."""
+
+    __tablename__ = "pending_flow_intents"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "flow_version_id",
+            "flow_key",
+            name="uq_pending_flow_intents_user_version_key",
+        ),
+        Index("ix_pending_flow_intents_user_position", "user_id", "position"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    flow_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    flow_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("flow_versions.id"), nullable=False
+    )
+    service_id: Mapped[UUID | None] = mapped_column(ForeignKey("services.id"))
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class TelegramPollState(Base):
     """The singleton durable Telegram polling offset."""
 

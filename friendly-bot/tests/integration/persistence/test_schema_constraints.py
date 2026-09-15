@@ -228,6 +228,7 @@ async def test_metadata_creates_every_f01_durable_table(
         "operational_profiles",
         "outbound_deliveries",
         "outbound_delivery_attempts",
+        "pending_flow_intents",
         "persona_cursors",
         "processed_telegram_updates",
         "service_attendances",

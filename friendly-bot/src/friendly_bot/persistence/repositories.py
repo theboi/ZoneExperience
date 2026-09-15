@@ -36,6 +36,7 @@ from friendly_bot.persistence.models import (
     OperationalRole,
     OutboundDelivery,
     OutboundDeliveryAttempt,
+    PendingFlowIntent,
     PersonaCursor,
     ProcessedTelegramUpdate,
     Service,
@@ -202,6 +203,26 @@ class PersonaCursorRecord:
     persona: str
     last_message_id: UUID | None
     generated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class NewPendingFlowIntent:
+    """A queued interactive flow reference with no retained free-form input."""
+
+    user_id: UUID
+    flow_key: str
+    flow_version_id: UUID
+    service_id: UUID | None
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PendingFlowIntentRecord(NewPendingFlowIntent):
+    """One persisted pending flow reference in user-owned execution order."""
+
+    id: UUID
+    position: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,6 +463,20 @@ class PersonaRepository(Protocol):
         last_message_id: UUID,
         generated_at: datetime,
     ) -> None: ...
+
+
+class PendingIntentRepository(Protocol):
+    async def list_active(
+        self, user_id: UUID, *, now: datetime
+    ) -> list[PendingFlowIntentRecord]: ...
+
+    async def append(
+        self, intent: NewPendingFlowIntent, *, max_per_user: int
+    ) -> PendingFlowIntentRecord: ...
+
+    async def delete(self, intent_id: UUID) -> None: ...
+
+    async def delete_expired(self, user_id: UUID, *, now: datetime) -> int: ...
 
 
 class MatchRepository(Protocol):
@@ -801,6 +836,19 @@ def _cursor_record(row: PersonaCursor) -> PersonaCursorRecord:
         persona=row.persona,
         last_message_id=row.last_message_id,
         generated_at=row.generated_at,
+    )
+
+
+def _pending_intent_record(row: PendingFlowIntent) -> PendingFlowIntentRecord:
+    return PendingFlowIntentRecord(
+        id=row.id,
+        user_id=row.user_id,
+        flow_key=row.flow_key,
+        flow_version_id=row.flow_version_id,
+        service_id=row.service_id,
+        position=row.position,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
     )
 
 
@@ -1559,6 +1607,131 @@ class SqlAlchemyPersonaRepository:
                 updated_at=generated_at,
             )
         )
+
+
+class SqlAlchemyPendingIntentRepository:
+    """Persist bounded per-user interactive flow references behind the user lock."""
+
+    def __init__(self, session: AsyncSession, locked_user_ids: set[UUID]) -> None:
+        self._session = session
+        self._locked_user_ids = locked_user_ids
+
+    async def list_active(
+        self, user_id: UUID, *, now: datetime
+    ) -> list[PendingFlowIntentRecord]:
+        rows = await self._session.scalars(
+            select(PendingFlowIntent)
+            .where(
+                PendingFlowIntent.user_id == user_id,
+                PendingFlowIntent.expires_at > now,
+            )
+            .order_by(PendingFlowIntent.position, PendingFlowIntent.id)
+        )
+        return [_pending_intent_record(row) for row in rows]
+
+    async def append(
+        self, intent: NewPendingFlowIntent, *, max_per_user: int
+    ) -> PendingFlowIntentRecord:
+        self._require_locked(intent.user_id)
+        _validate_pending_intent(intent, max_per_user=max_per_user)
+        await self._delete_expired(intent.user_id, now=intent.created_at)
+        duplicate = await self._session.scalar(
+            select(PendingFlowIntent)
+            .where(
+                PendingFlowIntent.user_id == intent.user_id,
+                PendingFlowIntent.flow_version_id == intent.flow_version_id,
+                PendingFlowIntent.flow_key == intent.flow_key,
+            )
+            .with_for_update()
+        )
+        next_position = await self._next_position(intent.user_id)
+        if duplicate is not None:
+            duplicate.service_id = intent.service_id
+            duplicate.position = next_position
+            duplicate.created_at = intent.created_at
+            duplicate.expires_at = intent.expires_at
+            await self._session.flush()
+            return _pending_intent_record(duplicate)
+
+        rows = list(
+            await self._session.scalars(
+                select(PendingFlowIntent)
+                .where(PendingFlowIntent.user_id == intent.user_id)
+                .order_by(PendingFlowIntent.position, PendingFlowIntent.id)
+                .with_for_update()
+            )
+        )
+        for row in rows[: max(0, len(rows) - max_per_user + 1)]:
+            await self._session.delete(row)
+        record = PendingFlowIntent(
+            user_id=intent.user_id,
+            flow_key=intent.flow_key,
+            flow_version_id=intent.flow_version_id,
+            service_id=intent.service_id,
+            position=next_position,
+            created_at=intent.created_at,
+            expires_at=intent.expires_at,
+        )
+        self._session.add(record)
+        await self._session.flush()
+        return _pending_intent_record(record)
+
+    async def delete(self, intent_id: UUID) -> None:
+        row = await self._session.scalar(
+            select(PendingFlowIntent)
+            .where(PendingFlowIntent.id == intent_id)
+            .with_for_update()
+        )
+        if row is None:
+            return
+        self._require_locked(row.user_id)
+        await self._session.delete(row)
+
+    async def delete_expired(self, user_id: UUID, *, now: datetime) -> int:
+        self._require_locked(user_id)
+        return await self._delete_expired(user_id, now=now)
+
+    async def _delete_expired(self, user_id: UUID, *, now: datetime) -> int:
+        deleted = await self._session.scalars(
+            delete(PendingFlowIntent)
+            .where(
+                PendingFlowIntent.user_id == user_id,
+                PendingFlowIntent.expires_at <= now,
+            )
+            .returning(PendingFlowIntent.id)
+        )
+        return len(list(deleted))
+
+    async def _next_position(self, user_id: UUID) -> int:
+        current = await self._session.scalar(
+            select(func.max(PendingFlowIntent.position)).where(
+                PendingFlowIntent.user_id == user_id
+            )
+        )
+        return 0 if current is None else int(current) + 1
+
+    def _require_locked(self, user_id: UUID) -> None:
+        if user_id not in self._locked_user_ids:
+            raise RuntimeError("pending intent user is not locked")
+
+
+def _validate_pending_intent(
+    intent: NewPendingFlowIntent, *, max_per_user: int
+) -> None:
+    if not isinstance(intent.user_id, UUID) or not isinstance(
+        intent.flow_version_id, UUID
+    ):
+        raise TypeError("pending intent identity is invalid")
+    if intent.service_id is not None and not isinstance(intent.service_id, UUID):
+        raise TypeError("pending intent service identity is invalid")
+    if type(intent.flow_key) is not str or not intent.flow_key:
+        raise ValueError("pending intent flow key must be nonempty")
+    if type(max_per_user) is not int or max_per_user < 1:
+        raise ValueError("pending intent maximum must be positive")
+    if intent.created_at.tzinfo is None or intent.expires_at.tzinfo is None:
+        raise ValueError("pending intent timestamps must be timezone-aware")
+    if intent.expires_at <= intent.created_at:
+        raise ValueError("pending intent expiry must be after creation")
 
 
 class SqlAlchemyMatchRepository:

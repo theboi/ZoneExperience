@@ -39,6 +39,7 @@ F01_TABLES = {
     "operational_profiles",
     "outbound_deliveries",
     "outbound_delivery_attempts",
+    "pending_flow_intents",
     "persona_cursors",
     "processed_telegram_updates",
     "service_attendances",
@@ -279,6 +280,41 @@ async def test_alembic_head_exposes_nullable_service_interaction_closure(
         )
 
     assert columns["interaction_closed_at"]["nullable"] is True
+
+
+async def test_pending_intent_revision_is_reversible(
+    migrated_database: MigratedDatabase,
+) -> None:
+    """Structured pending work must upgrade and downgrade without residual state."""
+
+    _run_alembic(
+        migrated_database.database_url, "downgrade", "0004_service_interaction_closure"
+    )
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            before = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+    assert "pending_flow_intents" not in before["tables"]
+
+    _run_alembic(migrated_database.database_url, "upgrade", "head")
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            after = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+    assert set(after["columns"]["pending_flow_intents"]) == {
+        "id",
+        "user_id",
+        "flow_key",
+        "flow_version_id",
+        "service_id",
+        "position",
+        "created_at",
+        "expires_at",
+    }
 
 
 async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
