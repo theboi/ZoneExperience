@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from subprocess import run
 
@@ -10,6 +11,7 @@ from friendly_bot.app import load_zone_x_seed
 from friendly_bot.domain.actions import (
     ReturnToNearestCheckpointAction,
     SendButtonsAction,
+    SendMessageFixedAction,
 )
 from friendly_bot.domain.triggers import (
     AnyOfDiscussionFlowTrigger,
@@ -105,3 +107,69 @@ def test_zone_x_json_is_semantically_equal_to_canonical_yaml() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_seed_marks_answer_fragments_and_protected_copy_as_fixed() -> None:
+    """Breaks if multi-intent answers can mutate state or protected copy varies."""
+
+    seed = json.loads((PROJECT_ROOT / "seeds" / "zone-x.json").read_text())
+    roots = [
+        seed["system_global_root_excerpt"],
+        seed["service"]["service_global_root"],
+        *(timestamp["root_flow"] for timestamp in seed["service"]["timestamps"]),
+    ]
+    flows = [
+        flow
+        for root in roots
+        for flow in _walk_flows(root)
+    ]
+    answer_keys = {
+        "system.global.menu.timings",
+        "system.global.menu.directions",
+        "system.global.menu.expect",
+        "system.global.menu.zone",
+        "system.global.menu.connect",
+        "service.zone_x.what_to_expect",
+        "service.zone_x.service.toilet",
+        "service.zone_x.service.who_is_jesus",
+        "service.zone_x.service.unknown_question",
+    }
+
+    assert {
+        flow["key"]
+        for flow in flows
+        if flow.get("multi_intent_mode") == "answer"
+    } == answer_keys
+    assert all(
+        not flow["next_flows"]
+        for flow in flows
+        if flow["key"] in answer_keys
+    )
+    assert all(
+        action["type"] == "send_message_fixed"
+        for flow in flows
+        for action in flow["actions"]
+        if re.search(r"https?://", action.get("text", ""))
+    )
+
+    root = load_zone_x_seed(PROJECT_ROOT / "seeds" / "zone-x.json")
+    safety = next(
+        flow for flow in root.system_global_root_excerpt.next_flows
+        if flow.key == "system.global.safety"
+    )
+    no_responder = next(
+        flow for flow in safety.next_flows
+        if flow.key == "system.global.safety.no_responder"
+    )
+    assert isinstance(safety.actions[0], SendMessageFixedAction)
+    assert isinstance(no_responder.actions[0], SendMessageFixedAction)
+
+
+def _walk_flows(root: dict[str, object]) -> list[dict[str, object]]:
+    flows: list[dict[str, object]] = []
+    stack = [root]
+    while stack:
+        flow = stack.pop()
+        flows.append(flow)
+        stack.extend(reversed(flow["next_flows"]))
+    return flows

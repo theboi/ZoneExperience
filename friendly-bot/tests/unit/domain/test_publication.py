@@ -10,8 +10,15 @@ import pytest
 from fixtures import action_event_flow, valid_system_checkpoint, valid_timestamp_root
 from pydantic import ValidationError
 
-from friendly_bot.domain.actions import parse_action
-from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
+from friendly_bot.domain.actions import (
+    SendMessageFixedAction,
+    parse_action,
+)
+from friendly_bot.domain.flows import (
+    DiscussionFlow,
+    MultiIntentMode,
+    NextFlowMode,
+)
 from friendly_bot.domain.publication import (
     FlowPublicationError,
     RootKind,
@@ -19,6 +26,7 @@ from friendly_bot.domain.publication import (
     canonical_json,
     validate_for_publication,
 )
+from friendly_bot.domain.templates import template_tokens, urls
 from friendly_bot.domain.triggers import parse_trigger
 
 SCHEMA = TemplateContextSchema({"user.name"})
@@ -380,3 +388,69 @@ def test_template_filters_allow_only_optional() -> None:
     assert validate_for_publication(optional, SCHEMA, RootKind.SYSTEM)
     with pytest.raises(FlowPublicationError):
         validate_for_publication(unsupported, SCHEMA, RootKind.SYSTEM)
+
+
+def test_fixed_message_action_and_template_inspection_are_closed_and_ordered() -> None:
+    """Breaks if fixed copy cannot coexist with paraphrasable flow copy."""
+
+    action = parse_action(
+        {
+            "type": "send_message_fixed",
+            "text": "Map: https://example.com/zone for {{ user.name }}",
+        }
+    )
+
+    assert isinstance(action, SendMessageFixedAction)
+    assert template_tokens(action.text) == ("user.name",)
+    assert urls(action.text) == ("https://example.com/zone",)
+
+
+def test_flow_defaults_to_interactive_multi_intent_mode() -> None:
+    """Breaks if unclassified flow authors accidentally create answer fragments."""
+
+    flow = DiscussionFlow(
+        key="system.default_mode",
+        next_flow_mode=NextFlowMode.ALLOW_MANY,
+    )
+
+    assert flow.multi_intent_mode is MultiIntentMode.INTERACTIVE
+
+
+@pytest.mark.parametrize(
+    "invalid_answer",
+    [
+        DiscussionFlow(
+            key="system.answer.stateful",
+            trigger=parse_trigger({"type": "message", "llm_gist": "stateful"}),
+            actions=[parse_action({"type": "return_to_nearest_checkpoint"})],
+            next_flow_mode=NextFlowMode.ALLOW_MANY,
+            multi_intent_mode=MultiIntentMode.ANSWER,
+        ),
+        DiscussionFlow(
+            key="system.answer.with_child",
+            trigger=parse_trigger({"type": "message", "llm_gist": "child"}),
+            actions=[parse_action({"type": "send_message", "text": "Answer"})],
+            next_flows=[
+                DiscussionFlow(
+                    key="system.answer.with_child.follow_up",
+                    trigger=parse_trigger(
+                        {"type": "message", "llm_gist": "follow up"}
+                    ),
+                    next_flow_mode=NextFlowMode.ALLOW_MANY,
+                )
+            ],
+            next_flow_mode=NextFlowMode.ALLOW_MANY,
+            multi_intent_mode=MultiIntentMode.ANSWER,
+        ),
+    ],
+)
+def test_publication_rejects_non_fragment_answer_flows(
+    invalid_answer: DiscussionFlow,
+) -> None:
+    """Breaks if an answer flow can mutate or open conversational state."""
+
+    root = valid_system_checkpoint()
+    root.next_flows.append(invalid_answer)
+
+    with pytest.raises(FlowPublicationError):
+        validate_for_publication(root, SCHEMA, RootKind.SYSTEM)

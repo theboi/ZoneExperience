@@ -133,6 +133,7 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         select_service_attendance,
         send_buttons,
         send_message,
+        send_message_fixed,
         send_photo,
         send_service_choice_buttons,
         share_human_contact,
@@ -159,6 +160,7 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         SelectServiceAttendanceAction,
         SendButtonsAction,
         SendMessageAction,
+        SendMessageFixedAction,
         SendPhotoAction,
         SendServiceChoiceButtonsAction,
         ShareHumanContactAction,
@@ -167,6 +169,7 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
 
     registry = ActionExecutorRegistry()
     registry.register(SendMessageAction, send_message)
+    registry.register(SendMessageFixedAction, send_message_fixed)
     registry.register(SendButtonsAction, send_buttons)
     registry.register(SendServiceChoiceButtonsAction, send_service_choice_buttons)
     registry.register(SendPhotoAction, send_photo)

@@ -49,6 +49,13 @@ class SendMessageAction(DiscussionActionBase):
     text: NonEmptyText
 
 
+class SendMessageFixedAction(DiscussionActionBase):
+    """Requester-facing copy that must be sent exactly as authored."""
+
+    type: Literal["send_message_fixed"]
+    text: NonEmptyText
+
+
 class SendButtonsAction(DiscussionActionBase):
     type: Literal["send_buttons"]
     service_bound: bool
@@ -192,6 +199,7 @@ class ReturnToNearestCheckpointAction(DiscussionActionBase):
 
 DiscussionAction = Annotated[
     SendMessageAction
+    | SendMessageFixedAction
     | SendButtonsAction
     | SendServiceChoiceButtonsAction
     | SendPhotoAction

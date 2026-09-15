@@ -27,6 +27,7 @@ from friendly_bot.domain.actions import (
     SelectServiceAttendanceAction,
     SendButtonsAction,
     SendMessageAction,
+    SendMessageFixedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
     ShareHumanContactAction,
@@ -49,6 +50,14 @@ from friendly_bot.telegram import (
 
 async def send_message(action: SendMessageAction, context: ActionContext) -> None:
     """Buffer one configured requester-facing text presentation."""
+
+    await context.queue_text_presentation(context.render(action.text))
+
+
+async def send_message_fixed(
+    action: SendMessageFixedAction, context: ActionContext
+) -> None:
+    """Buffer fixed requester-facing text with only local template rendering."""
 
     await context.queue_text_presentation(context.render(action.text))
 

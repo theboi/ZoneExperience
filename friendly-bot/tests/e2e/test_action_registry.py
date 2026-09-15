@@ -31,6 +31,7 @@ from friendly_bot.domain.actions import (
     EndServiceInteractionsAction,
     SendButtonsAction,
     SendMessageAction,
+    SendMessageFixedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
     ShowActivityAction,
@@ -147,7 +148,7 @@ def test_registry_can_be_exactly_complete_for_f01_action_classes() -> None:
         registry.register(action_type, _do_nothing)
 
     registry.assert_complete(action_types)
-    assert len(action_types) == 24
+    assert len(action_types) == 25
 
 
 def test_composed_registry_registers_every_declared_action_exactly_once() -> None:
@@ -181,6 +182,35 @@ def test_registry_rejects_duplicate_missing_and_extra_executors() -> None:
         )
     with pytest.raises(ActionRegistryCompletenessError):
         registry.assert_complete(concrete_action_types(DiscussionAction))
+
+
+async def test_fixed_message_executor_renders_and_queues_exact_copy(
+    now: datetime,
+) -> None:
+    """Breaks if fixed configured copy is sent through paraphrase behavior."""
+
+    context, uow = _context(now)
+    action = SendMessageFixedAction(
+        type="send_message_fixed",
+        text="Call a trusted adult now, {{ user.display_name }}.",
+    )
+
+    registry = build_action_registry(
+        ActionDependencies(
+            telegram=context.telegram,
+            services=cast(ServiceAttendanceService, object()),
+            lifecycle=cast(ServiceLifecycleService, object()),
+            matching=cast(MatchingService, object()),
+            diagnostics=cast(DiagnosticRepository, object()),
+        )
+    )
+    await registry.resolve(action)(action, context)
+    await context.flush_presentation()
+
+    assert uow.deliveries.enqueued[0].payload == {
+        "text": "Call a trusted adult now, Ryan.",
+        "buttons": [],
+    }
 
 
 async def test_context_renders_locally_queues_delivery_and_allows_one_event(

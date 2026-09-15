@@ -47,7 +47,7 @@
 - Consumes: existing `DiscussionAction`, `DiscussionFlow`, `ActionExecutorRegistry`, and local template rendering.
 - Produces: `SendMessageFixedAction`, `MultiIntentMode`, shared template-token inspection, publication validation for answer flows, and an audited seed.
 
-- [ ] **Step 1: Write failing domain and publication tests**
+- [x] **Step 1: Write failing domain and publication tests**
 
 Add exact parsing and publication tests for these target models:
 
@@ -64,13 +64,13 @@ class MultiIntentMode(StrEnum):
 
 Assert that `DiscussionFlow.multi_intent_mode` defaults to `INTERACTIVE`. Assert publication rejects an answer flow with any non-presentation action, any child, or any return action. The only legal answer-flow action classes are `SendMessageAction`, `SendMessageFixedAction`, `SendButtonsAction`, and `SendPhotoAction`.
 
-- [ ] **Step 2: Run the domain tests and verify RED**
+- [x] **Step 2: Run the domain tests and verify RED**
 
 Run: `uv run pytest tests/unit/domain/test_publication.py tests/e2e/test_action_registry.py tests/e2e/test_zone_x_seed.py -q`
 
 Expected: FAIL because the new action discriminator, mode, executor registration, and publication rules do not exist.
 
-- [ ] **Step 3: Extract template inspection and implement the closed models**
+- [x] **Step 3: Extract template inspection and implement the closed models**
 
 Move the shared regular expression into `domain/templates.py` and expose exact pure functions:
 
@@ -91,7 +91,7 @@ Add `SendMessageFixedAction` to the discriminated union, register a `send_messag
 
 Add `multi_intent_mode: MultiIntentMode = MultiIntentMode.INTERACTIVE` to `DiscussionFlow`. Publication must enforce the answer-flow restrictions described in Step 1.
 
-- [ ] **Step 4: Audit and update the Zone X seed**
+- [x] **Step 4: Audit and update the Zone X seed**
 
 Mark these direct typed-answer nodes with `"multi_intent_mode": "answer"`:
 
@@ -111,13 +111,13 @@ Convert the following categories to `send_message_fixed`: safety and no-responde
 
 Add seed assertions that every URL-bearing action and every safety subtree message is fixed.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run: `uv run pytest tests/unit/domain/test_publication.py tests/e2e/test_action_registry.py tests/e2e/test_zone_x_seed.py -q`
 
 Expected: PASS with registry completeness and immutable publication hashing updated for the new fields.
 
-- [ ] **Step 6: Commit and push Task 1**
+- [x] **Step 6: Commit and push Task 1**
 
 Run:
 

@@ -96,7 +96,7 @@ system_global_root_excerpt:
           this for greetings, ordinary questions, general distress, ambiguous
           requests for help, jokes, or figurative language.
       actions:
-        - type: send_message
+        - type: send_message_fixed
           text: >-
             Thank you for telling me. You do not have to handle this alone.
             I’m finding a trusted person who can support you now.
@@ -131,7 +131,7 @@ system_global_root_excerpt:
             type: action_event
             event_key: safety_match.not_found
           actions:
-            - type: send_message
+            - type: send_message_fixed
               text: >-
                 I can’t reach a trusted person through the bot right now. If you
                 may be in immediate danger, call emergency services or go to a
@@ -157,6 +157,7 @@ system_global_root_excerpt:
       next_flows: []
 
     - key: system.global.menu.timings
+      multi_intent_mode: answer
       trigger:
         type: any_of
         triggers:
@@ -167,13 +168,14 @@ system_global_root_excerpt:
               The person asks for service timings, youth group times, or when a
               youth service happens.
       actions:
-        - type: send_message
+        - type: send_message_fixed
           text: "Service timings placeholder: add the timings for each youth group here."
       next_flow_mode: ALLOW_MANY
       return_actions: []
       next_flows: []
 
     - key: system.global.menu.directions
+      multi_intent_mode: answer
       trigger:
         type: any_of
         triggers:
@@ -184,7 +186,7 @@ system_global_root_excerpt:
               The person asks for directions to Star Performing Arts Centre, The
               Star Vista, or The Zone.
       actions:
-        - type: send_message
+        - type: send_message_fixed
           text: >-
             The Zone is at The Star Performing Arts Centre, 1 Vista Exchange
             Green. Take the MRT to Buona Vista and follow the signs to The Star
@@ -194,6 +196,7 @@ system_global_root_excerpt:
       next_flows: []
 
     - key: system.global.menu.expect
+      multi_intent_mode: answer
       trigger:
         type: any_of
         triggers:
@@ -214,6 +217,7 @@ system_global_root_excerpt:
       next_flows: []
 
     - key: system.global.menu.zone
+      multi_intent_mode: answer
       trigger:
         type: any_of
         triggers:
@@ -233,6 +237,7 @@ system_global_root_excerpt:
       next_flows: []
 
     - key: system.global.menu.connect
+      multi_intent_mode: answer
       trigger:
         type: any_of
         triggers:
@@ -243,7 +248,7 @@ system_global_root_excerpt:
               The person wants to get connected with The Zone or asks for a
               connection link.
       actions:
-        - type: send_message
+        - type: send_message_fixed
           text: "Get connected with The Zone: https://bit.ly//thezonenew"
       next_flow_mode: ALLOW_MANY
       return_actions: []
@@ -305,7 +310,7 @@ service:
                 The person asks how to get to Star Performing Arts Centre or
                 where Zone X is being held.
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: >-
               Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange
               Green! Take the MRT to Buona Vista and follow the signs to The Star
@@ -324,13 +329,14 @@ service:
               type: button
               button_id: zone_x.directions.open_map
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: "Map: {{ service.map_url }}"
             next_flow_mode: ONE_AND_ONCE_ONLY
             return_actions: []
             next_flows: []
 
       - key: service.zone_x.what_to_expect
+        multi_intent_mode: answer
         trigger:
           type: any_of
           triggers:
@@ -400,7 +406,7 @@ service:
                   type: action_event
                   event_key: human_match.found
                 actions:
-                  - type: send_message
+                  - type: send_message_fixed
                     text: >-
                       I found {{ matched_server.name }} from
                       {{ matched_server.cg_name }}. How would you like to meet?
@@ -483,7 +489,7 @@ service:
                               type: action_event
                               event_key: human_match.not_found
                             actions:
-                              - type: send_message
+                              - type: send_message_fixed
                                 text: >-
                                   Sorry, nobody else is available to meet right
                                   now. Please speak to a Zone team member at the
@@ -562,7 +568,7 @@ service:
                               type: action_event
                               event_key: human_match.not_found
                             actions:
-                              - type: send_message
+                              - type: send_message_fixed
                                 text: >-
                                   Sorry, nobody else is available to meet right
                                   now. Please speak to a Zone team member at the
@@ -576,7 +582,7 @@ service:
                   type: action_event
                   event_key: human_match.not_found
                 actions:
-                  - type: send_message
+                  - type: send_message_fixed
                     text: >-
                       Sorry, nobody is available to meet right now. Please try
                       again later or speak to a Zone team member at the venue.
@@ -644,7 +650,7 @@ service:
                       type: action_event
                       event_key: service_attendance.ended
                     actions:
-                      - type: send_message
+                      - type: send_message_fixed
                         text: "Sorry, the service is over!"
                     next_flow_mode: ONE_AND_ONCE_ONLY
                     return_actions: []
@@ -654,7 +660,7 @@ service:
               type: action_event
               event_key: service_attendance.none_available
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: "There are no other ongoing services to switch to."
             next_flow_mode: ONE_AND_ONCE_ONLY
             return_actions: []
@@ -668,7 +674,7 @@ service:
         attendance_status: latecomer
       - type: enter_service_checkpoint
         flow_key: service.zone_x.home
-      - type: send_message
+      - type: send_message_fixed
         text: >-
           Yes, you can still join Zone X. Service has started, so head to the
           venue entrance and ask a Zone team member to help you find a seat.
@@ -695,7 +701,7 @@ service:
             asset_key: zone_x_poster_2026
             caption: >-
               Zone X is happening on 18 October at The Star Performing Arts
-              Centre. You can come alone—we’ll help you meet someone friendly.
+              Centre. You can come alone. We’ll help you meet someone friendly.
           - type: send_buttons
             service_bound: true
             buttons:
@@ -725,7 +731,7 @@ service:
               type: button
               button_id: zone_x.marketing.directions
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: >-
                   Take the MRT to Buona Vista and follow signs to The Star Vista.
                   Map: {{ service.map_url }}
@@ -740,7 +746,7 @@ service:
         key: service.zone_x.timestamp.one_day_before
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: >-
               Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star
               Performing Arts Centre.
@@ -759,7 +765,7 @@ service:
               type: button
               button_id: zone_x.one_day.directions
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: "Map: {{ service.map_url }}"
             next_flow_mode: ONE_AND_ONCE_ONLY
             return_actions: []
@@ -772,7 +778,7 @@ service:
         key: service.zone_x.timestamp.doors_open
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: "Doors are open for Zone X. Are you here with us?"
           - type: send_buttons
             service_bound: true
@@ -816,7 +822,7 @@ service:
                   type: action_event
                   event_key: service_attendance.ended
                 actions:
-                  - type: send_message
+                  - type: send_message_fixed
                     text: "Sorry, the service is over!"
                 next_flow_mode: ONE_AND_ONCE_ONLY
                 return_actions: []
@@ -829,7 +835,7 @@ service:
         key: service.zone_x.timestamp.service_questions
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: "Service has started. You can ask a question here at any time."
           - type: send_buttons
             service_bound: true
@@ -851,6 +857,7 @@ service:
                 text: Who is Jesus?
         next_flows:
           - key: service.zone_x.service.toilet
+            multi_intent_mode: answer
             trigger:
               type: any_of
               triggers:
@@ -860,7 +867,7 @@ service:
                   llm_gist: >-
                     The person asks where the toilet or restroom is.
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: >-
                   The nearest toilets are on Level 4 beside the lifts. Ask a Zone
                   team member if you’d like someone to show you.
@@ -869,6 +876,7 @@ service:
             next_flows: []
 
           - key: service.zone_x.service.who_is_jesus
+            multi_intent_mode: answer
             trigger:
               type: any_of
               triggers:
@@ -879,7 +887,7 @@ service:
                     The person asks who Jesus is or what Christians believe about
                     Jesus.
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: >-
                   At NCC, we believe Jesus is the Son of God who came to reveal
                   God’s love and give us new life through His death and
@@ -895,13 +903,14 @@ service:
             next_flows: []
 
           - key: service.zone_x.service.unknown_question
+            multi_intent_mode: answer
             trigger:
               type: message
               llm_gist: >-
                 The person asks a genuine question about service that is not
                 covered by a more specific open question flow.
             actions:
-              - type: send_message
+              - type: send_message_fixed
                 text: >-
                   I don’t have an approved answer for that question, but I can
                   connect you with someone who can talk with you.
@@ -921,7 +930,7 @@ service:
         key: service.zone_x.timestamp.after_service
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: "Service has ended. What would you like to do next?"
           - type: send_buttons
             service_bound: true
@@ -971,7 +980,7 @@ service:
         key: service.zone_x.timestamp.thank_you
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: >-
               Thank you for coming to Zone X today. We’re glad you were here.
               You can still use the service options until 6:00 pm.
@@ -986,7 +995,7 @@ service:
         key: service.zone_x.timestamp.interaction_ends
         trigger: null
         actions:
-          - type: send_message
+          - type: send_message_fixed
             text: >-
               Zone X has ended, but you can still ask for directions to Star or
               learn more about NCC here anytime.
@@ -1144,4 +1153,4 @@ Please pay particular attention to these concrete assumptions:
 10. **Interaction expiry:** at 6:00 pm, Zone X flows and buttons expire even if an earlier prompt is unanswered. The long-term conversation remains stored.
 11. **Default errors:** an executing flow may define a direct `error` event child. If it does not, the harness sends the hardcoded message “Sorry, an error occurred. Error log: {telegram_user_id}.” without searching any ancestor. This sender is application code, not a root flow or configurable JSON. The Telegram user ID is rendered locally and never sent to OpenRouter.
 
-If any assumption above is wrong, changing it may affect the product specification or architecture masterplan—not just this example.
+If any assumption above is wrong, changing it may affect the product specification or architecture masterplan, not just this example.

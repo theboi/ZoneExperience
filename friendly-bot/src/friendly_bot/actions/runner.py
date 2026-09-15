@@ -12,6 +12,7 @@ from friendly_bot.domain.actions import (
     DiscussionAction,
     SendButtonsAction,
     SendMessageAction,
+    SendMessageFixedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
 )
@@ -214,6 +215,7 @@ def _is_presentation_action(action: DiscussionAction) -> bool:
         action,
         (
             SendMessageAction,
+            SendMessageFixedAction,
             SendButtonsAction,
             SendServiceChoiceButtonsAction,
             SendPhotoAction,

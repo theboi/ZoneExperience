@@ -13,8 +13,20 @@ from typing import Any, cast
 
 from pydantic import JsonValue, ValidationError
 
-from friendly_bot.domain.actions import DiscussionAction, parse_action
-from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
+from friendly_bot.domain.actions import (
+    DiscussionAction,
+    SendButtonsAction,
+    SendMessageAction,
+    SendMessageFixedAction,
+    SendPhotoAction,
+    parse_action,
+)
+from friendly_bot.domain.flows import (
+    DiscussionFlow,
+    MultiIntentMode,
+    NextFlowMode,
+)
+from friendly_bot.domain.templates import TEMPLATE_TOKEN_PATTERN
 from friendly_bot.domain.triggers import (
     ActionEventDiscussionFlowTrigger,
     DiscussionFlowTrigger,
@@ -23,10 +35,6 @@ from friendly_bot.domain.triggers import (
 
 _STABLE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]{2,127}$")
 _DOTTED_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
-_TEMPLATE_PATTERN = re.compile(
-    r"\{\{\s*([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"
-    r"\s*(?:\|\s*optional)?\s*\}\}"
-)
 
 
 class FlowPublicationError(ValueError):
@@ -225,6 +233,27 @@ def _validate_node_shape(node: DiscussionFlow, *, is_root: bool) -> None:
         raise FlowPublicationError(
             f"flow {node.key} may only declare return actions at a checkpoint"
         )
+    if node.multi_intent_mode is MultiIntentMode.ANSWER:
+        _validate_answer_flow(node)
+
+
+def _validate_answer_flow(node: DiscussionFlow) -> None:
+    """Allow answer fragments to emit presentations but never alter branch state."""
+
+    answer_action_types = (
+        SendMessageAction,
+        SendMessageFixedAction,
+        SendButtonsAction,
+        SendPhotoAction,
+    )
+    if node.next_flows:
+        raise FlowPublicationError(f"answer flow {node.key} may not have children")
+    if node.return_actions:
+        raise FlowPublicationError(f"answer flow {node.key} may not have return actions")
+    if not all(isinstance(action, answer_action_types) for action in node.actions):
+        raise FlowPublicationError(
+            f"answer flow {node.key} contains a non-presentation action"
+        )
 
 
 def _validate_trigger(trigger: DiscussionFlowTrigger | None, *, flow_key: str) -> None:
@@ -302,8 +331,8 @@ def _validate_templates(
     value: object, context_schema: TemplateContextSchema, flow_key: str
 ) -> None:
     if isinstance(value, str):
-        matches = list(_TEMPLATE_PATTERN.finditer(value))
-        without_templates = _TEMPLATE_PATTERN.sub("", value)
+        matches = list(TEMPLATE_TOKEN_PATTERN.finditer(value))
+        without_templates = TEMPLATE_TOKEN_PATTERN.sub("", value)
         if "{{" in without_templates or "}}" in without_templates:
             raise FlowPublicationError(f"flow {flow_key} has a malformed template")
         for match in matches:

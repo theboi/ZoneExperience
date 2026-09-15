@@ -19,6 +19,13 @@ class NextFlowMode(StrEnum):
     CHECKPOINT = "checkpoint"
 
 
+class MultiIntentMode(StrEnum):
+    """Whether typed routing may render a flow beside other matched flows."""
+
+    ANSWER = "answer"
+    INTERACTIVE = "interactive"
+
+
 class DiscussionFlow(BaseModel):
     """One node in a recursively authored discussion-flow definition."""
 
@@ -26,6 +33,7 @@ class DiscussionFlow(BaseModel):
 
     key: StableKey
     trigger: DiscussionFlowTrigger | None = None
+    multi_intent_mode: MultiIntentMode = MultiIntentMode.INTERACTIVE
     actions: list[DiscussionAction] = Field(default_factory=list)
     next_flows: list[DiscussionFlow] = Field(default_factory=list)
     next_flow_mode: NextFlowMode

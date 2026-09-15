@@ -95,7 +95,7 @@
         },
         "actions": [
           {
-            "type": "send_message",
+            "type": "send_message_fixed",
             "text": "Thank you for telling me. You do not have to handle this alone. I’m finding a trusted person who can support you now."
           },
           {
@@ -146,7 +146,7 @@
             },
             "actions": [
               {
-                "type": "send_message",
+                "type": "send_message_fixed",
                 "text": "I can’t reach a trusted person through the bot right now. If you may be in immediate danger, call emergency services or go to a trusted adult near you now."
               },
               {
@@ -185,6 +185,7 @@
       },
       {
         "key": "system.global.menu.timings",
+        "multi_intent_mode": "answer",
         "trigger": {
           "type": "any_of",
           "triggers": [
@@ -200,7 +201,7 @@
         },
         "actions": [
           {
-            "type": "send_message",
+            "type": "send_message_fixed",
             "text": "Service timings placeholder: add the timings for each youth group here."
           }
         ],
@@ -210,6 +211,7 @@
       },
       {
         "key": "system.global.menu.directions",
+        "multi_intent_mode": "answer",
         "trigger": {
           "type": "any_of",
           "triggers": [
@@ -225,7 +227,7 @@
         },
         "actions": [
           {
-            "type": "send_message",
+            "type": "send_message_fixed",
             "text": "The Zone is at The Star Performing Arts Centre, 1 Vista Exchange Green. Take the MRT to Buona Vista and follow the signs to The Star Vista. Map: https://maps.google.com/?q=The+Star+Performing+Arts+Centre"
           }
         ],
@@ -235,6 +237,7 @@
       },
       {
         "key": "system.global.menu.expect",
+        "multi_intent_mode": "answer",
         "trigger": {
           "type": "any_of",
           "triggers": [
@@ -260,6 +263,7 @@
       },
       {
         "key": "system.global.menu.zone",
+        "multi_intent_mode": "answer",
         "trigger": {
           "type": "any_of",
           "triggers": [
@@ -285,6 +289,7 @@
       },
       {
         "key": "system.global.menu.connect",
+        "multi_intent_mode": "answer",
         "trigger": {
           "type": "any_of",
           "triggers": [
@@ -300,7 +305,7 @@
         },
         "actions": [
           {
-            "type": "send_message",
+            "type": "send_message_fixed",
             "text": "Get connected with The Zone: https://bit.ly//thezonenew"
           }
         ],
@@ -399,7 +404,7 @@
           },
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange Green! Take the MRT to Buona Vista and follow the signs to The Star Vista. You'll meet our friendly welcome team in blue near the venue entrance to guide you."
             },
             {
@@ -426,7 +431,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "Map: {{ service.map_url }}"
                 }
               ],
@@ -442,6 +447,7 @@
         },
         {
           "key": "service.zone_x.what_to_expect",
+          "multi_intent_mode": "answer",
           "trigger": {
             "type": "any_of",
             "triggers": [
@@ -546,7 +552,7 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message",
+                      "type": "send_message_fixed",
                       "text": "I found {{ matched_server.name }} from {{ matched_server.cg_name }}. How would you like to meet?"
                     },
                     {
@@ -670,7 +676,7 @@
                               },
                               "actions": [
                                 {
-                                  "type": "send_message",
+                                  "type": "send_message_fixed",
                                   "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue."
                                 }
                               ],
@@ -787,7 +793,7 @@
                               },
                               "actions": [
                                 {
-                                  "type": "send_message",
+                                  "type": "send_message_fixed",
                                   "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue."
                                 }
                               ],
@@ -813,7 +819,7 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message",
+                      "type": "send_message_fixed",
                       "text": "Sorry, nobody is available to meet right now. Please try again later or speak to a Zone team member at the venue."
                     }
                   ],
@@ -936,7 +942,7 @@
                       },
                       "actions": [
                         {
-                          "type": "send_message",
+                          "type": "send_message_fixed",
                           "text": "Sorry, the service is over!"
                         }
                       ],
@@ -960,7 +966,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "There are no other ongoing services to switch to."
                 }
               ],
@@ -989,7 +995,7 @@
           "flow_key": "service.zone_x.home"
         },
         {
-          "type": "send_message",
+          "type": "send_message_fixed",
           "text": "Yes, you can still join Zone X. Service has started, so head to the venue entrance and ask a Zone team member to help you find a seat."
         },
         {
@@ -1027,7 +1033,7 @@
             {
               "type": "send_photo",
               "asset_key": "zone_x_poster_2026",
-              "caption": "Zone X is happening on 18 October at The Star Performing Arts Centre. You can come alone—we’ll help you meet someone friendly."
+              "caption": "Zone X is happening on 18 October at The Star Performing Arts Centre. You can come alone. We’ll help you meet someone friendly."
             },
             {
               "type": "send_buttons",
@@ -1080,7 +1086,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "Take the MRT to Buona Vista and follow signs to The Star Vista. Map: {{ service.map_url }}"
                 }
               ],
@@ -1104,7 +1110,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing Arts Centre."
             },
             {
@@ -1134,7 +1140,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "Map: {{ service.map_url }}"
                 }
               ],
@@ -1158,7 +1164,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Doors are open for Zone X. Are you here with us?"
             },
             {
@@ -1242,7 +1248,7 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message",
+                      "type": "send_message_fixed",
                       "text": "Sorry, the service is over!"
                     }
                   ],
@@ -1268,7 +1274,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Service has started. You can ask a question here at any time."
             },
             {
@@ -1310,6 +1316,7 @@
           "next_flows": [
             {
               "key": "service.zone_x.service.toilet",
+              "multi_intent_mode": "answer",
               "trigger": {
                 "type": "any_of",
                 "triggers": [
@@ -1325,7 +1332,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "The nearest toilets are on Level 4 beside the lifts. Ask a Zone team member if you’d like someone to show you."
                 }
               ],
@@ -1339,6 +1346,7 @@
             },
             {
               "key": "service.zone_x.service.who_is_jesus",
+              "multi_intent_mode": "answer",
               "trigger": {
                 "type": "any_of",
                 "triggers": [
@@ -1354,7 +1362,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "At NCC, we believe Jesus is the Son of God who came to reveal God’s love and give us new life through His death and resurrection. I can connect you with someone if you’d like to talk about this personally."
                 },
                 {
@@ -1378,13 +1386,14 @@
             },
             {
               "key": "service.zone_x.service.unknown_question",
+              "multi_intent_mode": "answer",
               "trigger": {
                 "type": "message",
                 "llm_gist": "The person asks a genuine question about service that is not covered by a more specific open question flow."
               },
               "actions": [
                 {
-                  "type": "send_message",
+                  "type": "send_message_fixed",
                   "text": "I don’t have an approved answer for that question, but I can connect you with someone who can talk with you."
                 },
                 {
@@ -1418,7 +1427,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Service has ended. What would you like to do next?"
             },
             {
@@ -1510,7 +1519,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Thank you for coming to Zone X today. We’re glad you were here. You can still use the service options until 6:00 pm."
             }
           ],
@@ -1532,7 +1541,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message",
+              "type": "send_message_fixed",
               "text": "Zone X has ended, but you can still ask for directions to Star or learn more about NCC here anytime."
             },
             {
