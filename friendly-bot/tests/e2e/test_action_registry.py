@@ -42,13 +42,14 @@ from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.persistence.models import FlowScopeKind, OperationalRole
 from friendly_bot.persistence.repositories import (
+    DiagnosticRecord,
     DiagnosticRepository,
     FlowVersionRecord,
-    NewOutboundDelivery,
     ServiceRecord,
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.responses.planner import PlannedActionText, ReplyPlan
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
 from friendly_bot.telegram import (
     TelegramActivityConfirmed,
@@ -56,15 +57,17 @@ from friendly_bot.telegram import (
     TelegramCallbackContextKind,
     TelegramGateway,
     TelegramInlineButton,
+    TelegramPhotoPresentation,
+    TelegramTextPresentation,
     decode_callback,
 )
 
 
 class RecordingDeliveries:
     def __init__(self) -> None:
-        self.enqueued: list[NewOutboundDelivery] = []
+        self.enqueued: list[object] = []
 
-    async def enqueue(self, delivery: NewOutboundDelivery) -> object:
+    async def enqueue(self, delivery: object) -> object:
         self.enqueued.append(delivery)
         return object()
 
@@ -72,6 +75,21 @@ class RecordingDeliveries:
 class RecordingUnitOfWork:
     def __init__(self) -> None:
         self.deliveries = RecordingDeliveries()
+
+
+@dataclass
+class RecordingDiagnostics:
+    reason_codes: list[str] = field(default_factory=list)
+
+    async def record(self, **kwargs: object) -> DiagnosticRecord:
+        safe_context = cast(dict[str, str], kwargs["safe_context"])
+        self.reason_codes.append(safe_context["reason_code"])
+        return DiagnosticRecord(
+            id=uuid4(),
+            correlation_id=cast(UUID, kwargs["correlation_id"]),
+            severity=cast(str, kwargs["severity"]),
+            safe_summary=cast(str, kwargs["safe_summary"]),
+        )
 
 
 @dataclass
@@ -207,10 +225,70 @@ async def test_fixed_message_executor_renders_and_queues_exact_copy(
     await registry.resolve(action)(action, context)
     await context.flush_presentation()
 
-    assert uow.deliveries.enqueued[0].payload == {
-        "text": "Call a trusted adult now, Ryan.",
-        "buttons": [],
-    }
+    assert uow.deliveries.enqueued == []
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "Call a trusted adult now, Ryan."),
+    )
+
+
+async def test_ordinary_message_uses_its_planned_reply_and_fixed_copy_does_not(
+    now: datetime,
+) -> None:
+    context, _ = _context(now)
+    context.reply_plan = ReplyPlan(
+        (PlannedActionText("system.greeting", 0, "hey Ryan"),)
+    )
+    registry = build_action_registry(
+        ActionDependencies(
+            telegram=context.telegram,
+            services=cast(ServiceAttendanceService, object()),
+            lifecycle=cast(ServiceLifecycleService, object()),
+            matching=cast(MatchingService, object()),
+            diagnostics=cast(DiagnosticRepository, object()),
+        )
+    )
+    ordinary = SendMessageAction(
+        type="send_message", text="Hello {{ user.display_name }}"
+    )
+    fixed = SendMessageFixedAction(type="send_message_fixed", text="Call 999 now")
+
+    await registry.resolve(ordinary)(ordinary, context.for_action("system.greeting", 0))
+    await registry.resolve(fixed)(fixed, context.for_action("system.greeting", 1))
+    await context.flush_presentation()
+
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "hey Ryan"),
+        TelegramTextPresentation(42, "Call 999 now"),
+    )
+
+
+async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(
+    now: datetime,
+) -> None:
+    context, _ = _context(now)
+    diagnostics = RecordingDiagnostics()
+    context.diagnostics = cast(DiagnosticRepository, diagnostics)
+    context.reply_plan = ReplyPlan((), frozenset({("system.greeting", 0)}))
+    action = SendMessageAction(
+        type="send_message", text="Hello {{ user.display_name }}"
+    )
+    registry = build_action_registry(
+        ActionDependencies(
+            telegram=context.telegram,
+            services=cast(ServiceAttendanceService, object()),
+            lifecycle=cast(ServiceLifecycleService, object()),
+            matching=cast(MatchingService, object()),
+            diagnostics=cast(DiagnosticRepository, object()),
+        )
+    )
+
+    await registry.resolve(action)(action, context.for_action("system.greeting", 0))
+    await context.flush_presentation()
+
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "Hello Ryan"),
+    )
+    assert diagnostics.reason_codes == ["paraphrase.validation_fallback"]
 
 
 async def test_context_renders_locally_queues_delivery_and_allows_one_event(
@@ -226,12 +304,10 @@ async def test_context_renders_locally_queues_delivery_and_allows_one_event(
     )
     await context.enqueue_text("local fixed copy")
 
-    assert len(uow.deliveries.enqueued) == 1
-    delivery = uow.deliveries.enqueued[0]
-    assert delivery.user_id == context.user.id
-    assert delivery.telegram_chat_id == 42
-    assert delivery.payload == {"text": "local fixed copy"}
-    assert str(context.correlation_id) in delivery.idempotency_key
+    assert uow.deliveries.enqueued == []
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "local fixed copy"),
+    )
 
     event = ActionEvent(key="human_match.found", payload={"request_id": "local"})
     context.emit(event)
@@ -258,19 +334,20 @@ async def test_context_composes_text_or_photo_with_inline_buttons(
     )
     await context.flush_presentation()
 
-    assert [delivery.kind for delivery in uow.deliveries.enqueued] == [
-        "message",
-        "photo",
-    ]
-    assert uow.deliveries.enqueued[0].payload == {
-        "text": "Choose an option",
-        "buttons": [{"text": "Continue", "callback_data": "zone_x.menu.connect"}],
-    }
-    assert uow.deliveries.enqueued[1].payload == {
-        "asset_key": "zone_x_poster_2026",
-        "caption": "Zone X",
-        "buttons": [{"text": "Directions", "callback_data": "zone_x.menu.directions"}],
-    }
+    assert uow.deliveries.enqueued == []
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(
+            42,
+            "Choose an option",
+            (TelegramInlineButton("Continue", "zone_x.menu.connect"),),
+        ),
+        TelegramPhotoPresentation(
+            42,
+            "zone_x_poster_2026",
+            "Zone X",
+            (TelegramInlineButton("Directions", "zone_x.menu.directions"),),
+        ),
+    )
 
 
 async def test_context_rejects_orphan_textless_buttons(now: datetime) -> None:
@@ -282,7 +359,7 @@ async def test_context_rejects_orphan_textless_buttons(now: datetime) -> None:
         )
 
 
-async def test_child_context_preserves_parent_delivery_idempotency_sequence(
+async def test_child_context_preserves_parent_presentation_order(
     now: datetime,
 ) -> None:
     context, uow = _context(now)
@@ -291,19 +368,17 @@ async def test_child_context_preserves_parent_delivery_idempotency_sequence(
     child = context.for_child(context.flow, event_payload=None)
     await child.enqueue_text("child")
 
-    assert [
-        delivery.idempotency_key.rsplit(":", maxsplit=1)[-1]
-        for delivery in uow.deliveries.enqueued
-    ] == [
-        "1",
-        "2",
-    ]
+    assert uow.deliveries.enqueued == []
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "parent"),
+        TelegramTextPresentation(42, "child"),
+    )
 
 
-async def test_parent_after_direct_child_keeps_shared_delivery_sequence(
+async def test_parent_after_direct_child_keeps_shared_presentation_order(
     now: datetime,
 ) -> None:
-    """Return actions after an event child must not reuse an already queued suffix."""
+    """Return actions after an event child retain their execution order."""
 
     context, uow = _context(now)
     child = context.for_child(context.flow, event_payload=None)
@@ -311,10 +386,11 @@ async def test_parent_after_direct_child_keeps_shared_delivery_sequence(
     await child.enqueue_text("event child")
     await context.enqueue_text("return action")
 
-    assert [
-        delivery.idempotency_key.rsplit(":", maxsplit=1)[-1]
-        for delivery in uow.deliveries.enqueued
-    ] == ["1", "2"]
+    assert uow.deliveries.enqueued == []
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "event child"),
+        TelegramTextPresentation(42, "return action"),
+    )
 
 
 async def test_explicit_presentation_executors_use_typed_callbacks_and_activity(
@@ -376,29 +452,25 @@ async def test_explicit_presentation_executors_use_typed_callbacks_and_activity(
     await registry.resolve(activity)(activity, context)
     await context.flush_presentation()
 
-    assert [delivery.kind for delivery in uow.deliveries.enqueued] == [
-        "message",
-        "photo",
-        "message",
+    assert uow.deliveries.enqueued == []
+    presentations = context.presentation_buffer.snapshot()
+    assert [type(presentation) for presentation in presentations] == [
+        TelegramTextPresentation,
+        TelegramPhotoPresentation,
+        TelegramTextPresentation,
     ]
-    first_buttons = cast(
-        list[dict[str, str]], uow.deliveries.enqueued[0].payload["buttons"]
-    )
-    first_callback = first_buttons[0]["callback_data"]
+    first = cast(TelegramTextPresentation, presentations[0])
+    first_callback = first.buttons[0].callback_data
     assert decode_callback(first_callback) == TelegramCallback(
         button_id="zone_x.menu.connect",
         context_kind=TelegramCallbackContextKind.SERVICE,
         context_id=service_id,
     )
-    assert uow.deliveries.enqueued[1].payload == {
-        "asset_key": "zone_x_poster_2026",
-        "caption": "Poster",
-        "buttons": [],
-    }
-    choice_buttons = cast(
-        list[dict[str, str]], uow.deliveries.enqueued[2].payload["buttons"]
+    assert presentations[1] == TelegramPhotoPresentation(
+        42, "zone_x_poster_2026", "Poster"
     )
-    choice_callback = choice_buttons[0]["callback_data"]
+    choice = cast(TelegramTextPresentation, presentations[2])
+    choice_callback = choice.buttons[0].callback_data
     assert decode_callback(choice_callback).context_id == service_id
     assert telegram.activities == [(42, "typing")]
 

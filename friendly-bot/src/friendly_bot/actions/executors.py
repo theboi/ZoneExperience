@@ -51,7 +51,9 @@ from friendly_bot.telegram import (
 async def send_message(action: SendMessageAction, context: ActionContext) -> None:
     """Buffer one configured requester-facing text presentation."""
 
-    await context.queue_text_presentation(context.render(action.text))
+    await context.queue_text_presentation(
+        context.render(await context.message_template(action))
+    )
 
 
 async def send_message_fixed(

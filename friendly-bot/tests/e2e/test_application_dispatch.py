@@ -13,7 +13,11 @@ from pydantic import JsonValue
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.actions.registry import ActionDependencies, ActionExecutorRegistry
 from friendly_bot.app import DispatchResult, FriendlyBotApplication, PublishedZoneX
-from friendly_bot.domain.actions import SelectServiceAttendanceAction, SendMessageAction
+from friendly_bot.domain.actions import (
+    SelectServiceAttendanceAction,
+    SendMessageAction,
+    SendMessageFixedAction,
+)
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.state import (
@@ -35,17 +39,33 @@ from friendly_bot.persistence.repositories import (
     DiagnosticRepository,
     FlowVersionRecord,
     MatchRequestRecord,
-    NewOutboundDelivery,
+    NewPendingFlowIntent,
+    PendingFlowIntentRecord,
     ServiceRecord,
     ServiceTimestampRecord,
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.responses.planner import (
+    CandidateResponsePlan,
+    PlannedActionText,
+    ReplyPlan,
+)
+from friendly_bot.routing.contracts import (
+    KnownFlowRequest,
+    PlannedFlowMatch,
+    PlannedReply,
+)
 from friendly_bot.routing.openrouter_gateway import (
     GatewayProtocolError,
     GatewayTransportError,
 )
-from friendly_bot.routing.router import ConstrainedRouter
+from friendly_bot.routing.router import (
+    ConstrainedRouter,
+    MultiIntentRoutingResult,
+    RoutedMatch,
+    RoutingCandidate,
+)
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
 from friendly_bot.telegram import (
     TelegramCallback,
@@ -53,19 +73,11 @@ from friendly_bot.telegram import (
     TelegramChat,
     TelegramGateway,
     TelegramMessage,
+    TelegramTextPresentation,
     TelegramUser,
 )
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
-
-
-@dataclass
-class RecordingDeliveries:
-    enqueued: list[NewOutboundDelivery] = field(default_factory=list)
-
-    async def enqueue(self, delivery: NewOutboundDelivery) -> object:
-        self.enqueued.append(delivery)
-        return object()
 
 
 @dataclass
@@ -232,12 +244,69 @@ class RecordingVersions:
 
 
 @dataclass
+class RecordingPendingIntents:
+    records: list[PendingFlowIntentRecord] = field(default_factory=list)
+
+    async def list_active(
+        self, user_id: UUID, *, now: datetime
+    ) -> list[PendingFlowIntentRecord]:
+        return [
+            record
+            for record in self.records
+            if record.user_id == user_id and record.expires_at > now
+        ]
+
+    async def append(
+        self, intent: NewPendingFlowIntent, *, max_per_user: int
+    ) -> PendingFlowIntentRecord:
+        self.records = [
+            record
+            for record in self.records
+            if not (
+                record.user_id == intent.user_id
+                and record.flow_version_id == intent.flow_version_id
+                and record.flow_key == intent.flow_key
+            )
+        ]
+        same_user = [
+            record for record in self.records if record.user_id == intent.user_id
+        ]
+        other_users = [
+            record for record in self.records if record.user_id != intent.user_id
+        ]
+        self.records = other_users + same_user[-max_per_user + 1 :]
+        record = PendingFlowIntentRecord(
+            id=uuid4(),
+            position=len(same_user),
+            user_id=intent.user_id,
+            flow_key=intent.flow_key,
+            flow_version_id=intent.flow_version_id,
+            service_id=intent.service_id,
+            created_at=intent.created_at,
+            expires_at=intent.expires_at,
+        )
+        self.records.append(record)
+        return record
+
+    async def delete(self, intent_id: UUID) -> None:
+        self.records = [record for record in self.records if record.id != intent_id]
+
+    async def delete_expired(self, user_id: UUID, *, now: datetime) -> int:
+        before = len(self.records)
+        self.records = [
+            record
+            for record in self.records
+            if record.user_id != user_id or record.expires_at > now
+        ]
+        return before - len(self.records)
+
+
+@dataclass
 class FakeUnitOfWork:
     user: UserRecord
     version: FlowVersionRecord
     branches: list[OpenSelectionState]
     services_by_id: dict[UUID, ServiceRecord]
-    deliveries: RecordingDeliveries = field(default_factory=RecordingDeliveries)
     locked_user_ids: list[UUID] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -249,6 +318,7 @@ class FakeUnitOfWork:
         self.diagnostics = RecordingDiagnostics()
         self.flow_versions = RecordingVersions({self.version.id: self.version})
         self.open_selections = RecordingSelections(self.branches)
+        self.pending_intents = RecordingPendingIntents()
 
     async def lock_user(self, user_id: UUID) -> None:
         self.locked_user_ids.append(user_id)
@@ -334,10 +404,18 @@ def _application(
         context.emit(ActionEvent(key="dispatch.found"))
 
     async def send(action: SendMessageAction, context: ActionContext) -> None:
+        await context.queue_text_presentation(
+            context.render(await context.message_template(action))
+        )
+
+    async def send_fixed(
+        action: SendMessageFixedAction, context: ActionContext
+    ) -> None:
         await context.queue_text_presentation(context.render(action.text))
 
     registry.register(SelectServiceAttendanceAction, emit_found)
     registry.register(SendMessageAction, send)
+    registry.register(SendMessageFixedAction, send_fixed)
     zone_x = PublishedZoneX(
         service=service,
         map_url="https://maps.example.test/zone-x",
@@ -355,7 +433,7 @@ def _application(
             diagnostics=cast(DiagnosticRepository, object()),
         ),
         registry=registry,
-        router=router or cast(ConstrainedRouter, object()),
+        router=router or cast(ConstrainedRouter, AuthoredKnownFlowRouter()),
         zone_x=zone_x,
         onboarding=onboarding,
     )
@@ -447,6 +525,100 @@ class RejectingRouter:
         raise AssertionError("deterministic onboarding must not invoke model routing")
 
 
+class AuthoredKnownFlowRouter:
+    async def route_update_in_uow(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("deterministic flow must not invoke typed routing")
+
+    async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch:
+        return PlannedFlowMatch(
+            flow_id=request.flow_id,
+            replies=tuple(
+                PlannedReply(slot_id=slot.slot_id, text=slot.template)
+                for slot in request.reply_slots
+            ),
+        )
+
+
+@dataclass
+class ResultRouter:
+    result: MultiIntentRoutingResult
+    typed_calls: int = 0
+    known_calls: int = 0
+
+    async def route_update_in_uow(self, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        self.typed_calls += 1
+        return self.result
+
+    async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch:
+        self.known_calls += 1
+        return PlannedFlowMatch(
+            flow_id=request.flow_id,
+            replies=tuple(
+                PlannedReply(slot_id=slot.slot_id, text=slot.template)
+                for slot in request.reply_slots
+            ),
+        )
+
+
+def _routing_candidate(
+    flow: DiscussionFlow, version: FlowVersionRecord, *, interruptive: bool = False
+) -> RoutingCandidate:
+    return RoutingCandidate(
+        key=str(flow.key),
+        gists=("test request",),
+        source="current",
+        is_current=True,
+        service_id=None,
+        is_global_interruptive=interruptive,
+        multi_intent_mode=flow.multi_intent_mode.value,
+        response_plan=CandidateResponsePlan((), ()),
+        flow_version_id=version.id,
+    )
+
+
+def _multi_fixture(
+    root: DiscussionFlow, router: ResultRouter
+) -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
+    version = _version(root)
+    user = UserRecord(
+        id=uuid4(),
+        telegram_user_id=77,
+        display_name="Ryan",
+        role=OperationalRole.NBNC,
+        is_admin=False,
+    )
+    service = ServiceRecord(
+        id=uuid4(),
+        key="zone_x_2026_10_18",
+        highkey=True,
+        doors_open_at=NOW - timedelta(hours=1),
+        doors_close_at=NOW + timedelta(hours=1),
+        interaction_ends_at=NOW + timedelta(hours=2),
+        name="Zone X",
+    )
+    branch = OpenSelectionState(
+        id=uuid4(),
+        user_id=user.id,
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        service_id=None,
+        is_current=True,
+        is_global_interruptive=True,
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+        opened_at=NOW,
+        last_focused_at=NOW,
+    )
+    uow = FakeUnitOfWork(user, version, [branch], {service.id: service})
+    return (
+        _application(user, version, service, router=cast(ConstrainedRouter, router)),
+        uow,
+        user,
+    )
+
+
 async def test_start_and_name_capture_do_not_invoke_model_routing() -> None:
     """Removing the onboarding boundary would send `/start` and the name to OpenRouter."""
 
@@ -471,16 +643,17 @@ async def test_start_and_name_capture_do_not_invoke_model_routing() -> None:
         unit_of_work=cast(UnitOfWork, uow),
     )
 
-    assert started == DispatchResult("onboarding")
-    assert named == DispatchResult("onboarding")
-    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
-        {
-            "text": (
+    assert started == DispatchResult(
+        "onboarding",
+        presentations=(
+            TelegramTextPresentation(
+                77,
                 "Hey! Welcome to The Zone! Glad to see you here today!\n\n"
-                "How may I address you?"
-            )
-        }
-    ]
+                "How may I address you?",
+            ),
+        ),
+    )
+    assert named == DispatchResult("onboarding")
     assert uow.users.user.display_name == "Ari"
     assert uow.attendances.started == [
         (uow.users.user.id, next(iter(uow.services_by_id)), "ordinary")
@@ -571,10 +744,12 @@ async def test_routing_failure_commits_a_redacted_fallback(
         unit_of_work=cast(UnitOfWork, uow),
     )
 
-    assert result == DispatchResult("failed")
-    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
-        {"text": "Sorry, an error occurred. Error log: 77."}
-    ]
+    assert result == DispatchResult(
+        "failed",
+        presentations=(
+            TelegramTextPresentation(77, "Sorry, an error occurred. Error log: 77."),
+        ),
+    )
     assert uow.diagnostics.reason_codes == [reason_code]
     assert caplog.messages == [f"routing provider failure: {reason_code}"]
     assert str(error) not in caplog.text
@@ -598,15 +773,16 @@ async def test_dispatch_persists_event_child_for_its_later_button_callback() -> 
         unit_of_work=cast(UnitOfWork, uow),
     )
 
-    assert first == DispatchResult(
-        "selected", ("system.dispatch.start", "system.dispatch.event")
+    assert first.executed_flow_keys == (
+        "system.dispatch.start",
+        "system.dispatch.event",
     )
-    assert second == DispatchResult("selected", ("system.dispatch.confirm",))
-    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
-        {"text": "Found a match", "buttons": []},
-        {"text": "Connection confirmed", "buttons": []},
-        {"text": "Back at the checkpoint", "buttons": []},
-    ]
+    assert first.presentations == (TelegramTextPresentation(77, "Found a match"),)
+    assert second.executed_flow_keys == ("system.dispatch.confirm",)
+    assert second.presentations == (
+        TelegramTextPresentation(77, "Connection confirmed"),
+        TelegramTextPresentation(77, "Back at the checkpoint"),
+    )
     assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
         "system.dispatch.root"
     ]
@@ -636,10 +812,10 @@ async def test_expired_service_callback_sends_exact_fixed_copy_without_execution
         unit_of_work=cast(UnitOfWork, uow),
     )
 
-    assert result == DispatchResult("expired")
-    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
-        {"text": "Sorry, the service is over!"}
-    ]
+    assert result == DispatchResult(
+        "expired",
+        presentations=(TelegramTextPresentation(77, "Sorry, the service is over!"),),
+    )
 
 
 async def test_unknown_match_callback_is_ignored_without_branch_or_output_work() -> (
@@ -662,7 +838,6 @@ async def test_unknown_match_callback_is_ignored_without_branch_or_output_work()
     )
 
     assert result == DispatchResult("ignored")
-    assert uow.deliveries.enqueued == []
 
 
 async def test_timestamp_preparer_opens_the_root_and_counts_its_own_outbox_work() -> (
@@ -703,10 +878,325 @@ async def test_timestamp_preparer_opens_the_root_and_counts_its_own_outbox_work(
     )
 
     assert prepared.enqueued_delivery_count == 1
-    assert [delivery.payload for delivery in uow.deliveries.enqueued] == [
-        {"text": "Timestamp notice", "buttons": []}
-    ]
     assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
         "system.dispatch.root",
         "service.zone_x.timestamp.notice",
     ]
+
+
+async def test_typed_dispatch_runs_all_answer_fragments_without_transition() -> None:
+    root = DiscussionFlow.model_validate(
+        {
+            "key": "system.multi.root",
+            "next_flow_mode": "checkpoint",
+            "next_flows": [
+                {
+                    "key": "system.multi.answer_one",
+                    "trigger": {"type": "message", "llm_gist": "first answer"},
+                    "multi_intent_mode": "answer",
+                    "actions": [{"type": "send_message", "text": "first"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+                {
+                    "key": "system.multi.answer_two",
+                    "trigger": {"type": "message", "llm_gist": "second answer"},
+                    "multi_intent_mode": "answer",
+                    "actions": [{"type": "send_message", "text": "second"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+            ],
+        }
+    )
+    version = _version(root)
+    first, second = root.next_flows
+    router = ResultRouter(
+        MultiIntentRoutingResult(
+            answers=(
+                RoutedMatch(
+                    _routing_candidate(first, version),
+                    ReplyPlan((PlannedActionText(str(first.key), 0, "first reply"),)),
+                ),
+                RoutedMatch(
+                    _routing_candidate(second, version),
+                    ReplyPlan((PlannedActionText(str(second.key), 0, "second reply"),)),
+                ),
+            ),
+            interactive=None,
+            deferred=(),
+            terminal=None,
+        )
+    )
+    app, uow, user = _multi_fixture(root, router)
+    uow.flow_versions.versions[version.id] = version
+    uow.open_selections.branches[0] = replace(
+        uow.open_selections.branches[0],
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+    )
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=21, text="both please"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.executed_flow_keys == (str(first.key), str(second.key))
+    assert result.presentations == (
+        TelegramTextPresentation(77, "first reply"),
+        TelegramTextPresentation(77, "second reply"),
+    )
+    assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
+        str(root.key)
+    ]
+    assert router.typed_calls == 1
+
+
+async def test_typed_dispatch_defers_extra_interactive_matches_in_order() -> None:
+    root = DiscussionFlow.model_validate(
+        {
+            "key": "system.pending.root",
+            "next_flow_mode": "checkpoint",
+            "next_flows": [
+                {
+                    "key": "system.pending.first",
+                    "trigger": {"type": "message", "llm_gist": "first"},
+                    "actions": [{"type": "send_message", "text": "first"}],
+                    "next_flow_mode": "one_and_once_only",
+                    "next_flows": [
+                        {
+                            "key": "system.pending.first.wait",
+                            "trigger": {"type": "button", "button_id": "wait"},
+                            "next_flow_mode": "one_and_once_only",
+                        }
+                    ],
+                },
+                {
+                    "key": "system.pending.second",
+                    "trigger": {"type": "message", "llm_gist": "second"},
+                    "actions": [{"type": "send_message", "text": "second"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+                {
+                    "key": "system.pending.third",
+                    "trigger": {"type": "message", "llm_gist": "third"},
+                    "actions": [{"type": "send_message", "text": "third"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+            ],
+        }
+    )
+    version = _version(root)
+    first, second, third = root.next_flows
+    first_match = RoutedMatch(
+        _routing_candidate(first, version),
+        ReplyPlan((PlannedActionText(str(first.key), 0, "first reply"),)),
+    )
+    router = ResultRouter(
+        MultiIntentRoutingResult(
+            answers=(),
+            interactive=first_match,
+            deferred=(
+                _routing_candidate(second, version),
+                _routing_candidate(third, version),
+            ),
+            terminal=None,
+        )
+    )
+    app, uow, user = _multi_fixture(root, router)
+    uow.flow_versions.versions[version.id] = version
+    uow.open_selections.branches[0] = replace(
+        uow.open_selections.branches[0],
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+    )
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=22, text="all three"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.executed_flow_keys == (str(first.key),)
+    assert result.presentations == (TelegramTextPresentation(77, "first reply"),)
+    assert [intent.flow_key for intent in uow.pending_intents.records] == [
+        str(second.key),
+        str(third.key),
+    ]
+
+
+async def test_completed_interactive_flow_resumes_one_pending_intent() -> None:
+    root = DiscussionFlow.model_validate(
+        {
+            "key": "system.resume.root",
+            "next_flow_mode": "checkpoint",
+            "next_flows": [
+                {
+                    "key": "system.resume.first",
+                    "trigger": {"type": "message", "llm_gist": "first"},
+                    "actions": [{"type": "send_message", "text": "first"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+                {
+                    "key": "system.resume.second",
+                    "trigger": {"type": "message", "llm_gist": "second"},
+                    "actions": [{"type": "send_message", "text": "second"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+                {
+                    "key": "system.resume.third",
+                    "trigger": {"type": "message", "llm_gist": "third"},
+                    "actions": [{"type": "send_message", "text": "third"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+            ],
+        }
+    )
+    version = _version(root)
+    first, second, third = root.next_flows
+    router = ResultRouter(
+        MultiIntentRoutingResult(
+            answers=(),
+            interactive=RoutedMatch(
+                _routing_candidate(first, version),
+                ReplyPlan((PlannedActionText(str(first.key), 0, "first reply"),)),
+            ),
+            deferred=(
+                _routing_candidate(second, version),
+                _routing_candidate(third, version),
+            ),
+            terminal=None,
+        )
+    )
+    app, uow, user = _multi_fixture(root, router)
+    uow.flow_versions.versions[version.id] = version
+    uow.open_selections.branches[0] = replace(
+        uow.open_selections.branches[0],
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+    )
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=23, text="all three"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.executed_flow_keys == (str(first.key), str(second.key))
+    assert result.presentations == (
+        TelegramTextPresentation(77, "first reply"),
+        TelegramTextPresentation(77, "second"),
+    )
+    assert [intent.flow_key for intent in uow.pending_intents.records] == [
+        str(third.key)
+    ]
+
+
+async def test_interruptive_safety_result_excludes_other_matches() -> None:
+    root = DiscussionFlow.model_validate(
+        {
+            "key": "system.safety.root",
+            "next_flow_mode": "checkpoint",
+            "next_flows": [
+                {
+                    "key": "system.global.safety",
+                    "trigger": {"type": "message", "llm_gist": "unsafe"},
+                    "actions": [{"type": "send_message", "text": "safety"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+                {
+                    "key": "system.safety.answer",
+                    "trigger": {"type": "message", "llm_gist": "answer"},
+                    "multi_intent_mode": "answer",
+                    "actions": [{"type": "send_message", "text": "answer"}],
+                    "next_flow_mode": "one_and_once_only",
+                },
+            ],
+        }
+    )
+    version = _version(root)
+    safety = root.next_flows[0]
+    router = ResultRouter(
+        MultiIntentRoutingResult(
+            answers=(),
+            interactive=RoutedMatch(
+                _routing_candidate(safety, version, interruptive=True),
+                ReplyPlan((PlannedActionText(str(safety.key), 0, "safety reply"),)),
+            ),
+            deferred=(),
+            terminal=None,
+        )
+    )
+    app, uow, user = _multi_fixture(root, router)
+    uow.flow_versions.versions[version.id] = version
+    uow.open_selections.branches[0] = replace(
+        uow.open_selections.branches[0],
+        flow_version_id=version.id,
+        parent_flow_key=str(root.key),
+        ancestor_flow_keys=(str(root.key),),
+        checkpoint_flow_keys=(str(root.key),),
+    )
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=24, text="unsafe and answer"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.presentations == (TelegramTextPresentation(77, "safety reply"),)
+    assert uow.pending_intents.records == []
+
+
+async def test_button_flow_with_ordinary_copy_plans_once() -> None:
+    router = ResultRouter(MultiIntentRoutingResult((), None, (), None))
+    app, uow, user = _fixture(router=cast(ConstrainedRouter, router))
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(
+            user, callback=TelegramCallback("dispatch.start"), message_id=25
+        ),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.presentations == (TelegramTextPresentation(77, "Found a match"),)
+    assert router.typed_calls == 0
+    assert router.known_calls == 1
+
+
+async def test_fixed_only_button_flow_skips_known_flow_planning() -> None:
+    root = DiscussionFlow.model_validate(
+        {
+            "key": "system.fixed.root",
+            "next_flow_mode": "checkpoint",
+            "next_flows": [
+                {
+                    "key": "system.fixed.reply",
+                    "trigger": {"type": "button", "button_id": "fixed.reply"},
+                    "actions": [
+                        {"type": "send_message_fixed", "text": "Exact fixed copy"}
+                    ],
+                    "next_flow_mode": "one_and_once_only",
+                }
+            ],
+        }
+    )
+    router = ResultRouter(MultiIntentRoutingResult((), None, (), None))
+    app, uow, user = _multi_fixture(root, router)
+
+    result = await app.dispatch(
+        user_id=user.id,
+        incoming=_message(
+            user, callback=TelegramCallback("fixed.reply"), message_id=26
+        ),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.presentations == (TelegramTextPresentation(77, "Exact fixed copy"),)
+    assert router.typed_calls == 0
+    assert router.known_calls == 0

@@ -62,6 +62,16 @@ class ReplyPlan:
     """Immutable selected paraphrases addressed only by local flow/action coordinates."""
 
     messages: tuple[PlannedActionText, ...]
+    fallback_addresses: frozenset[tuple[str, int]] = frozenset()
+
+    def __post_init__(self) -> None:
+        addresses = tuple(
+            (message.flow_key, message.action_index) for message in self.messages
+        )
+        if len(addresses) != len(set(addresses)):
+            raise ValueError("reply plan contains a duplicate action address")
+        if set(addresses) & self.fallback_addresses:
+            raise ValueError("reply plan cannot plan and fall back for one action")
 
     def text_for(self, flow_key: str, action_index: int) -> str | None:
         """Return the one planned text for an action, if one was safely validated."""
@@ -74,6 +84,11 @@ class ReplyPlan:
         if len(matches) > 1:
             raise ValueError("reply plan contains a duplicate action address")
         return matches[0] if matches else None
+
+    def requires_fallback(self, flow_key: str, action_index: int) -> bool:
+        """Return whether a failed paraphrase must use trusted authored copy."""
+
+        return (flow_key, action_index) in self.fallback_addresses
 
 
 def message_gists(trigger: DiscussionFlowTrigger | None) -> tuple[str, ...]:

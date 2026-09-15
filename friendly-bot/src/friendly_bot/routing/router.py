@@ -21,6 +21,7 @@ from friendly_bot.responses.planner import (
     plan_candidate_responses,
 )
 from friendly_bot.routing.contracts import (
+    KnownFlowRequest,
     MultiIntentMatches,
     MultiIntentRequest,
     MultiIntentTerminal,
@@ -64,6 +65,7 @@ class RoutingCandidate:
     is_global_interruptive: bool
     multi_intent_mode: Literal["answer", "interactive"]
     response_plan: CandidateResponsePlan
+    flow_version_id: UUID | None = None
 
     @property
     def gist(self) -> str:
@@ -110,6 +112,8 @@ class ResponseModel(Protocol):
     async def route_and_plan(
         self, request: MultiIntentRequest
     ) -> MultiIntentMatches | MultiIntentTerminal: ...
+
+    async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch: ...
 
 
 class CandidateAssembler:
@@ -158,6 +162,7 @@ class CandidateAssembler:
                             child,
                             checkpoint=_checkpoint_for(selection, root, parent, child),
                         ),
+                        flow_version_id=selection.flow_version_id,
                     )
                 )
         return candidates
@@ -190,6 +195,11 @@ class ConstrainedRouter:
                 now=now,
                 incoming_is_persisted=False,
             )
+
+    async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch:
+        """Plan ordinary copy for one already-selected local flow once."""
+
+        return await self._gateway.plan_known_flow(request)
 
     async def route_update_in_uow(
         self,

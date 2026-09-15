@@ -35,9 +35,10 @@ class RetryableActionExecutionError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ActionRunResult:
-    """The flow keys visited while one action path ran."""
+    """The flow keys visited and whether that action path reached a leaf."""
 
     executed_flow_keys: tuple[str, ...]
+    completed: bool
 
 
 class ActionRunner:
@@ -55,13 +56,15 @@ class ActionRunner:
         self, flow: DiscussionFlow, context: ActionContext
     ) -> ActionRunResult:
         executed_flow_keys: list[str] = []
-        await self._run_flow(
+        completed = await self._run_flow(
             flow,
             context,
             executed_flow_keys,
             is_error_recovery=False,
         )
-        return ActionRunResult(executed_flow_keys=tuple(executed_flow_keys))
+        return ActionRunResult(
+            executed_flow_keys=tuple(executed_flow_keys), completed=completed
+        )
 
     async def _run_flow(
         self,
@@ -70,12 +73,14 @@ class ActionRunner:
         executed_flow_keys: list[str],
         *,
         is_error_recovery: bool,
-    ) -> None:
+    ) -> bool:
         executed_flow_keys.append(str(flow.key))
-        for action in flow.actions:
+        for action_index, action in enumerate(flow.actions):
             if not _is_presentation_action(action):
                 await context.flush_presentation()
-            event = await self._run_action(action, context, flow)
+            event = await self._run_action(
+                action, context.for_action(str(flow.key), action_index), flow
+            )
             if event is None:
                 event = context.terminal_event
             if event is None:
@@ -83,15 +88,16 @@ class ActionRunner:
             await context.flush_presentation()
             if is_error_recovery and event.key == "error":
                 await send_unhandled_action_error(context)
-                return
-            await self._run_direct_event_child(
+                return True
+            return await self._run_direct_event_child(
                 flow,
                 context,
                 event,
                 executed_flow_keys,
             )
-            return
+            return not flow.next_flows
         await context.flush_presentation()
+        return not flow.next_flows
 
     async def _run_action(
         self,
@@ -119,15 +125,15 @@ class ActionRunner:
         context: ActionContext,
         event: ActionEvent,
         executed_flow_keys: list[str],
-    ) -> None:
+    ) -> bool:
         child = _direct_event_child(parent, event.key)
         if child is None:
             if event.key == "error":
                 await send_unhandled_action_error(context)
             else:
                 await self._record_unhandled_event(context, parent, event.key)
-            return
-        await self._run_flow(
+            return True
+        return await self._run_flow(
             child,
             context.for_child(child, event_payload=event.payload),
             executed_flow_keys,

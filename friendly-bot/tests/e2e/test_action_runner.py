@@ -67,6 +67,10 @@ class RecordingContext:
     async def flush_presentation(self) -> None:
         return None
 
+    def for_action(self, flow_key: str, action_index: int) -> RecordingContext:
+        del flow_key, action_index
+        return self
+
     def for_child(
         self, child: DiscussionFlow, *, event_payload: dict[str, JsonValue] | None
     ) -> RecordingContext:

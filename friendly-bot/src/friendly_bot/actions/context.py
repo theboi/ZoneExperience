@@ -20,13 +20,20 @@ from friendly_bot.persistence.repositories import (
     MatchAssignmentRecord,
     MatchRequestRecord,
     MatchResponderRecord,
-    NewOutboundDelivery,
     ServiceRecord,
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork
+from friendly_bot.responses.planner import ReplyPlan
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
-from friendly_bot.telegram import TelegramGateway, TelegramInlineButton, TelegramMessage
+from friendly_bot.telegram import (
+    PresentationBuffer,
+    TelegramGateway,
+    TelegramInlineButton,
+    TelegramMessage,
+    TelegramPhotoPresentation,
+    TelegramTextPresentation,
+)
 
 _TEMPLATE_PATTERN = re.compile(
     r"\{\{\s*([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)"
@@ -44,13 +51,6 @@ class TerminalActionEventAlreadyEmittedError(RuntimeError):
 
 class OrphanPresentationButtonsError(ValueError):
     """Raised when a textless button action has no preceding visible presentation."""
-
-
-@dataclass(slots=True)
-class _DeliverySequence:
-    """Mutable per-run sequence shared by direct-event child contexts."""
-
-    value: int = 0
 
 
 class ActionNavigation(Protocol):
@@ -87,24 +87,10 @@ class _PendingPresentation:
     asset_key: str | None = None
     buttons: list[TelegramInlineButton] = field(default_factory=list)
 
-    def payload(self) -> dict[str, JsonValue]:
-        buttons: list[JsonValue] = [
-            {"text": button.text, "callback_data": button.callback_data}
-            for button in self.buttons
-        ]
-        if self.kind == "message":
-            return {"text": self.body, "buttons": buttons}
-        assert self.asset_key is not None
-        return {
-            "asset_key": self.asset_key,
-            "caption": self.body,
-            "buttons": buttons,
-        }
-
 
 @dataclass(slots=True)
 class ActionContext:
-    """Own local rendering, durable output enqueueing, and one terminal event."""
+    """Own local rendering, in-memory presentations, and one terminal event."""
 
     user: UserRecord
     incoming: TelegramMessage | None
@@ -121,16 +107,20 @@ class ActionContext:
     matching: MatchingService
     diagnostics: DiagnosticRepository
     navigation: ActionNavigation | None = None
+    reply_plan: ReplyPlan = field(default_factory=lambda: ReplyPlan(()))
+    presentation_buffer: PresentationBuffer = field(default_factory=PresentationBuffer)
     _terminal_event: ActionEvent | None = field(default=None, init=False)
-    _delivery_sequence: _DeliverySequence = field(
-        default_factory=_DeliverySequence, init=False
-    )
     _match_assignment: MatchAssignmentRecord | None = field(default=None, init=False)
     _match_request: MatchRequestRecord | None = field(default=None, init=False)
     _matched_responder: MatchResponderRecord | None = field(default=None, init=False)
     _previous_responder: MatchResponderRecord | None = field(default=None, init=False)
     _service_choices: tuple[ServiceRecord, ...] = field(default=(), init=False)
     _pending_presentation: _PendingPresentation | None = field(default=None, init=False)
+    _active_flow_key: str | None = field(default=None, init=False)
+    _active_action_index: int | None = field(default=None, init=False)
+    _recorded_paraphrase_fallbacks: set[tuple[str, int]] = field(
+        default_factory=set, init=False
+    )
 
     def render(self, template: str) -> str:
         """Render only the already publication-validated dotted placeholders locally."""
@@ -160,12 +150,14 @@ class ActionContext:
         self._terminal_event = event
 
     async def enqueue_text(self, text: str) -> None:
-        """Queue one standalone text delivery through F01's durable outbox."""
+        """Append one standalone text presentation for post-commit sending."""
 
         if type(text) is not str or not text:
             raise ValueError("outbound text must be nonempty")
         await self.flush_presentation()
-        await self._enqueue_delivery(kind="message", payload={"text": text})
+        self.presentation_buffer.append(
+            TelegramTextPresentation(self._required_chat_id(), text)
+        )
 
     async def queue_text_presentation(self, text: str) -> None:
         """Begin a text presentation that a following button action may extend."""
@@ -206,40 +198,31 @@ class ActionContext:
         pending.buttons.extend(buttons)
 
     async def flush_presentation(self) -> None:
-        """Persist the buffered presentation before a non-presentation effect or return."""
+        """Append the buffered presentation before a non-presentation effect or return."""
 
         pending = self._pending_presentation
         if pending is None:
             return
         self._pending_presentation = None
-        await self._enqueue_delivery(kind=pending.kind, payload=pending.payload())
-
-    async def _enqueue_delivery(
-        self, *, kind: str, payload: dict[str, JsonValue]
-    ) -> None:
-        """Create one deterministic durable row after its output is fully composed."""
-
-        chat_id = self.user.telegram_user_id
-        if type(chat_id) is not int or chat_id <= 0:
-            raise ValueError("a Telegram user id is required for outbound delivery")
-        self._delivery_sequence.value += 1
-        await self.unit_of_work.deliveries.enqueue(
-            NewOutboundDelivery(
-                idempotency_key=(
-                    f"action:{self.correlation_id}:{self._delivery_sequence.value}"
-                ),
-                user_id=self.user.id,
-                telegram_chat_id=chat_id,
-                kind=kind,
-                payload=payload,
-                eligible_at=self.now,
+        buttons = tuple(pending.buttons)
+        if pending.kind == "message":
+            self.presentation_buffer.append(
+                TelegramTextPresentation(
+                    self._required_chat_id(), pending.body, buttons
+                )
+            )
+            return
+        assert pending.asset_key is not None
+        self.presentation_buffer.append(
+            TelegramPhotoPresentation(
+                self._required_chat_id(), pending.asset_key, pending.body, buttons
             )
         )
 
     async def enqueue_text_to(
         self, *, user_id: UUID, telegram_chat_id: int, text: str
     ) -> None:
-        """Queue a fixed external recipient notification through the same durable outbox."""
+        """Append a fixed external-recipient presentation for post-commit sending."""
 
         if not isinstance(user_id, UUID):
             raise TypeError("outbound recipient user id must be a UUID")
@@ -248,18 +231,8 @@ class ActionContext:
         if type(text) is not str or not text:
             raise ValueError("outbound text must be nonempty")
         await self.flush_presentation()
-        self._delivery_sequence.value += 1
-        await self.unit_of_work.deliveries.enqueue(
-            NewOutboundDelivery(
-                idempotency_key=(
-                    f"action:{self.correlation_id}:{self._delivery_sequence.value}"
-                ),
-                user_id=user_id,
-                telegram_chat_id=telegram_chat_id,
-                kind="message",
-                payload={"text": text},
-                eligible_at=self.now,
-            )
+        self.presentation_buffer.append(
+            TelegramTextPresentation(telegram_chat_id, text)
         )
 
     def match_request_id(self) -> UUID:
@@ -365,8 +338,36 @@ class ActionContext:
         child_context._matched_responder = self._matched_responder
         child_context._previous_responder = self._previous_responder
         child_context._service_choices = self._service_choices
-        child_context._delivery_sequence = self._delivery_sequence
+        child_context._pending_presentation = self._pending_presentation
+        child_context.presentation_buffer = self.presentation_buffer
         return child_context
+
+    def for_action(self, flow_key: str, action_index: int) -> ActionContext:
+        """Bind one executor call to its deterministic local reply-plan address."""
+
+        if type(flow_key) is not str or not flow_key or action_index < 0:
+            raise ValueError("action address is invalid")
+        self._active_flow_key = flow_key
+        self._active_action_index = action_index
+        return self
+
+    async def message_template(self, action: object) -> str:
+        """Return validated planned copy for one ordinary message or its authored fallback."""
+
+        authored_template = getattr(action, "text", None)
+        if type(authored_template) is not str:
+            raise TypeError("message action must carry authored text")
+        if self._active_flow_key is None or self._active_action_index is None:
+            return authored_template
+        planned = self.reply_plan.text_for(
+            self._active_flow_key, self._active_action_index
+        )
+        if planned is not None:
+            return planned
+        address = (self._active_flow_key, self._active_action_index)
+        if self.reply_plan.requires_fallback(*address):
+            await self._record_paraphrase_fallback(address)
+        return authored_template
 
     @property
     def match_assignment(self) -> MatchAssignmentRecord | None:
@@ -407,9 +408,27 @@ class ActionContext:
 
     @property
     def queued_delivery_count(self) -> int:
-        """Expose the local action-run outbox count to runtime composition only."""
+        """Expose the count of local presentations to runtime composition only."""
 
-        return self._delivery_sequence.value
+        return len(self.presentation_buffer.snapshot())
+
+    def _required_chat_id(self) -> int:
+        chat_id = self.user.telegram_user_id
+        if type(chat_id) is not int or chat_id <= 0:
+            raise ValueError("a Telegram user id is required for a presentation")
+        return chat_id
+
+    async def _record_paraphrase_fallback(self, address: tuple[str, int]) -> None:
+        if address in self._recorded_paraphrase_fallbacks:
+            return
+        self._recorded_paraphrase_fallbacks.add(address)
+        await self.diagnostics.record(
+            correlation_id=self.correlation_id,
+            severity="warning",
+            safe_summary="planned paraphrase unavailable",
+            safe_context={"reason_code": "paraphrase.validation_fallback"},
+            at=self.now,
+        )
 
     def _render_value(self, name: str, *, optional: bool = False) -> str:
         if name in {"user.display_name", "user.name"}:

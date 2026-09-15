@@ -8,7 +8,7 @@ import logging
 import signal
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
@@ -51,6 +51,7 @@ from friendly_bot.domain.triggers import (
     DiscussionFlowTrigger,
     MessageDiscussionFlowTrigger,
 )
+from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.onboarding.service import OnboardingService
 from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
@@ -58,20 +59,32 @@ from friendly_bot.persistence.models import FlowScopeKind, ServiceAudience
 from friendly_bot.persistence.repositories import (
     FlowVersionRecord,
     MatchRequestRecord,
-    NewOutboundDelivery,
     NewService,
     NewServiceTimestamp,
+    PendingFlowIntentRecord,
     ServiceRecord,
     ServiceTimestampRecord,
     UserRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
+from friendly_bot.responses.planner import (
+    CandidateResponsePlan,
+    PlannedActionText,
+    ReplyPlan,
+    plan_candidate_responses,
+)
+from friendly_bot.routing.contracts import KnownFlowRequest, PlannedFlowMatch
 from friendly_bot.routing.openrouter_gateway import (
     GatewayProtocolError,
     GatewayTransportError,
     OpenRouterGateway,
 )
-from friendly_bot.routing.router import ConstrainedRouter, IncomingText, RoutingTerminal
+from friendly_bot.routing.router import (
+    ConstrainedRouter,
+    IncomingText,
+    RoutedMatch,
+    RoutingTerminal,
+)
 from friendly_bot.services import (
     AudienceResolver,
     ServiceAttendanceService,
@@ -82,6 +95,7 @@ from friendly_bot.services.scheduler import TimestampRootPreparation
 from friendly_bot.telegram import (
     LocalTelegramAssetResolver,
     OutboundDeliveryWorker,
+    PresentationBuffer,
     TelegramApiClient,
     TelegramApiError,
     TelegramCallback,
@@ -90,12 +104,18 @@ from friendly_bot.telegram import (
     TelegramMessage,
     TelegramPoller,
     TelegramPreflight,
+    TelegramPresentation,
     TelegramResponseUncertain,
     TelegramRuntimeLock,
+    TelegramTextPresentation,
     normalize_command,
 )
 
 LOGGER = logging.getLogger(__name__)
+
+type DispatchKind = Literal[
+    "selected", "no_match", "clarified", "ignored", "expired", "failed", "onboarding"
+]
 
 _ZONE_X_TEMPLATE_CONTEXT: Final = TemplateContextSchema(
     {
@@ -190,18 +210,17 @@ class RuntimeRoutingPolicy:
 
 @dataclass(frozen=True, slots=True)
 class DispatchResult:
-    """One ingress decision without carrying Telegram content out of the UoW."""
+    """One ingress decision and its post-commit Telegram presentations."""
 
-    kind: Literal[
-        "selected",
-        "no_match",
-        "clarified",
-        "ignored",
-        "expired",
-        "failed",
-        "onboarding",
-    ]
-    selected_flow_keys: tuple[str, ...] = ()
+    kind: DispatchKind
+    executed_flow_keys: tuple[str, ...] = ()
+    presentations: tuple[TelegramPresentation, ...] = ()
+
+    @property
+    def selected_flow_keys(self) -> tuple[str, ...]:
+        """Expose the staged name while callers move to execution terminology."""
+
+        return self.executed_flow_keys
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +234,14 @@ class _DirectSelection:
     child: DiscussionFlow
     service: ServiceRecord | None
     match_request: MatchRequestRecord | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ExecutedInteractive:
+    """The completed transition and action path for one interactive choice."""
+
+    executed_flow_keys: tuple[str, ...]
+    completed: bool
 
 
 class FriendlyBotApplication:
@@ -251,15 +278,18 @@ class FriendlyBotApplication:
         await unit_of_work.lock_user(user.id)
         now = incoming.sent_at
         correlation_id = uuid4()
+        presentations = PresentationBuffer()
 
         if incoming.callback is not None:
-            return await self._dispatch_callback(
+            result = await self._dispatch_callback(
                 user=user,
                 incoming=incoming,
                 unit_of_work=unit_of_work,
                 correlation_id=correlation_id,
                 now=now,
+                presentations=presentations,
             )
+            return self._with_presentations(result, presentations)
 
         assert incoming.text is not None
         onboarding = await self._dispatch_onboarding(
@@ -268,12 +298,16 @@ class FriendlyBotApplication:
             unit_of_work=unit_of_work,
             correlation_id=correlation_id,
             now=now,
+            presentations=presentations,
         )
         if onboarding is not None:
-            return onboarding
+            return self._with_presentations(onboarding, presentations)
         if not await self._valid_branches(unit_of_work, user.id, now=now):
             await self.open_system_root_for_user(
-                user_id=user.id, unit_of_work=unit_of_work, now=now
+                user_id=user.id,
+                unit_of_work=unit_of_work,
+                now=now,
+                presentations=presentations,
             )
         command = normalize_command(incoming.text)
         if command.startswith("/"):
@@ -292,8 +326,11 @@ class FriendlyBotApplication:
                     correlation_id=correlation_id,
                     now=now,
                     executed_flow_keys=set(),
+                    presentations=presentations,
                 )
-                return DispatchResult("selected", executed)
+                return self._result(
+                    "selected", executed.executed_flow_keys, presentations
+                )
 
         try:
             routing = await self._router.route_update_in_uow(
@@ -311,6 +348,7 @@ class FriendlyBotApplication:
                 correlation_id=correlation_id,
                 now=now,
                 reason_code="routing.provider_unavailable",
+                presentations=presentations,
             )
         except GatewayProtocolError:
             return await self._routing_failure_result(
@@ -319,20 +357,50 @@ class FriendlyBotApplication:
                 correlation_id=correlation_id,
                 now=now,
                 reason_code="routing.provider_invalid_response",
+                presentations=presentations,
             )
         executed_flow_keys: set[str] = set()
         selected: list[str] = []
-        for decision in routing.selected_keys:
+        for answer in routing.answers:
             selection = await self._find_direct_selection(
                 unit_of_work=unit_of_work,
                 user=user,
                 now=now,
-                matcher=_message_flow_key_matcher(decision.key),
+                matcher=_message_flow_key_matcher(answer.candidate.key),
             )
             if selection is None:
                 continue
             selected.extend(
-                await self._execute_selection(
+                await self._execute_answer_fragment(
+                    selection,
+                    answer,
+                    user=user,
+                    incoming=incoming,
+                    unit_of_work=unit_of_work,
+                    correlation_id=correlation_id,
+                    now=now,
+                    presentations=presentations,
+                )
+            )
+
+        for deferred in routing.deferred:
+            await PendingIntentService(unit_of_work.pending_intents).enqueue(
+                user_id=user.id,
+                flow_key=deferred.key,
+                flow_version_id=_required_flow_version_id(deferred),
+                service_id=deferred.service_id,
+                now=now,
+            )
+
+        if routing.interactive is not None:
+            selection = await self._find_direct_selection(
+                unit_of_work=unit_of_work,
+                user=user,
+                now=now,
+                matcher=_message_flow_key_matcher(routing.interactive.candidate.key),
+            )
+            if selection is not None:
+                interactive_execution = await self._execute_selection(
                     selection,
                     user=user,
                     incoming=incoming,
@@ -340,31 +408,39 @@ class FriendlyBotApplication:
                     correlation_id=correlation_id,
                     now=now,
                     executed_flow_keys=executed_flow_keys,
+                    presentations=presentations,
+                    reply_plan=routing.interactive.reply_plan,
                 )
-            )
+                selected.extend(interactive_execution.executed_flow_keys)
+                if interactive_execution.completed:
+                    selected.extend(
+                        await self._resume_one_pending_intent(
+                            user=user,
+                            incoming=incoming,
+                            unit_of_work=unit_of_work,
+                            correlation_id=correlation_id,
+                            now=now,
+                            executed_flow_keys=executed_flow_keys,
+                            presentations=presentations,
+                        )
+                    )
 
         if routing.terminal is RoutingTerminal.CLARIFY:
-            await self._enqueue_fixed_text(
-                unit_of_work,
-                user=user,
-                correlation_id=correlation_id,
-                now=now,
-                text="Sorry, which message were you referring to?",
+            self._append_fixed_text(
+                presentations, user, "Sorry, which message were you referring to?"
             )
-            return DispatchResult("clarified", tuple(selected))
+            return self._result("clarified", tuple(selected), presentations)
         if routing.terminal is RoutingTerminal.NO_MATCH:
-            await self._enqueue_fixed_text(
-                unit_of_work,
-                user=user,
-                correlation_id=correlation_id,
-                now=now,
+            self._append_fixed_text(
+                presentations,
+                user,
                 text=(
                     self._routing_policy.no_match_text
                     or "Sorry, I didn't understand your request."
                 ),
             )
-            return DispatchResult("no_match", tuple(selected))
-        return DispatchResult("selected", tuple(selected))
+            return self._result("no_match", tuple(selected), presentations)
+        return self._result("selected", tuple(selected), presentations)
 
     async def _dispatch_onboarding(
         self,
@@ -374,6 +450,7 @@ class FriendlyBotApplication:
         unit_of_work: UnitOfWork,
         correlation_id: UUID,
         now: datetime,
+        presentations: PresentationBuffer,
     ) -> DispatchResult | None:
         """Handle deterministic onboarding before provider-backed message routing."""
 
@@ -390,15 +467,11 @@ class FriendlyBotApplication:
         if result.kind == "ignored":
             return DispatchResult("ignored")
         if result.kind == "name_capture":
-            await self._enqueue_fixed_text(
-                unit_of_work,
-                user=user,
-                correlation_id=correlation_id,
-                now=now,
-                text=(
-                    "Hey! Welcome to The Zone! Glad to see you here today!\n\n"
-                    "How may I address you?"
-                ),
+            self._append_fixed_text(
+                presentations,
+                user,
+                "Hey! Welcome to The Zone! Glad to see you here today!\n\n"
+                "How may I address you?",
             )
             return DispatchResult("onboarding")
         if result.kind == "existing_start":
@@ -406,6 +479,7 @@ class FriendlyBotApplication:
                 user_id=user.id,
                 unit_of_work=unit_of_work,
                 now=now,
+                presentations=presentations,
             )
             return DispatchResult("onboarding")
 
@@ -428,6 +502,7 @@ class FriendlyBotApplication:
                 service=self._zone_x.service,
                 now=now,
                 run_actions=True,
+                presentations=presentations,
             )
         elif attendance.kind == "latecomer":
             await self._open_root(
@@ -439,17 +514,24 @@ class FriendlyBotApplication:
                 service=self._zone_x.service,
                 now=now,
                 run_actions=True,
+                presentations=presentations,
             )
         else:
             await self.open_system_root_for_user(
                 user_id=completed_user.id,
                 unit_of_work=unit_of_work,
                 now=now,
+                presentations=presentations,
             )
         return DispatchResult("onboarding")
 
     async def open_system_root_for_user(
-        self, *, user_id: UUID, unit_of_work: UnitOfWork, now: datetime
+        self,
+        *,
+        user_id: UUID,
+        unit_of_work: UnitOfWork,
+        now: datetime,
+        presentations: PresentationBuffer | None = None,
     ) -> OpenSelectionState:
         """Provision the Zone X system checkpoint without starting another UoW."""
 
@@ -463,6 +545,7 @@ class FriendlyBotApplication:
             service=None,
             now=now,
             run_actions=True,
+            presentations=presentations,
         )
         return branch
 
@@ -526,6 +609,7 @@ class FriendlyBotApplication:
         unit_of_work: UnitOfWork,
         correlation_id: UUID,
         now: datetime,
+        presentations: PresentationBuffer,
     ) -> DispatchResult:
         callback = incoming.callback
         assert callback is not None
@@ -536,13 +620,7 @@ class FriendlyBotApplication:
         except LookupError:
             return DispatchResult("ignored")
         if expired:
-            await self._enqueue_fixed_text(
-                unit_of_work,
-                user=user,
-                correlation_id=correlation_id,
-                now=now,
-                text="Sorry, the service is over!",
-            )
+            self._append_fixed_text(presentations, user, "Sorry, the service is over!")
             return DispatchResult("expired")
         selection = await self._find_direct_selection(
             unit_of_work=unit_of_work,
@@ -562,8 +640,9 @@ class FriendlyBotApplication:
             correlation_id=correlation_id,
             now=now,
             executed_flow_keys=set(),
+            presentations=presentations,
         )
-        return DispatchResult("selected", executed)
+        return DispatchResult("selected", executed.executed_flow_keys)
 
     async def _revalidate_callback_context(
         self,
@@ -667,7 +746,9 @@ class FriendlyBotApplication:
         correlation_id: UUID,
         now: datetime,
         executed_flow_keys: set[str],
-    ) -> tuple[str, ...]:
+        presentations: PresentationBuffer,
+        reply_plan: ReplyPlan | None = None,
+    ) -> _ExecutedInteractive:
         engine = SelectionTransitionEngine(
             executed_flow_keys=executed_flow_keys,
             flow_definitions=_flow_index(selection.root),
@@ -689,6 +770,18 @@ class FriendlyBotApplication:
             now=now,
             service=selection.service,
             match_request=selection.match_request,
+            reply_plan=(
+                reply_plan
+                if reply_plan is not None
+                else await self._plan_known_flow(
+                    selection.child,
+                    incoming=incoming,
+                    unit_of_work=unit_of_work,
+                    correlation_id=correlation_id,
+                    checkpoint=_checkpoint_for_selection(selection),
+                )
+            ),
+            presentations=presentations,
         )
         result = await self._runner.run(selection.child, context)
         await unit_of_work.open_selections.apply(transition, at=now)
@@ -707,7 +800,98 @@ class FriendlyBotApplication:
             engine=engine,
             now=now,
         )
-        return result.executed_flow_keys
+        return _ExecutedInteractive(
+            result.executed_flow_keys,
+            result.completed and transition.checkpoint_return is not None,
+        )
+
+    async def _execute_answer_fragment(
+        self,
+        selection: _DirectSelection,
+        match: RoutedMatch,
+        *,
+        user: UserRecord,
+        incoming: TelegramMessage,
+        unit_of_work: UnitOfWork,
+        correlation_id: UUID,
+        now: datetime,
+        presentations: PresentationBuffer,
+    ) -> tuple[str, ...]:
+        """Run an answer flow as a presentation-only fragment with no state change."""
+
+        context = self._context_for(
+            user=user,
+            incoming=incoming,
+            flow=selection.child,
+            version=selection.version,
+            branch=selection.branch,
+            unit_of_work=unit_of_work,
+            correlation_id=correlation_id,
+            now=now,
+            service=selection.service,
+            match_request=selection.match_request,
+            reply_plan=match.reply_plan,
+            presentations=presentations,
+        )
+        return (await self._runner.run(selection.child, context)).executed_flow_keys
+
+    async def _resume_one_pending_intent(
+        self,
+        *,
+        user: UserRecord,
+        incoming: TelegramMessage,
+        unit_of_work: UnitOfWork,
+        correlation_id: UUID,
+        now: datetime,
+        executed_flow_keys: set[str],
+        presentations: PresentationBuffer,
+    ) -> tuple[str, ...]:
+        """Resume at most one still-valid interactive reference after completion."""
+
+        intents = PendingIntentService(unit_of_work.pending_intents)
+        for intent in await intents.list_active(user.id, now=now):
+            selection = await self._selection_for_pending_intent(
+                intent, user=user, unit_of_work=unit_of_work, now=now
+            )
+            if selection is None:
+                await intents.remove(intent.id)
+                continue
+            await intents.remove(intent.id)
+            resumed = await self._execute_selection(
+                selection,
+                user=user,
+                incoming=incoming,
+                unit_of_work=unit_of_work,
+                correlation_id=correlation_id,
+                now=now,
+                executed_flow_keys=executed_flow_keys,
+                presentations=presentations,
+            )
+            return resumed.executed_flow_keys
+        return ()
+
+    async def _selection_for_pending_intent(
+        self,
+        intent: PendingFlowIntentRecord,
+        *,
+        user: UserRecord,
+        unit_of_work: UnitOfWork,
+        now: datetime,
+    ) -> _DirectSelection | None:
+        selection = await self._find_direct_selection(
+            unit_of_work=unit_of_work,
+            user=user,
+            now=now,
+            matcher=_message_flow_key_matcher(intent.flow_key),
+        )
+        if selection is None:
+            return None
+        if (
+            selection.version.id != intent.flow_version_id
+            or selection.branch.service_id != intent.service_id
+        ):
+            return None
+        return selection
 
     async def _apply_event_selection_transitions(
         self,
@@ -759,6 +943,60 @@ class FriendlyBotApplication:
             return_flow, context.for_child(return_flow, event_payload=None)
         )
 
+    async def _plan_known_flow(
+        self,
+        flow: DiscussionFlow,
+        *,
+        incoming: TelegramMessage | None,
+        unit_of_work: UnitOfWork,
+        correlation_id: UUID,
+        checkpoint: DiscussionFlow | None,
+    ) -> ReplyPlan:
+        """Plan safe ordinary copy for a deterministic flow or retain authored fallback."""
+
+        response_plan = plan_candidate_responses(flow, checkpoint=checkpoint)
+        if not response_plan.reply_slots:
+            return ReplyPlan(())
+        messages = (incoming.text,) if incoming is not None and incoming.text else ()
+        try:
+            match = await self._router.plan_known_flow(
+                KnownFlowRequest(
+                    flow_id=str(flow.key),
+                    reply_slots=response_plan.reply_slots,
+                    messages=messages,
+                )
+            )
+            return _reply_plan_from_known_match(match, response_plan)
+        except (GatewayTransportError, GatewayProtocolError, ValueError):
+            await unit_of_work.diagnostics.record(
+                correlation_id=correlation_id,
+                severity="warning",
+                safe_summary="known-flow paraphrase unavailable",
+                safe_context={"reason_code": "paraphrase.known_flow_fallback"},
+                at=(incoming.sent_at if incoming is not None else datetime.now(UTC)),
+            )
+            return ReplyPlan(
+                (),
+                frozenset(
+                    (binding.flow_key, binding.action_index)
+                    for binding in response_plan.bindings
+                ),
+            )
+
+    @staticmethod
+    def _with_presentations(
+        result: DispatchResult, presentations: PresentationBuffer
+    ) -> DispatchResult:
+        return replace(result, presentations=presentations.snapshot())
+
+    def _result(
+        self,
+        kind: DispatchKind,
+        executed_flow_keys: tuple[str, ...],
+        presentations: PresentationBuffer,
+    ) -> DispatchResult:
+        return DispatchResult(kind, executed_flow_keys, presentations.snapshot())
+
     def _context_for(
         self,
         *,
@@ -772,6 +1010,8 @@ class FriendlyBotApplication:
         now: datetime,
         service: ServiceRecord | None,
         match_request: MatchRequestRecord | None,
+        reply_plan: ReplyPlan | None = None,
+        presentations: PresentationBuffer | None = None,
     ) -> ActionContext:
         selected_service = service
         if selected_service is None and branch.service_id == self._zone_x.service.id:
@@ -798,6 +1038,8 @@ class FriendlyBotApplication:
             matching=self._dependencies.matching,
             diagnostics=unit_of_work.diagnostics,
             navigation=self._navigation,
+            reply_plan=reply_plan or ReplyPlan(()),
+            presentation_buffer=presentations or PresentationBuffer(),
         )
         if match_request is not None:
             context.set_match_request(match_request)
@@ -815,6 +1057,7 @@ class FriendlyBotApplication:
         now: datetime,
         run_actions: bool,
         parent_context: ActionContext | None = None,
+        presentations: PresentationBuffer | None = None,
     ) -> tuple[OpenSelectionState, int]:
         await unit_of_work.lock_user(user.id)
         branch = await unit_of_work.open_selections.open_root(
@@ -834,6 +1077,14 @@ class FriendlyBotApplication:
                 now=now,
                 service=service,
                 match_request=None,
+                reply_plan=await self._plan_known_flow(
+                    root,
+                    incoming=incoming,
+                    unit_of_work=unit_of_work,
+                    correlation_id=uuid4(),
+                    checkpoint=None,
+                ),
+                presentations=presentations,
             )
         else:
             context = parent_context.for_child(root, event_payload=None)
@@ -848,27 +1099,12 @@ class FriendlyBotApplication:
         await self._runner.run(root, context)
         return branch, context.queued_delivery_count - delivery_count_before
 
-    async def _enqueue_fixed_text(
-        self,
-        unit_of_work: UnitOfWork,
-        *,
-        user: UserRecord,
-        correlation_id: UUID,
-        now: datetime,
-        text: str,
+    def _append_fixed_text(
+        self, presentations: PresentationBuffer, user: UserRecord, text: str
     ) -> None:
         if type(user.telegram_user_id) is not int or user.telegram_user_id <= 0:
-            raise ValueError("a Telegram user id is required for outbound delivery")
-        await unit_of_work.deliveries.enqueue(
-            NewOutboundDelivery(
-                idempotency_key=f"dispatch:{correlation_id}:terminal",
-                user_id=user.id,
-                telegram_chat_id=user.telegram_user_id,
-                kind="message",
-                payload={"text": text},
-                eligible_at=now,
-            )
-        )
+            raise ValueError("a Telegram user id is required for a presentation")
+        presentations.append(TelegramTextPresentation(user.telegram_user_id, text))
 
     async def _routing_failure_result(
         self,
@@ -878,6 +1114,7 @@ class FriendlyBotApplication:
         correlation_id: UUID,
         now: datetime,
         reason_code: str,
+        presentations: PresentationBuffer,
     ) -> DispatchResult:
         LOGGER.error("routing provider failure: %s", reason_code)
         diagnostic = await unit_of_work.diagnostics.record(
@@ -890,16 +1127,12 @@ class FriendlyBotApplication:
         await unit_of_work.diagnostics.enqueue_admin_notifications(
             diagnostic.id, at=now
         )
-        await self._enqueue_fixed_text(
-            unit_of_work,
-            user=user,
-            correlation_id=correlation_id,
-            now=now,
-            text=DEFAULT_UNHANDLED_ERROR_TEXT.format(
-                telegram_user_id=user.telegram_user_id
-            ),
+        self._append_fixed_text(
+            presentations,
+            user,
+            DEFAULT_UNHANDLED_ERROR_TEXT.format(telegram_user_id=user.telegram_user_id),
         )
-        return DispatchResult("failed")
+        return self._result("failed", (), presentations)
 
 
 class _ApplicationNavigation(ActionNavigation):
@@ -992,6 +1225,49 @@ def _find_flow(root: DiscussionFlow, key: str) -> DiscussionFlow | None:
         if flow_key == key:
             return flow
     return None
+
+
+def _checkpoint_for_selection(selection: _DirectSelection) -> DiscussionFlow | None:
+    """Find the only checkpoint whose return actions can execute with a choice."""
+
+    if selection.child.next_flow_mode is NextFlowMode.CHECKPOINT:
+        return selection.child
+    if selection.parent.next_flow_mode is NextFlowMode.CHECKPOINT:
+        return selection.parent
+    if not selection.branch.checkpoint_flow_keys:
+        return None
+    checkpoint = _find_flow(selection.root, selection.branch.checkpoint_flow_keys[-1])
+    if checkpoint is None:
+        raise ValueError("open selection checkpoint is absent from its flow version")
+    return checkpoint
+
+
+def _reply_plan_from_known_match(
+    match: PlannedFlowMatch, response_plan: CandidateResponsePlan
+) -> ReplyPlan:
+    """Bind a validated known-flow model result to local action addresses."""
+
+    replies = {reply.slot_id: reply.text for reply in match.replies}
+    bindings = response_plan.bindings
+    if match.flow_id != str(bindings[0].flow_key) or len(replies) != len(match.replies):
+        raise ValueError("known-flow model response is invalid")
+    if set(replies) != {binding.slot_id for binding in bindings}:
+        raise ValueError("known-flow reply slots do not match the local flow")
+    return ReplyPlan(
+        tuple(
+            PlannedActionText(
+                binding.flow_key, binding.action_index, replies[binding.slot_id]
+            )
+            for binding in bindings
+        )
+    )
+
+
+def _required_flow_version_id(candidate: object) -> UUID:
+    flow_version_id = getattr(candidate, "flow_version_id", None)
+    if not isinstance(flow_version_id, UUID):
+        raise TypeError("deferred routing candidate is missing a flow version")
+    return flow_version_id
 
 
 def _flow_index(root: DiscussionFlow) -> dict[str, DiscussionFlow]:

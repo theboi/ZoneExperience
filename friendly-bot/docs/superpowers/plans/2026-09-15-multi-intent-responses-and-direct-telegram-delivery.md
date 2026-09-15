@@ -623,7 +623,7 @@ git push origin main
 - Consumes: `PresentationBuffer`, `ReplyPlan`, `MultiIntentRoutingResult`, `PendingIntentService`, and `ResponseModel.plan_known_flow`.
 - Produces: reply-plan-aware action contexts, answer-fragment execution, branch-completion reporting, known-flow planning, and pending resumption.
 
-- [ ] **Step 1: Write failing action tests for paraphrased and fixed copy**
+- [x] **Step 1: Write failing action tests for paraphrased and fixed copy**
 
 Assert:
 
@@ -644,7 +644,7 @@ assert context.presentation_buffer.snapshot()[1].text == "Call 999 now"
 
 Add an invalid or absent reply-plan case that renders the authored `send_message` template, records `paraphrase.validation_fallback`, and continues.
 
-- [ ] **Step 2: Write failing application multi-intent tests**
+- [x] **Step 2: Write failing application multi-intent tests**
 
 Cover these exact dispatch outcomes:
 
@@ -657,19 +657,19 @@ Cover these exact dispatch outcomes:
 - A known button flow with paraphrased actions makes one `plan_known_flow` call.
 - A fixed-only button flow makes zero provider calls.
 
-- [ ] **Step 3: Run action and application tests and verify RED**
+- [x] **Step 3: Run action and application tests and verify RED**
 
 Run: `uv run pytest tests/e2e/test_action_registry.py tests/e2e/test_action_runner.py tests/e2e/test_application_dispatch.py -q`
 
 Expected: FAIL because contexts still enqueue durable deliveries and dispatch expects key-only routing.
 
-- [ ] **Step 4: Make action execution consume reply plans**
+- [x] **Step 4: Make action execution consume reply plans**
 
 Replace the delivery sequence in `ActionContext` with a shared `PresentationBuffer` and immutable `ReplyPlan`. Add `ActionContext.for_action(flow_key: str, action_index: int) -> ActionContext` and `ActionContext.message_template(action: SendMessageAction) -> str`. The runner supplies a per-action context to each executor. `message_template` looks up validated paraphrased text by the current action address and falls back to the authored template. `send_message_fixed` always ignores reply plans.
 
 Keep pending text-plus-buttons composition local. `flush_presentation` appends one typed presentation to the buffer. `enqueue_text_to` appends a presentation for the explicit recipient.
 
-- [ ] **Step 5: Implement application execution policy**
+- [x] **Step 5: Implement application execution policy**
 
 `FriendlyBotApplication.dispatch` owns one presentation buffer and returns it in `DispatchResult`:
 
@@ -685,17 +685,17 @@ Execute answer matches through an action-only path that never calls `SelectionTr
 
 Add explicit branch-completion state to `ActionRunResult`. After completion, rebuild current candidates, delete stale pending rows, and execute at most one valid pending flow. Do not recursively resume a second pending flow during the same update.
 
-- [ ] **Step 6: Implement known-flow response planning**
+- [x] **Step 6: Implement known-flow response planning**
 
 Before callback, command, onboarding, timestamp, or root execution, assemble its immediate reply slots. Call `plan_known_flow` once only when slots exist. On transport or protocol failure, build an authored fallback `ReplyPlan`, record a safe diagnostic, and execute the locally trusted flow.
 
-- [ ] **Step 7: Run application tests and verify GREEN**
+- [x] **Step 7: Run application tests and verify GREEN**
 
 Run: `uv run pytest tests/e2e/test_action_registry.py tests/e2e/test_action_runner.py tests/e2e/test_application_dispatch.py -q`
 
 Expected: PASS with no `NewOutboundDelivery` test doubles and no application-level outbound database writes.
 
-- [ ] **Step 8: Commit and push Task 7**
+- [x] **Step 8: Commit and push Task 7**
 
 Run:
 
