@@ -42,11 +42,11 @@ system_global_root_excerpt:
   trigger: null
   actions:
     - type: send_message
-      text: "What would you like help with?"
+      text: "Hey {{ user.name }}! Nice to meet you! What would you like help with?"
   next_flow_mode: CHECKPOINT
   return_actions:
     - type: send_message
-      text: "What would you like help with?"
+      text: "Is there anything else I can help you with?"
   next_flows:
     - key: system.global.never_mind
       trigger:
@@ -64,8 +64,11 @@ system_global_root_excerpt:
       trigger:
         type: message
         llm_gist: >-
-          The person may be in immediate danger, is considering suicide or
-          self-harm, is being abused, or urgently needs a safe responsible adult.
+          Select only when the person's current message clearly says they face
+          immediate physical danger, are considering suicide or self-harm, are
+          being abused, or urgently need a safe responsible adult. Do not select
+          this for greetings, ordinary questions, general distress, ambiguous
+          requests for help, jokes, or figurative language.
       actions:
         - type: send_message
           text: >-

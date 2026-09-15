@@ -151,8 +151,12 @@ class ConstrainedRouter:
         """Select configured keys until the gateway returns one reserved terminal."""
 
         async with self._uow_factory() as uow:
-            return await self.route_update_in_uow(
-                uow, user_id=user_id, incoming=incoming, now=now
+            return await self._route_update(
+                uow,
+                user_id=user_id,
+                incoming=incoming,
+                now=now,
+                incoming_is_persisted=False,
             )
 
     async def route_update_in_uow(
@@ -164,6 +168,25 @@ class ConstrainedRouter:
         now: datetime,
     ) -> RoutingResult:
         """Route in T02's locked ingress transaction without opening a second session."""
+
+        return await self._route_update(
+            uow,
+            user_id=user_id,
+            incoming=incoming,
+            now=now,
+            incoming_is_persisted=True,
+        )
+
+    async def _route_update(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        incoming: IncomingText,
+        now: datetime,
+        incoming_is_persisted: bool,
+    ) -> RoutingResult:
+        """Select configured keys using a prompt containing each input exactly once."""
 
         selections = await uow.open_selections.list_for_user(user_id, now=now)
         valid_selections = await _valid_selections(uow, selections, now)
@@ -178,7 +201,9 @@ class ConstrainedRouter:
         )
         remaining = {candidate.key: candidate for candidate in candidates}
         selected: list[RoutingDecision] = []
-        messages = tuple(message.body for message in unsummarized) + (incoming.body,)
+        messages = tuple(message.body for message in unsummarized)
+        if not incoming_is_persisted:
+            messages += (incoming.body,)
         for _ in range(self._max_attempts):
             request = KeySelectionRequest(
                 allowed_keys=frozenset(remaining) | _RESERVED_TERMINALS,

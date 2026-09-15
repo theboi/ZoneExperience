@@ -27,6 +27,14 @@ from friendly_bot.routing.contracts import (
 )
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+_KEY_SELECTION_INSTRUCTION = (
+    "Choose a configured flow only when the user's current message clearly "
+    "satisfies its gist. Use system.no_match when none does. A safety flow "
+    "requires an explicit disclosure of immediate danger, abuse, self-harm, or "
+    "an urgent request for a trusted adult; do not infer it from an ambiguous "
+    "request for help. Return exactly one JSON object with one key named 'key'. "
+    "Its value must be one of allowed_keys. Return no prose."
+)
 OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION = (
     "disabled-globally-or-friendly-bot-key-excluded"
 )
@@ -293,10 +301,7 @@ class OpenRouterGateway:
             await self._post(
                 self._payload(
                     request,
-                    (
-                        "Return exactly one JSON object with one key named 'key'. "
-                        "Its value must be one of allowed_keys. Return no prose."
-                    ),
+                    _KEY_SELECTION_INSTRUCTION,
                 ),
                 self._key_decoder(request.allowed_keys),
             ),

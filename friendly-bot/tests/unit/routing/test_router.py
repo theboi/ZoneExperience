@@ -17,7 +17,10 @@ from friendly_bot.domain.triggers import (
     ButtonDiscussionFlowTrigger,
     MessageDiscussionFlowTrigger,
 )
-from friendly_bot.persistence.repositories import PersonaCursorRecord
+from friendly_bot.persistence.repositories import (
+    ConversationMessageRecord,
+    PersonaCursorRecord,
+)
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.routing.router import (
     CandidateAssembler,
@@ -90,7 +93,11 @@ class StubGateway:
 
 class FakeUow:
     def __init__(
-        self, selections: list[OpenSelectionState], definitions: dict[UUID, object]
+        self,
+        selections: list[OpenSelectionState],
+        definitions: dict[UUID, object],
+        *,
+        messages: list[ConversationMessageRecord] | None = None,
     ) -> None:
         self.open_selections = SimpleNamespace(list_for_user=self._list_selections)
         self.personas = SimpleNamespace(get_or_create=self._get_cursor)
@@ -99,6 +106,7 @@ class FakeUow:
         self.services = SimpleNamespace(get=self._get_service)
         self._selections = selections
         self._definitions = definitions
+        self._messages = messages or []
 
     async def __aenter__(self) -> Self:
         return self
@@ -120,7 +128,7 @@ class FakeUow:
         self, user_id: UUID, cursor_id: UUID | None
     ) -> list[object]:
         assert user_id == USER and cursor_id is None
-        return []
+        return self._messages
 
     async def _get_definition(self, version_id: UUID) -> object:
         return self._definitions[version_id]
@@ -271,3 +279,40 @@ async def test_router_can_use_the_caller_owned_ingress_unit_of_work() -> None:
     )
 
     assert result.terminal is RoutingTerminal.DONE
+
+
+async def test_router_in_uow_does_not_repeat_the_already_persisted_input() -> None:
+    """T02 records input before routing, so the model sees it exactly once."""
+
+    version = uuid4()
+    gateway = StubGateway(["system.done"])
+    uow = FakeUow(
+        [_selection(version, "system.current", current=True)],
+        {
+            version: SimpleNamespace(
+                definition=_definition(
+                    "system.current", "flow.current", gist="now"
+                ).document
+            )
+        },
+        messages=[
+            ConversationMessageRecord(
+                id=uuid4(),
+                user_id=USER,
+                source_kind="telegram",
+                source_message_id=1,
+                body="help",
+                replied_to_body=None,
+                occurred_at=NOW,
+            )
+        ],
+    )
+
+    await ConstrainedRouter(lambda: cast(UnitOfWork, uow), gateway).route_update_in_uow(
+        cast(UnitOfWork, uow),
+        user_id=USER,
+        incoming=IncomingText(body="help"),
+        now=NOW,
+    )
+
+    assert gateway.requests[0].messages == ("help",)

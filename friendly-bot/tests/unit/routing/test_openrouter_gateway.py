@@ -1148,6 +1148,12 @@ async def test_gateway_cancellation_keeps_stdlib_worker_request_snapshots(
                     {
                         "role": "system",
                         "content": (
+                            "Choose a configured flow only when the user's current "
+                            "message clearly satisfies its gist. Use system.no_match "
+                            "when none does. A safety flow requires an explicit "
+                            "disclosure of immediate danger, abuse, self-harm, or an "
+                            "urgent request for a trusted adult; do not infer it from "
+                            "an ambiguous request for help. "
                             "Return exactly one JSON object with one key named 'key'. "
                             "Its value must be one of allowed_keys. Return no prose."
                         ),
