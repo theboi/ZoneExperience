@@ -68,8 +68,12 @@ Do not override these values, change the port, or point the bot at an arbitrary 
    FRIENDLY_BOT_DATABASE_URL=postgresql+asyncpg://friendly_bot:<POSTGRES_PASSWORD>@127.0.0.1:5833/friendly_bot
    TELEGRAM_BOT_TOKEN=<dedicated_telegram_bot_token>
    OPENROUTER_API_KEY=<openrouter_api_key>
+   OPENROUTER_MODEL=mistralai/mistral-nemo
+   FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=true
    FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION=disabled-globally-or-friendly-bot-key-excluded
    ```
+
+   For an explicitly approved non-ZDR test, set `OPENROUTER_MODEL=qwen/qwen3.7-flash` and `FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=false`. Leave `data_collection` protection enabled; restore ZDR before normal use.
 
    The literal attestation value is required. It does not contain a secret; it records the operator's confirmation that the configured OpenRouter account/key meets the privacy requirement.
 

@@ -43,10 +43,36 @@ system_global_root_excerpt:
   actions:
     - type: send_message
       text: "Hey {{ user.name }}! Nice to meet you! What would you like help with?"
+    - type: send_buttons
+      service_bound: false
+      buttons:
+        - button_id: system.global.menu.timings
+          text: Service timings for each youth group
+        - button_id: system.global.menu.directions
+          text: Directions to Star
+        - button_id: system.global.menu.expect
+          text: What to expect
+        - button_id: system.global.menu.zone
+          text: What is The Zone?
+        - button_id: system.global.menu.connect
+          text: Get connected
   next_flow_mode: CHECKPOINT
   return_actions:
     - type: send_message
       text: "Is there anything else I can help you with?"
+    - type: send_buttons
+      service_bound: false
+      buttons:
+        - button_id: system.global.menu.timings
+          text: Service timings for each youth group
+        - button_id: system.global.menu.directions
+          text: Directions to Star
+        - button_id: system.global.menu.expect
+          text: What to expect
+        - button_id: system.global.menu.zone
+          text: What is The Zone?
+        - button_id: system.global.menu.connect
+          text: Get connected
   next_flows:
     - key: system.global.never_mind
       trigger:
@@ -118,6 +144,111 @@ system_global_root_excerpt:
           return_actions: []
           next_flows: []
 
+    - key: system.global.options
+      trigger:
+        type: message
+        llm_gist: >-
+          The person asks what options are available, what the bot can do, how
+          the bot can help, or asks for a menu.
+      actions:
+        - type: return_to_nearest_checkpoint
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
+    - key: system.global.menu.timings
+      trigger:
+        type: any_of
+        triggers:
+          - type: button
+            button_id: system.global.menu.timings
+          - type: message
+            llm_gist: >-
+              The person asks for service timings, youth group times, or when a
+              youth service happens.
+      actions:
+        - type: send_message
+          text: "Service timings placeholder: add the timings for each youth group here."
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
+    - key: system.global.menu.directions
+      trigger:
+        type: any_of
+        triggers:
+          - type: button
+            button_id: system.global.menu.directions
+          - type: message
+            llm_gist: >-
+              The person asks for directions to Star Performing Arts Centre, The
+              Star Vista, or The Zone.
+      actions:
+        - type: send_message
+          text: >-
+            The Zone is at The Star Performing Arts Centre, 1 Vista Exchange
+            Green. Take the MRT to Buona Vista and follow the signs to The Star
+            Vista. Map: https://maps.google.com/?q=The+Star+Performing+Arts+Centre
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
+    - key: system.global.menu.expect
+      trigger:
+        type: any_of
+        triggers:
+          - type: button
+            button_id: system.global.menu.expect
+          - type: message
+            llm_gist: >-
+              The person asks what to expect at The Zone, what will happen, what
+              to wear, or whether they may come alone.
+      actions:
+        - type: send_message
+          text: >-
+            Come as you are. You can expect music, a message about Jesus, and
+            time to meet other youths. It’s okay to come alone, sit quietly, or
+            ask for someone to meet you before you enter.
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
+    - key: system.global.menu.zone
+      trigger:
+        type: any_of
+        triggers:
+          - type: button
+            button_id: system.global.menu.zone
+          - type: message
+            llm_gist: >-
+              The person asks what The Zone is, what this youth community is, or
+              wants to learn about The Zone.
+      actions:
+        - type: send_message
+          text: >-
+            The Zone is a youth community where you can come as you are, meet
+            other youths, and learn about Jesus.
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
+    - key: system.global.menu.connect
+      trigger:
+        type: any_of
+        triggers:
+          - type: button
+            button_id: system.global.menu.connect
+          - type: message
+            llm_gist: >-
+              The person wants to get connected with The Zone or asks for a
+              connection link.
+      actions:
+        - type: send_message
+          text: "Get connected with The Zone: https://bit.ly//thezonenew"
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
+
 service:
   key: zone_x_2026_10_18
   name: Zone X
@@ -135,7 +266,7 @@ service:
     trigger: null
     actions:
       - type: send_message
-        text: "You’re checked in for Zone X. What would you like to do?"
+        text: "Hey {{ user.name }}! Welcome to Zone X! What would you like help with?"
       - type: send_buttons
         service_bound: true
         buttons:
@@ -150,7 +281,7 @@ service:
     next_flow_mode: CHECKPOINT
     return_actions:
       - type: send_message
-        text: "Is there anything else you’d like help with at Zone X?"
+        text: "Is there anything else I can help you with at Zone X?"
       - type: send_buttons
         service_bound: true
         buttons:
@@ -176,9 +307,10 @@ service:
         actions:
           - type: send_message
             text: >-
-              Zone X is at The Star Performing Arts Centre, 1 Vista Exchange
-              Green. Take the MRT to Buona Vista and follow signs to The Star
-              Vista. Our team will be near the venue entrance to guide you.
+              Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange
+              Green! Take the MRT to Buona Vista and follow the signs to The Star
+              Vista. You'll meet our friendly welcome team in blue near the venue
+              entrance to guide you.
           - type: send_buttons
             service_bound: true
             buttons:

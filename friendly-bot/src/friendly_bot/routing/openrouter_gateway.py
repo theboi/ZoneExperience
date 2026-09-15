@@ -61,13 +61,15 @@ class GatewayProtocolError(GatewayError):
 
 
 class OpenRouterSettings(BaseSettings):
-    """Read the provider credential and non-secret privacy attestation."""
+    """Read provider routing controls, credentials, and privacy attestation."""
 
     model_config = SettingsConfigDict(
         env_prefix="", extra="ignore", env_file=PROJECT_DOTENV_FILE
     )
 
     openrouter_api_key: SecretStr | None = None
+    openrouter_model: str = OPENROUTER_MODEL
+    friendly_bot_openrouter_enforce_zdr: bool = True
     friendly_bot_openrouter_input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False
 
     @field_validator(
@@ -257,6 +259,8 @@ class OpenRouterGateway:
         *,
         api_key: str | SecretStr,
         client: GatewayHttpClient | None = None,
+        model: str = OPENROUTER_MODEL,
+        enforce_zdr: bool = True,
         timeout_seconds: float = OPENROUTER_TIMEOUT_SECONDS,
         max_attempts: int = ROUTING_MAX_ATTEMPTS,
         input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False,
@@ -265,6 +269,10 @@ class OpenRouterGateway:
             raise ValueError("timeout_seconds must be positive")
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least one")
+        if type(model) is not str or not model:
+            raise ValueError("model must be a nonempty string")
+        if type(enforce_zdr) is not bool:
+            raise ValueError("enforce_zdr must be a boolean")
         if input_output_logging_attestation != (
             OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION
         ):
@@ -275,6 +283,8 @@ class OpenRouterGateway:
             api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         )
         self._client = client or _StdlibAsyncHttpClient()
+        self._model = model
+        self._enforce_zdr = enforce_zdr
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
 
@@ -289,6 +299,8 @@ class OpenRouterGateway:
             )
         return cls(
             api_key=settings.openrouter_api_key,
+            model=settings.openrouter_model,
+            enforce_zdr=settings.friendly_bot_openrouter_enforce_zdr,
             input_output_logging_attestation=(
                 settings.friendly_bot_openrouter_input_output_logging_attestation
             ),
@@ -354,9 +366,12 @@ class OpenRouterGateway:
         request: KeySelectionRequest | PersonaSummaryRequest | MatchRankingRequest,
         instruction: str,
     ) -> dict[str, object]:
+        provider: dict[str, object] = {"data_collection": "deny"}
+        if self._enforce_zdr:
+            provider = {"zdr": True, **provider}
         return {
-            "model": OPENROUTER_MODEL,
-            "provider": {"zdr": True, "data_collection": "deny"},
+            "model": self._model,
+            "provider": provider,
             "messages": [
                 {"role": "system", "content": instruction},
                 {

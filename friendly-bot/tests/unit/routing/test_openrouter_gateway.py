@@ -364,6 +364,25 @@ def test_openrouter_settings_reads_key_and_attestation_from_explicit_dotenv(
     )
 
 
+def test_openrouter_settings_reads_an_explicit_test_model_without_zdr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An operator can temporarily test a non-ZDR model without a source edit."""
+
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR", raising=False)
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text(
+        "OPENROUTER_MODEL=qwen/qwen3.7-flash\n"
+        "FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=false\n"
+    )
+
+    settings = OpenRouterSettings(_env_file=dotenv_file)
+
+    assert settings.openrouter_model == "qwen/qwen3.7-flash"
+    assert settings.friendly_bot_openrouter_enforce_zdr is False
+
+
 def test_gateway_environment_does_not_retain_invalid_attestation_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -445,6 +464,33 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels() -> No
     assert all(sentinel not in serialized for sentinel in _IDENTIFIER_SENTINELS)
     assert "telegram" in serialized
     assert "dob" in serialized
+
+
+async def test_gateway_uses_an_explicit_test_model_without_zdr_enforcement() -> None:
+    """The testing override must reach the provider payload, not just settings."""
+
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {"choices": [{"message": {"content": '{"key":"flow.a"}'}}]},
+            )
+        ]
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        client=client,
+        model="qwen/qwen3.7-flash",
+        enforce_zdr=False,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    assert (
+        await gateway.select_key(KeySelectionRequest(allowed_keys={"flow.a"}))
+        == "flow.a"
+    )
+    assert client.requests[0]["json"]["model"] == "qwen/qwen3.7-flash"
+    assert client.requests[0]["json"]["provider"] == {"data_collection": "deny"}
 
 
 @pytest.mark.parametrize(
