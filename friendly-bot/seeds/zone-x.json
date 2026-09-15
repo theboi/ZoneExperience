@@ -5,14 +5,14 @@
     "actions": [
       {
         "type": "send_message",
-        "text": "What would you like help with?"
+        "text": "Hey {{ user.name }}! Nice to meet you! What would you like help with?"
       }
     ],
     "next_flow_mode": "CHECKPOINT",
     "return_actions": [
       {
         "type": "send_message",
-        "text": "What would you like help with?"
+        "text": "Is there anything else I can help you with?"
       }
     ],
     "next_flows": [
