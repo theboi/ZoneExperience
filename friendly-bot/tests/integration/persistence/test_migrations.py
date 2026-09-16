@@ -529,6 +529,28 @@ def test_runtime_guard_verify_only_checks_compose_configuration(
     assert calls == [("config", "--quiet")]
 
 
+def test_runtime_guard_reset_recreates_missing_runtime_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reset must recover a lost local credential file after dropping its volume."""
+
+    db_runtime_check = runtime_guard_module()
+    environment_file = tmp_path / "postgres.env"
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(db_runtime_check, "POSTGRES_ENV_FILE", environment_file)
+    monkeypatch.setattr(
+        db_runtime_check,
+        "run_compose",
+        lambda arguments: calls.append(arguments),
+    )
+
+    db_runtime_check.run_action("reset", confirm_reset=True)
+
+    assert calls == [("down", "--volumes"), ("up", "-d", "postgres")]
+    assert environment_file.is_file()
+    assert environment_file.stat().st_mode & 0o777 == 0o600
+
+
 def _docker_compose_is_available() -> bool:
     """Avoid treating the known host-tooling gap as a product test failure."""
 

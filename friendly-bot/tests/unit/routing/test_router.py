@@ -52,9 +52,7 @@ def _definition(root_key: str, child_key: str, *, gist: str) -> PublishedFlowDef
             ),
             DiscussionFlow(
                 key=f"{child_key}.button",
-                trigger=OnButtonPressTrigger(
-                    type="button", button_id="button.one"
-                ),
+                trigger=OnButtonPressTrigger(type="button", button_id="button.one"),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
             ),
         ],
@@ -335,8 +333,8 @@ async def test_router_can_use_the_caller_owned_ingress_unit_of_work() -> None:
     assert result.terminal is RoutingTerminal.NO_MATCH
 
 
-async def test_router_in_uow_does_not_repeat_the_already_persisted_input() -> None:
-    """T02 records input before routing, so the model sees it exactly once."""
+async def test_router_uses_only_the_current_input_when_history_is_persisted() -> None:
+    """A prior question must never cause its answer flow to run again."""
 
     version = uuid4()
     gateway = StubGateway([MultiIntentTerminal(kind="terminal", terminal="no_match")])
@@ -355,18 +353,27 @@ async def test_router_in_uow_does_not_repeat_the_already_persisted_input() -> No
                 user_id=USER,
                 source_kind="telegram",
                 source_message_id=1,
-                body="help",
+                body="where are the directions?",
                 replied_to_body=None,
                 occurred_at=NOW,
-            )
+            ),
+            ConversationMessageRecord(
+                id=uuid4(),
+                user_id=USER,
+                source_kind="telegram",
+                source_message_id=2,
+                body="what is The Zone?",
+                replied_to_body=None,
+                occurred_at=NOW,
+            ),
         ],
     )
 
     await ConstrainedRouter(lambda: cast(UnitOfWork, uow), gateway).route_update_in_uow(
         cast(UnitOfWork, uow),
         user_id=USER,
-        incoming=IncomingText(body="help"),
+        incoming=IncomingText(body="what is The Zone?"),
         now=NOW,
     )
 
-    assert gateway.requests[0].messages == ("help",)
+    assert gateway.requests[0].messages == ("what is The Zone?",)

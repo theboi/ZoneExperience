@@ -175,13 +175,14 @@ def run_action(action: str, *, confirm_reset: bool) -> None:
         run_compose(("up", "-d", "postgres"))
         return
 
-    require_postgres_env()
     if action == "down":
+        require_postgres_env()
         run_compose(("down",))
         return
     if not confirm_reset:
         raise RuntimeGuardError("reset requires --confirm-reset")
     run_compose(("down", "--volumes"))
+    create_postgres_env_if_needed()
     run_compose(("up", "-d", "postgres"))
 
 

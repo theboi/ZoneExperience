@@ -72,7 +72,7 @@ class TerminalGateway:
 async def test_router_reads_f01_uow_repositories_without_reply_identifier_state() -> (
     None
 ):
-    """Native reply text reaches the prompt while no reply mapping is persisted."""
+    """Routing reads only selections, persona, and immutable flow definitions."""
 
     version_id = uuid4()
     root = DiscussionFlow(
@@ -111,4 +111,4 @@ async def test_router_reads_f01_uow_repositories_without_reply_identifier_state(
     )
 
     assert result.terminal is RoutingTerminal.NO_MATCH
-    assert uow.calls == ["selections", "persona", "conversation", "flow_version"]
+    assert uow.calls == ["selections", "persona", "flow_version"]

@@ -193,7 +193,6 @@ class ConstrainedRouter:
                 user_id=user_id,
                 incoming=incoming,
                 now=now,
-                incoming_is_persisted=False,
             )
 
     async def plan_known_flow(self, request: KnownFlowRequest) -> PlannedFlowMatch:
@@ -216,7 +215,6 @@ class ConstrainedRouter:
             user_id=user_id,
             incoming=incoming,
             now=now,
-            incoming_is_persisted=True,
         )
 
     async def _route_update(
@@ -226,30 +224,23 @@ class ConstrainedRouter:
         user_id: UUID,
         incoming: IncomingText,
         now: datetime,
-        incoming_is_persisted: bool,
     ) -> MultiIntentRoutingResult:
-        """Plan all matching configured flows using a prompt containing input once."""
+        """Plan flows using only the incoming message and its explicit reply context."""
 
         selections = await uow.open_selections.list_for_user(user_id, now=now)
         valid_selections = await _valid_selections(uow, selections, now)
         cursor = await uow.personas.get_or_create(user_id)
-        unsummarized = await uow.conversations.list_after(
-            user_id, cursor.last_message_id
-        )
         definitions = await _load_definitions(uow, valid_selections)
 
         candidates = self._candidate_assembler.assemble(
             valid_selections, definitions, now=now
         )
-        messages = tuple(message.body for message in unsummarized)
-        if not incoming_is_persisted:
-            messages += (incoming.body,)
         if not candidates:
             return MultiIntentRoutingResult((), None, (), RoutingTerminal.NO_MATCH)
         model_result = await self._gateway.route_and_plan(
             MultiIntentRequest(
                 persona=cursor.persona,
-                messages=messages,
+                messages=(incoming.body,),
                 reply_body=incoming.replied_to_body,
                 candidates=tuple(
                     RoutingPromptCandidate(

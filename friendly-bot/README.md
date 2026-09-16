@@ -124,6 +124,8 @@ uv run python scripts/db_runtime_check.py reset --confirm-reset
 
 `reset` deletes the local `friendly-bot-u<uid>-postgres` volume. It is irreversible for this local database; use it only when a clean MVP database is intended.
 
+If the generated `.runtime/u<uid>/postgres.env` file is missing, `reset` creates a new one after deleting the old volume. Before running migrations, replace the password in `FRIENDLY_BOT_DATABASE_URL` in `.env` with the new `POSTGRES_PASSWORD` from that file.
+
 ## Operator failure guide
 
 | Symptom | Correct response |
