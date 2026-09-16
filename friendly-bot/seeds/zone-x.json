@@ -5,7 +5,7 @@
     "actions": [
       {
         "type": "send_message",
-        "text": "Hey {{ user.name }}! Nice to meet you! What would you like help with?"
+        "text": "Hey {{ user.name }}! Nice to meet you! Welcome to The Zone! I'm Friendly Bot, here to help you get connected to our wonderful community!"
       },
       {
         "type": "send_buttons",
@@ -13,15 +13,15 @@
         "buttons": [
           {
             "button_id": "system.global.menu.timings",
-            "text": "Service timings for each youth group"
+            "text": "When do we gather?"
           },
           {
             "button_id": "system.global.menu.directions",
-            "text": "Directions to Star"
+            "text": "How to get to service?"
           },
           {
             "button_id": "system.global.menu.expect",
-            "text": "What to expect"
+            "text": "What to expect?"
           },
           {
             "button_id": "system.global.menu.zone",
@@ -46,15 +46,15 @@
         "buttons": [
           {
             "button_id": "system.global.menu.timings",
-            "text": "Service timings for each youth group"
+            "text": "When do we gather?"
           },
           {
             "button_id": "system.global.menu.directions",
-            "text": "Directions to Star"
+            "text": "How to get to service?"
           },
           {
             "button_id": "system.global.menu.expect",
-            "text": "What to expect"
+            "text": "What to expect?"
           },
           {
             "button_id": "system.global.menu.zone",
@@ -95,8 +95,8 @@
         },
         "actions": [
           {
-            "type": "send_message_fixed",
-            "text": "Thank you for telling me. You do not have to handle this alone. I’m finding a trusted person who can support you now."
+            "type": "send_message",
+            "text": "Hey, thank you for telling me... you do not have to handle this alone. Let me help you find someone to talk to..."
           },
           {
             "type": "show_activity",
@@ -201,7 +201,7 @@
         },
         "actions": [
           {
-            "type": "send_message_fixed",
+            "type": "send_message",
             "text": "Service timings placeholder: add the timings for each youth group here."
           }
         ],
@@ -221,14 +221,18 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person asks for directions to Star Performing Arts Centre, The Star Vista, or The Zone."
+              "llm_gist": "The person asks for directions to the Star Performing Arts Centre, Star Vista, The Zone or church."
             }
           ]
         },
         "actions": [
           {
+            "type": "send_message",
+            "text": "Our services are held at Star Vista! Take the MRT to Buona Vista and follow the signs!"
+          },
+          {
             "type": "send_message_fixed",
-            "text": "The Zone is at The Star Performing Arts Centre, 1 Vista Exchange Green. Take the MRT to Buona Vista and follow the signs to The Star Vista. Map: https://maps.google.com/?q=The+Star+Performing+Arts+Centre"
+            "text": "1 Vista Exchange Green, Singapore 138617\nhttps://maps.google.com/?q=The+Star+Performing+Arts+Centre"
           }
         ],
         "next_flow_mode": "ALLOW_MANY",
@@ -305,8 +309,8 @@
         },
         "actions": [
           {
-            "type": "send_message_fixed",
-            "text": "Get connected with The Zone: https://bit.ly//thezonenew"
+            "type": "send_message",
+            "text": "Get connected at https://bit.ly//thezonenew! We would love to hear from you!"
           }
         ],
         "next_flow_mode": "ALLOW_MANY",

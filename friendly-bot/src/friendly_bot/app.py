@@ -454,7 +454,7 @@ class FriendlyBotApplication:
                 user,
                 text=(
                     self._routing_policy.no_match_text
-                    or "Sorry, I didn't understand your request."
+                    or "sorry, what did you mean?"
                 ),
             )
             return self._result("no_match", tuple(selected), presentations)
