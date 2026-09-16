@@ -302,12 +302,25 @@ class FriendlyBotApplication:
         )
         if onboarding is not None:
             return self._with_presentations(onboarding, presentations)
-        if not await self._valid_branches(unit_of_work, user.id, now=now):
+        branches = await self._valid_branches(unit_of_work, user.id, now=now)
+        if not branches:
             await self.open_system_root_for_user(
                 user_id=user.id,
                 unit_of_work=unit_of_work,
                 now=now,
                 presentations=presentations,
+            )
+        elif _has_duplicate_system_roots(
+            branches, root_flow_key=self._zone_x.system_root.root_flow_key
+        ):
+            await unit_of_work.open_selections.reset_global_root(
+                _root_selection(
+                    user=user,
+                    version=self._zone_x.system_root,
+                    root=_root_from_version(self._zone_x.system_root),
+                    now=now,
+                ),
+                at=now,
             )
         command = normalize_command(incoming.text)
         if command.startswith("/"):
@@ -546,6 +559,7 @@ class FriendlyBotApplication:
             now=now,
             run_actions=True,
             presentations=presentations,
+            reset_global_root=True,
         )
         return branch
 
@@ -1058,12 +1072,16 @@ class FriendlyBotApplication:
         service: ServiceRecord | None,
         now: datetime,
         run_actions: bool,
+        reset_global_root: bool = False,
         parent_context: ActionContext | None = None,
         presentations: PresentationBuffer | None = None,
     ) -> tuple[OpenSelectionState, int]:
         await unit_of_work.lock_user(user.id)
-        branch = await unit_of_work.open_selections.open_root(
-            _root_selection(user=user, version=version, root=root, now=now), at=now
+        root_selection = _root_selection(user=user, version=version, root=root, now=now)
+        branch = (
+            await unit_of_work.open_selections.reset_global_root(root_selection, at=now)
+            if reset_global_root
+            else await unit_of_work.open_selections.open_root(root_selection, at=now)
         )
         if not run_actions:
             return branch, 0
@@ -1312,6 +1330,22 @@ def _root_selection(
         checkpoint_flow_keys=(root_key,) if is_checkpoint else (),
         opened_at=now,
         last_focused_at=now,
+    )
+
+
+def _has_duplicate_system_roots(
+    branches: tuple[OpenSelectionState, ...], *, root_flow_key: str
+) -> bool:
+    """Detect stale immutable system-root versions before they duplicate intents."""
+
+    return (
+        sum(
+            branch.service_id is None
+            and branch.is_global_interruptive
+            and branch.parent_flow_key == root_flow_key
+            for branch in branches
+        )
+        > 1
     )
 
 

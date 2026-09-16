@@ -512,6 +512,10 @@ class OpenSelectionRepository(Protocol):
         self, root: OpenSelectionState, *, at: datetime
     ) -> OpenSelectionState: ...
 
+    async def reset_global_root(
+        self, root: OpenSelectionState, *, at: datetime
+    ) -> OpenSelectionState: ...
+
     async def apply(
         self,
         transition: SelectionTransition | CheckpointReturnTransition,
@@ -2202,6 +2206,24 @@ class SqlAlchemyOpenSelectionRepository:
         if row is None:
             raise RuntimeError("root selection could not be opened")
         return _open_selection_state(row)
+
+    async def reset_global_root(
+        self, root: OpenSelectionState, *, at: datetime
+    ) -> OpenSelectionState:
+        """Replace this user's global branch while retaining independent service branches."""
+
+        if root.user_id not in self._locked_user_ids:
+            raise RuntimeError("root selection user is not locked")
+        if root.service_id is not None or not root.is_global_interruptive:
+            raise ValueError("global root reset requires a non-service global root")
+        await self._session.execute(
+            delete(OpenFlowSelection).where(
+                OpenFlowSelection.user_id == root.user_id,
+                OpenFlowSelection.service_id.is_(None),
+                OpenFlowSelection.is_global_interruptive.is_(True),
+            )
+        )
+        return await self.open_root(root, at=at)
 
     async def apply(
         self,

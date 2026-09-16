@@ -65,6 +65,7 @@ from friendly_bot.routing.router import (
     MultiIntentRoutingResult,
     RoutedMatch,
     RoutingCandidate,
+    RoutingTerminal,
 )
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
 from friendly_bot.telegram import (
@@ -129,6 +130,16 @@ class RecordingSelections:
                 return branch
         self.branches.append(root)
         return root
+
+    async def reset_global_root(
+        self, root: OpenSelectionState, *, at: datetime
+    ) -> OpenSelectionState:
+        self.branches = [
+            branch
+            for branch in self.branches
+            if branch.service_id is not None or not branch.is_global_interruptive
+        ]
+        return await self.open_root(root, at=at)
 
     def _focus(self, target_key: str) -> None:
         self.branches = [
@@ -678,6 +689,48 @@ async def test_existing_start_opens_the_system_path_without_model_routing() -> N
     assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
         "system.dispatch.root"
     ]
+
+
+async def test_dispatch_repairs_duplicate_system_roots_before_routing() -> None:
+    """A stale immutable root must not make every following update unrouteable."""
+
+    router = ResultRouter(
+        MultiIntentRoutingResult((), None, (), RoutingTerminal.NO_MATCH)
+    )
+    application, uow, user = _fixture(router=cast(ConstrainedRouter, router))
+    current = uow.open_selections.branches[0]
+    service_id = next(iter(uow.services_by_id))
+    service_branch = replace(
+        current,
+        id=uuid4(),
+        parent_flow_key="service.zone_x.questions",
+        service_id=service_id,
+        is_global_interruptive=False,
+        ancestor_flow_keys=("service.zone_x.questions",),
+        checkpoint_flow_keys=("service.zone_x.questions",),
+    )
+    uow.open_selections.branches.append(
+        replace(current, id=uuid4(), flow_version_id=uuid4())
+    )
+    uow.open_selections.branches.append(service_branch)
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=8, text="what is the zone?"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.kind == "no_match"
+    assert router.typed_calls == 1
+    assert len(uow.open_selections.branches) == 2
+    repaired = next(
+        branch for branch in uow.open_selections.branches if branch.service_id is None
+    )
+    assert repaired.user_id == user.id
+    assert repaired.flow_version_id == current.flow_version_id
+    assert repaired.parent_flow_key == current.parent_flow_key
+    assert repaired.is_global_interruptive is True
+    assert service_branch in uow.open_selections.branches
 
 
 @pytest.mark.parametrize(
