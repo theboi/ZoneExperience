@@ -276,7 +276,7 @@ def _decode_stdlib_success_response(
         if len(body) > OPENROUTER_MAX_RESPONSE_BYTES:
             return _ProviderProtocolFailure(decoder.capability)
         if debug:
-            LOGGER.debug("OpenRouter output:\n%s", body.decode("utf-8", "replace"))
+            LOGGER.debug("LLM output:\n%s", _format_debug_output(body))
         try:
             payload = json.loads(body.decode("utf-8"))
         except Exception:  # noqa: BLE001 - malformed/deep provider JSON is closed here
@@ -504,9 +504,9 @@ class OpenRouterGateway:
                 try:
                     if self._debug:
                         LOGGER.debug(
-                            "OpenRouter input (attempt %s):\n%s",
+                            "LLM prompt (attempt %s):\n%s",
                             attempt + 1,
-                            json.dumps(request_payload, ensure_ascii=False),
+                            _format_debug_prompt(request_payload),
                         )
                     result = await self._client.post(
                         _CHAT_COMPLETIONS_URL,
@@ -872,6 +872,44 @@ def _json_schema_response_format(
         "type": "json_schema",
         "json_schema": {"name": name, "strict": True, "schema": schema},
     }
+
+
+def _format_debug_prompt(payload: Mapping[str, object]) -> str:
+    """Render only the two messages the model receives, without transport metadata."""
+
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return "<unavailable>"
+    rendered: list[str] = []
+    for message in messages:
+        if not isinstance(message, Mapping):
+            return "<unavailable>"
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            return "<unavailable>"
+        rendered.append(f"{role.upper()}:\n{_format_debug_json(content)}")
+    return "\n\n".join(rendered)
+
+
+def _format_debug_output(body: bytes | bytearray) -> str:
+    """Render only the model content from a provider envelope for local debugging."""
+
+    try:
+        envelope = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "<unavailable>"
+    content = OpenRouterGateway._assistant_content(envelope)
+    return _format_debug_json(content) if content is not None else "<unavailable>"
+
+
+def _format_debug_json(content: str) -> str:
+    """Pretty-print model JSON while preserving non-JSON content for inspection."""
+
+    try:
+        return json.dumps(json.loads(content), ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        return content
 
 
 def _reply_preserves_template(slot: ReplyTemplateSlot, text: str) -> bool:

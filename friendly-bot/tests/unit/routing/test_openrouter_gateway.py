@@ -190,7 +190,7 @@ def _gateway(client: FakeHttpxClient) -> OpenRouterGateway:
 async def test_debug_gateway_logs_openrouter_input_and_output(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An explicit local debug run exposes the complete model exchange in its terminal."""
+    """Debug mode exposes only the model prompt and its decoded JSON output."""
 
     raw_body = json.dumps(
         {"choices": [{"message": {"content": '{"key":"flow.a"}'}}]}
@@ -219,10 +219,13 @@ async def test_debug_gateway_logs_openrouter_input_and_output(
             == "flow.a"
         )
 
-    assert "OpenRouter input (attempt 1):" in caplog.text
+    assert "LLM prompt (attempt 1):" in caplog.text
+    assert "SYSTEM:" in caplog.text
+    assert "USER:" in caplog.text
     assert "hello" in caplog.text
-    assert "OpenRouter output:" in caplog.text
-    assert '\\"key\\":\\"flow.a\\"' in caplog.text
+    assert '"allowed_keys"' in caplog.text
+    assert 'LLM output:\n{\n  "key": "flow.a"\n}' in caplog.text
+    assert "choices" not in caplog.text
 
 
 def _multi_intent_request() -> MultiIntentRequest:

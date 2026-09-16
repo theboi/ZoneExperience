@@ -20,7 +20,7 @@ def main(argv: Sequence[str] = ()) -> None:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="print OpenRouter request and response bodies to this terminal",
+        help="print the LLM prompt and formatted response JSON to this terminal",
     )
     arguments = parser.parse_args(argv)
     logging.basicConfig(
@@ -29,7 +29,7 @@ def main(argv: Sequence[str] = ()) -> None:
     )
     if arguments.debug:
         LOGGER.warning(
-            "debug mode is enabled; OpenRouter inputs and outputs will be printed to this terminal"
+            "debug mode is enabled; LLM prompts and formatted response JSON will be printed to this terminal"
         )
     try:
         runtime = run_application(debug=True) if arguments.debug else run_application()

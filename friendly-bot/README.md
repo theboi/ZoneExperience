@@ -102,7 +102,7 @@ Do not override these values, change the port, or point the bot at an arbitrary 
    uv run python -m friendly_bot --debug
    ```
 
-   This prints each OpenRouter request and response body to that terminal. It can include user message content and must only be used in a private local terminal.
+   This prints each LLM prompt and its formatted response JSON to that terminal. It can include user message content and must only be used in a private local terminal.
 
 6. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
 
