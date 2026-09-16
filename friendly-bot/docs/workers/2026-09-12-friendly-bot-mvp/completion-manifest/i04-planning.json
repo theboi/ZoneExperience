@@ -32,7 +32,7 @@
   "f01_contract_reconciliation": {
     "source_commit": "9bc9e84c6f553d10c1173c786bcb48b4a8513e86",
     "consumed": [
-      "friendly_bot.domain.DiscussionFlow, DiscussionAction, ActionEvent, ActionEventDiscussionFlowTrigger, SelectionTransitionEngine, and publication types",
+      "friendly_bot.domain.DiscussionFlow, DiscussionAction, ActionEvent, OnActionEventTrigger, SelectionTransitionEngine, and publication types",
       "frozen UserRecord, OperationalProfileRecord, ServiceRecord, AttendanceRecord, MatchAssignmentRecord, and DiagnosticRecord DTOs",
       "UnitOfWork plus direct flow-version, open-selection, user, profile, service, attendance, conversation, delivery, match, and diagnostic repositories"
     ],

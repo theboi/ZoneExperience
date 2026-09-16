@@ -18,7 +18,7 @@ from friendly_bot.domain.actions import (
 )
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
-from friendly_bot.domain.triggers import ActionEventDiscussionFlowTrigger
+from friendly_bot.domain.triggers import OnActionEventTrigger
 from friendly_bot.persistence.models import OperationalRole
 from friendly_bot.persistence.repositories import DiagnosticRecord, UserRecord
 
@@ -100,7 +100,7 @@ def _flow(
     *,
     actions: list[object] | None = None,
     children: list[DiscussionFlow] | None = None,
-    trigger: ActionEventDiscussionFlowTrigger | None = None,
+    trigger: OnActionEventTrigger | None = None,
 ) -> DiscussionFlow:
     return DiscussionFlow.model_validate(
         {
@@ -138,7 +138,7 @@ async def test_terminal_event_executes_one_matching_direct_child_and_stops_paren
     child = _flow(
         "system.parent.found",
         actions=[{"type": "send_message", "text": "child copy"}],
-        trigger=ActionEventDiscussionFlowTrigger(
+        trigger=OnActionEventTrigger(
             type="action_event", event_key="human_match.found"
         ),
     )
@@ -168,7 +168,7 @@ async def test_event_never_bubbles_to_an_ancestor_or_reusable_past_selection() -
             _flow(
                 "system.ancestor.found",
                 actions=[{"type": "send_message", "text": "must not run"}],
-                trigger=ActionEventDiscussionFlowTrigger(
+                trigger=OnActionEventTrigger(
                     type="action_event", event_key="human_match.found"
                 ),
             )
@@ -202,7 +202,7 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
             _flow(
                 "system.direct-error.recovery",
                 actions=[{"type": "send_message", "text": "custom recovery"}],
-                trigger=ActionEventDiscussionFlowTrigger(
+                trigger=OnActionEventTrigger(
                     type="action_event", event_key="error"
                 ),
             )

@@ -9,10 +9,10 @@ from friendly_bot.domain.actions import SendMessageAction
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.templates import template_tokens, urls
 from friendly_bot.domain.triggers import (
-    ActionEventDiscussionFlowTrigger,
-    AnyOfDiscussionFlowTrigger,
-    DiscussionFlowTrigger,
-    MessageDiscussionFlowTrigger,
+    OnActionEventTrigger,
+    OnAnyOfTrigger,
+    DiscussionTrigger,
+    OnMessageTrigger,
 )
 from friendly_bot.routing.contracts import ReplyTemplateSlot
 
@@ -91,17 +91,17 @@ class ReplyPlan:
         return (flow_key, action_index) in self.fallback_addresses
 
 
-def message_gists(trigger: DiscussionFlowTrigger | None) -> tuple[str, ...]:
+def message_gists(trigger: DiscussionTrigger | None) -> tuple[str, ...]:
     """Return ordered typed-message gists from a direct or `any_of` trigger."""
 
-    if isinstance(trigger, MessageDiscussionFlowTrigger):
+    if isinstance(trigger, OnMessageTrigger):
         return (trigger.llm_gist,)
-    if not isinstance(trigger, AnyOfDiscussionFlowTrigger):
+    if not isinstance(trigger, OnAnyOfTrigger):
         return ()
     return tuple(
         child.llm_gist
         for child in trigger.triggers
-        if isinstance(child, MessageDiscussionFlowTrigger)
+        if isinstance(child, OnMessageTrigger)
     )
 
 
@@ -154,7 +154,7 @@ def _immediate_action_event_closure(flow: DiscussionFlow) -> Iterator[Discussion
 
     yield flow
     for child in flow.next_flows:
-        if isinstance(child.trigger, ActionEventDiscussionFlowTrigger):
+        if isinstance(child.trigger, OnActionEventTrigger):
             yield from _immediate_action_event_closure(child)
 
 
@@ -162,7 +162,7 @@ def _can_return_before_next_input(flow: DiscussionFlow) -> bool:
     """Require every reachable child edge to be an immediate action-event edge."""
 
     return all(
-        isinstance(child.trigger, ActionEventDiscussionFlowTrigger)
+        isinstance(child.trigger, OnActionEventTrigger)
         and _can_return_before_next_input(child)
         for child in flow.next_flows
     )

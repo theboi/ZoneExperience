@@ -28,8 +28,8 @@ from friendly_bot.domain.flows import (
 )
 from friendly_bot.domain.templates import TEMPLATE_TOKEN_PATTERN
 from friendly_bot.domain.triggers import (
-    ActionEventDiscussionFlowTrigger,
-    DiscussionFlowTrigger,
+    OnActionEventTrigger,
+    DiscussionTrigger,
     parse_trigger,
 )
 
@@ -256,7 +256,7 @@ def _validate_answer_flow(node: DiscussionFlow) -> None:
         )
 
 
-def _validate_trigger(trigger: DiscussionFlowTrigger | None, *, flow_key: str) -> None:
+def _validate_trigger(trigger: DiscussionTrigger | None, *, flow_key: str) -> None:
     if trigger is None:
         return
     try:
@@ -354,7 +354,7 @@ def _validate_direct_event_handlers(node: DiscussionFlow, event_keys: set[str]) 
     handlers: set[str] = set()
     for child in node.next_flows:
         trigger = child.trigger
-        if isinstance(trigger, ActionEventDiscussionFlowTrigger):
+        if isinstance(trigger, OnActionEventTrigger):
             event_key = trigger.event_key
             if event_key in handlers:
                 raise FlowPublicationError(
@@ -424,7 +424,7 @@ def _reachable_direct_event_children(node: DiscussionFlow) -> list[DiscussionFlo
     children: list[DiscussionFlow] = []
     for child in node.next_flows:
         trigger = child.trigger
-        if isinstance(trigger, ActionEventDiscussionFlowTrigger) and (
+        if isinstance(trigger, OnActionEventTrigger) and (
             trigger.event_key in declared or trigger.event_key == "error"
         ):
             children.append(child)

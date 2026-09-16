@@ -28,7 +28,7 @@
   "planned_contracts": {
     "domain": [
       "DiscussionFlow",
-      "DiscussionFlowTrigger",
+      "DiscussionTrigger",
       "DiscussionAction",
       "validate_for_publication",
       "SelectionTransitionEngine"

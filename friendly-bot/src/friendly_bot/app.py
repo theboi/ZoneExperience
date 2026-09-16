@@ -44,12 +44,12 @@ from friendly_bot.domain.publication import (
 )
 from friendly_bot.domain.state import OpenSelectionState, SelectionTransitionEngine
 from friendly_bot.domain.triggers import (
-    ActionEventDiscussionFlowTrigger,
-    AnyOfDiscussionFlowTrigger,
-    ButtonDiscussionFlowTrigger,
-    CommandDiscussionFlowTrigger,
-    DiscussionFlowTrigger,
-    MessageDiscussionFlowTrigger,
+    OnActionEventTrigger,
+    OnButtonPressTrigger,
+    OnAnyOfTrigger,
+    OnCommandTrigger,
+    DiscussionTrigger,
+    OnMessageTrigger,
 )
 from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
@@ -1349,25 +1349,25 @@ def _has_duplicate_system_roots(
     )
 
 
-def _matches_button(trigger: DiscussionFlowTrigger | None, button_id: str) -> bool:
+def _matches_button(trigger: DiscussionTrigger | None, button_id: str) -> bool:
     return any(
-        isinstance(candidate, ButtonDiscussionFlowTrigger)
+        isinstance(candidate, OnButtonPressTrigger)
         and candidate.button_id == button_id
         for candidate in _trigger_options(trigger)
     )
 
 
-def _matches_command(trigger: DiscussionFlowTrigger | None, command: str) -> bool:
+def _matches_command(trigger: DiscussionTrigger | None, command: str) -> bool:
     return any(
-        isinstance(candidate, CommandDiscussionFlowTrigger)
+        isinstance(candidate, OnCommandTrigger)
         and candidate.command == command
         for candidate in _trigger_options(trigger)
     )
 
 
-def _matches_message(trigger: DiscussionFlowTrigger | None) -> bool:
+def _matches_message(trigger: DiscussionTrigger | None) -> bool:
     return any(
-        isinstance(candidate, MessageDiscussionFlowTrigger)
+        isinstance(candidate, OnMessageTrigger)
         for candidate in _trigger_options(trigger)
     )
 
@@ -1379,9 +1379,9 @@ def _message_flow_key_matcher(key: str) -> Callable[[DiscussionFlow], bool]:
 
 
 def _trigger_options(
-    trigger: DiscussionFlowTrigger | None,
+    trigger: DiscussionTrigger | None,
 ) -> tuple[object, ...]:
-    if isinstance(trigger, AnyOfDiscussionFlowTrigger):
+    if isinstance(trigger, OnAnyOfTrigger):
         return tuple(trigger.triggers)
     if trigger is None:
         return ()
@@ -1397,7 +1397,7 @@ def _direct_action_event_child(
         child
         for child in parent.next_flows
         if str(child.key) == key
-        and isinstance(child.trigger, ActionEventDiscussionFlowTrigger)
+        and isinstance(child.trigger, OnActionEventTrigger)
     ]
     if len(matches) > 1:
         raise ValueError("published flow has duplicate direct action-event children")

@@ -19,7 +19,7 @@ from friendly_bot.domain.actions import (
 )
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
-from friendly_bot.domain.triggers import ActionEventDiscussionFlowTrigger
+from friendly_bot.domain.triggers import OnActionEventTrigger
 
 DEFAULT_UNHANDLED_ERROR_TEXT = "Sorry, an error occurred. Error log: {correlation_id}."
 LOGGER = logging.getLogger(__name__)
@@ -95,7 +95,6 @@ class ActionRunner:
                 event,
                 executed_flow_keys,
             )
-            return not flow.next_flows
         await context.flush_presentation()
         return not flow.next_flows
 
@@ -192,7 +191,7 @@ def _direct_event_child(
     matches = [
         child
         for child in parent.next_flows
-        if isinstance(child.trigger, ActionEventDiscussionFlowTrigger)
+        if isinstance(child.trigger, OnActionEventTrigger)
         and child.trigger.event_key == event_key
     ]
     if len(matches) > 1:

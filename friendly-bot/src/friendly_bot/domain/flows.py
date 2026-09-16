@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from friendly_bot.domain.actions import DiscussionAction
 from friendly_bot.domain.events import StableKey
-from friendly_bot.domain.triggers import DiscussionFlowTrigger
+from friendly_bot.domain.triggers import DiscussionTrigger
 
 
 class NextFlowMode(StrEnum):
@@ -32,7 +32,7 @@ class DiscussionFlow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     key: StableKey
-    trigger: DiscussionFlowTrigger | None = None
+    trigger: DiscussionTrigger | None = None
     multi_intent_mode: MultiIntentMode = MultiIntentMode.INTERACTIVE
     actions: list[DiscussionAction] = Field(default_factory=list)
     next_flows: list[DiscussionFlow] = Field(default_factory=list)

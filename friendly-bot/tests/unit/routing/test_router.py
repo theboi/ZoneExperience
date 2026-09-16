@@ -14,9 +14,9 @@ from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.domain.triggers import (
-    AnyOfDiscussionFlowTrigger,
-    ButtonDiscussionFlowTrigger,
-    MessageDiscussionFlowTrigger,
+    OnAnyOfTrigger,
+    OnButtonPressTrigger,
+    OnMessageTrigger,
 )
 from friendly_bot.persistence.repositories import (
     ConversationMessageRecord,
@@ -47,12 +47,12 @@ def _definition(root_key: str, child_key: str, *, gist: str) -> PublishedFlowDef
         next_flows=[
             DiscussionFlow(
                 key=child_key,
-                trigger=MessageDiscussionFlowTrigger(type="message", llm_gist=gist),
+                trigger=OnMessageTrigger(type="message", llm_gist=gist),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
             ),
             DiscussionFlow(
                 key=f"{child_key}.button",
-                trigger=ButtonDiscussionFlowTrigger(
+                trigger=OnButtonPressTrigger(
                     type="button", button_id="button.one"
                 ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
@@ -206,13 +206,13 @@ def test_candidate_assembly_includes_one_any_of_message_candidate() -> None:
         next_flows=[
             DiscussionFlow(
                 key="system.home.directions",
-                trigger=AnyOfDiscussionFlowTrigger(
+                trigger=OnAnyOfTrigger(
                     type="any_of",
                     triggers=[
-                        ButtonDiscussionFlowTrigger(
+                        OnButtonPressTrigger(
                             type="button", button_id="menu.directions"
                         ),
-                        MessageDiscussionFlowTrigger(
+                        OnMessageTrigger(
                             type="message", llm_gist="asks for directions"
                         ),
                     ],

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import OpenSelectionState
-from friendly_bot.domain.triggers import MessageDiscussionFlowTrigger
+from friendly_bot.domain.triggers import OnMessageTrigger
 from friendly_bot.persistence.repositories import PersonaCursorRecord
 from friendly_bot.routing.contracts import MultiIntentTerminal
 from friendly_bot.routing.router import ConstrainedRouter, IncomingText, RoutingTerminal
@@ -81,7 +81,7 @@ async def test_router_reads_f01_uow_repositories_without_reply_identifier_state(
         next_flows=[
             DiscussionFlow(
                 key="flow.help",
-                trigger=MessageDiscussionFlowTrigger(type="message", llm_gist="help"),
+                trigger=OnMessageTrigger(type="message", llm_gist="help"),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
             )
         ],

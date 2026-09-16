@@ -14,9 +14,9 @@ from friendly_bot.domain.actions import (
     SendMessageFixedAction,
 )
 from friendly_bot.domain.triggers import (
-    AnyOfDiscussionFlowTrigger,
-    ButtonDiscussionFlowTrigger,
-    MessageDiscussionFlowTrigger,
+    OnAnyOfTrigger,
+    OnButtonPressTrigger,
+    OnMessageTrigger,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -76,16 +76,16 @@ def test_system_root_options_question_reopens_the_same_button_menu() -> None:
         flow for flow in root.next_flows if flow.key == "system.global.options"
     )
 
-    assert isinstance(options_flow.trigger, MessageDiscussionFlowTrigger)
+    assert isinstance(options_flow.trigger, OnMessageTrigger)
     assert "what options" in options_flow.trigger.llm_gist
     assert isinstance(options_flow.actions[0], ReturnToNearestCheckpointAction)
 
     for flow in root.next_flows:
         if not flow.key.startswith("system.global.menu."):
             continue
-        assert isinstance(flow.trigger, AnyOfDiscussionFlowTrigger)
+        assert isinstance(flow.trigger, OnAnyOfTrigger)
         assert any(
-            isinstance(trigger, ButtonDiscussionFlowTrigger)
+            isinstance(trigger, OnButtonPressTrigger)
             for trigger in flow.trigger.triggers
         )
 

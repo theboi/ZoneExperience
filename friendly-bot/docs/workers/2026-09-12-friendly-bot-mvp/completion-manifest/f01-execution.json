@@ -222,7 +222,7 @@
       "friendly_bot.domain": [
         "ActionEvent",
         "DiscussionAction",
-        "DiscussionFlowTrigger",
+        "DiscussionTrigger",
         "parse_action",
         "parse_trigger"
       ],

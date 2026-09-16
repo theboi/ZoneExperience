@@ -7,10 +7,10 @@ import pytest
 from friendly_bot.domain.actions import SendMessageAction, SendMessageFixedAction
 from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
 from friendly_bot.domain.triggers import (
-    ActionEventDiscussionFlowTrigger,
-    AnyOfDiscussionFlowTrigger,
-    ButtonDiscussionFlowTrigger,
-    MessageDiscussionFlowTrigger,
+    OnActionEventTrigger,
+    OnAnyOfTrigger,
+    OnButtonPressTrigger,
+    OnMessageTrigger,
 )
 from friendly_bot.responses.planner import (
     PlannedActionText,
@@ -21,27 +21,27 @@ from friendly_bot.responses.planner import (
 
 
 def test_message_gists_extracts_ordered_message_alternatives_only() -> None:
-    trigger = AnyOfDiscussionFlowTrigger(
+    trigger = OnAnyOfTrigger(
         type="any_of",
         triggers=[
-            ButtonDiscussionFlowTrigger(type="button", button_id="menu.directions"),
-            MessageDiscussionFlowTrigger(
+            OnButtonPressTrigger(type="button", button_id="menu.directions"),
+            OnMessageTrigger(
                 type="message", llm_gist="asks for directions"
             ),
-            MessageDiscussionFlowTrigger(type="message", llm_gist="asks for a map"),
+            OnMessageTrigger(type="message", llm_gist="asks for a map"),
         ],
     )
 
     assert message_gists(trigger) == ("asks for directions", "asks for a map")
     assert (
         message_gists(
-            AnyOfDiscussionFlowTrigger(
+            OnAnyOfTrigger(
                 type="any_of",
                 triggers=[
-                    ButtonDiscussionFlowTrigger(
+                    OnButtonPressTrigger(
                         type="button", button_id="menu.directions"
                     ),
-                    ButtonDiscussionFlowTrigger(type="button", button_id="menu.expect"),
+                    OnButtonPressTrigger(type="button", button_id="menu.expect"),
                 ],
             )
         )
@@ -57,7 +57,7 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
     )
     child = DiscussionFlow(
         key="system.home.ask",
-        trigger=MessageDiscussionFlowTrigger(type="message", llm_gist="asks"),
+        trigger=OnMessageTrigger(type="message", llm_gist="asks"),
         next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
         actions=[
             SendMessageAction(type="send_message", text="first {{ user.name }}"),
@@ -66,7 +66,7 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
         next_flows=[
             DiscussionFlow(
                 key="system.home.ask.found",
-                trigger=ActionEventDiscussionFlowTrigger(
+                trigger=OnActionEventTrigger(
                     type="action_event", event_key="match.found"
                 ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
@@ -74,7 +74,7 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
             ),
             DiscussionFlow(
                 key="system.home.ask.none",
-                trigger=ActionEventDiscussionFlowTrigger(
+                trigger=OnActionEventTrigger(
                     type="action_event", event_key="match.none"
                 ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
