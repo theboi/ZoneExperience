@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -184,6 +185,44 @@ def _gateway(client: FakeHttpxClient) -> OpenRouterGateway:
         client=client,
         input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
     )
+
+
+async def test_debug_gateway_logs_openrouter_input_and_output(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An explicit local debug run exposes the complete model exchange in its terminal."""
+
+    raw_body = json.dumps(
+        {"choices": [{"message": {"content": '{"key":"flow.a"}'}}]}
+    ).encode()
+
+    def successful_urlopen(*args: object, **kwargs: object) -> RawStdlibResponse:
+        del args, kwargs
+        return RawStdlibResponse(raw_body)
+
+    monkeypatch.setattr(
+        "friendly_bot.routing.openrouter_gateway.urlopen", successful_urlopen
+    )
+    gateway = OpenRouterGateway(
+        api_key="test-only",
+        debug=True,
+        input_output_logging_attestation=_OBSERVABILITY_ATTESTATION,
+    )
+
+    with caplog.at_level(
+        logging.DEBUG, logger="friendly_bot.routing.openrouter_gateway"
+    ):
+        assert (
+            await gateway.select_key(
+                KeySelectionRequest(allowed_keys={"flow.a"}, messages=["hello"])
+            )
+            == "flow.a"
+        )
+
+    assert "OpenRouter input (attempt 1):" in caplog.text
+    assert "hello" in caplog.text
+    assert "OpenRouter output:" in caplog.text
+    assert '\\"key\\":\\"flow.a\\"' in caplog.text
 
 
 def _multi_intent_request() -> MultiIntentRequest:

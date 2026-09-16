@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -37,6 +38,7 @@ from friendly_bot.routing.contracts import (
 )
 
 _CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+LOGGER = logging.getLogger(__name__)
 _KEY_SELECTION_INSTRUCTION = (
     "Choose a configured flow only when the user's current message clearly "
     "satisfies its gist. Use system.no_match when none does. A safety flow "
@@ -185,6 +187,9 @@ class _BoundedReadableResponse(Protocol):
 class _StdlibAsyncHttpClient:
     """Small async wrapper that avoids a second application persistence boundary."""
 
+    def __init__(self, *, debug: bool = False) -> None:
+        self._debug = debug
+
     async def post(
         self,
         url: str,
@@ -203,6 +208,7 @@ class _StdlibAsyncHttpClient:
             payload=payload_snapshot,
             timeout=timeout,
             decoder=decoder,
+            debug=self._debug,
         )
 
     @staticmethod
@@ -213,6 +219,7 @@ class _StdlibAsyncHttpClient:
         payload: dict[str, object],
         timeout: float,
         decoder: _ProviderPayloadDecoder,
+        debug: bool,
     ) -> _DecodedProviderResult:
         request_body: bytes | None = None
         request_headers = dict(headers)
@@ -228,7 +235,7 @@ class _StdlibAsyncHttpClient:
             with urlopen(request, timeout=timeout) as response:
                 if not 200 <= response.status < 300:
                     return _ProviderTransportFailure()
-                return _decode_stdlib_success_response(response, decoder)
+                return _decode_stdlib_success_response(response, decoder, debug=debug)
         except HTTPError:
             # Deliberately do not read an HTTPError body: it may contain provider data.
             return _ProviderTransportFailure()
@@ -244,7 +251,10 @@ class _StdlibAsyncHttpClient:
 
 
 def _decode_stdlib_success_response(
-    response: _BoundedReadableResponse, decoder: _ProviderPayloadDecoder
+    response: _BoundedReadableResponse,
+    decoder: _ProviderPayloadDecoder,
+    *,
+    debug: bool = False,
 ) -> _DecodedProviderResult:
     """Bound, parse, validate, and clear one successful provider body in one scope."""
 
@@ -256,6 +266,8 @@ def _decode_stdlib_success_response(
             return _ProviderTransportFailure()
         if len(body) > OPENROUTER_MAX_RESPONSE_BYTES:
             return _ProviderProtocolFailure(decoder.capability)
+        if debug:
+            LOGGER.debug("OpenRouter output:\n%s", body.decode("utf-8", "replace"))
         try:
             payload = json.loads(body.decode("utf-8"))
         except Exception:  # noqa: BLE001 - malformed/deep provider JSON is closed here
@@ -291,6 +303,7 @@ class OpenRouterGateway:
         timeout_seconds: float = OPENROUTER_TIMEOUT_SECONDS,
         max_attempts: int = OPENROUTER_HTTP_MAX_ATTEMPTS,
         input_output_logging_attestation: OpenRouterInputOutputLoggingAttestation = False,
+        debug: bool = False,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -300,6 +313,8 @@ class OpenRouterGateway:
             raise ValueError("model must be a nonempty string")
         if type(enforce_zdr) is not bool:
             raise ValueError("enforce_zdr must be a boolean")
+        if type(debug) is not bool:
+            raise ValueError("debug must be a boolean")
         if input_output_logging_attestation != (
             OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION
         ):
@@ -309,14 +324,15 @@ class OpenRouterGateway:
         self._api_key = (
             api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         )
-        self._client = client or _StdlibAsyncHttpClient()
+        self._client = client or _StdlibAsyncHttpClient(debug=debug)
         self._model = model
         self._enforce_zdr = enforce_zdr
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
+        self._debug = debug
 
     @classmethod
-    def from_environment(cls) -> OpenRouterGateway:
+    def from_environment(cls, *, debug: bool = False) -> OpenRouterGateway:
         """Construct only when an operator explicitly attests provider logging safety."""
 
         settings = OpenRouterSettings.from_environment()
@@ -331,6 +347,7 @@ class OpenRouterGateway:
             input_output_logging_attestation=(
                 settings.friendly_bot_openrouter_input_output_logging_attestation
             ),
+            debug=debug,
         )
 
     async def select_key(self, request: KeySelectionRequest) -> str:
@@ -476,6 +493,12 @@ class OpenRouterGateway:
         try:
             for attempt in range(self._max_attempts):
                 try:
+                    if self._debug:
+                        LOGGER.debug(
+                            "OpenRouter input (attempt %s):\n%s",
+                            attempt + 1,
+                            json.dumps(request_payload, ensure_ascii=False),
+                        )
                     result = await self._client.post(
                         _CHAT_COMPLETIONS_URL,
                         headers=headers,

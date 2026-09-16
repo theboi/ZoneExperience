@@ -29,3 +29,18 @@ def test_main_logs_an_unexpected_runtime_failure(
             "friendly bot runtime stopped unexpectedly",
         )
     ]
+
+
+def test_main_passes_debug_to_the_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI flag must reach the provider boundary through runtime composition."""
+
+    observed: list[bool] = []
+
+    async def recording_runtime(*, debug: bool = False) -> None:
+        observed.append(debug)
+
+    monkeypatch.setattr(__main__, "run_application", recording_runtime)
+
+    __main__.main(["--debug"])
+
+    assert observed == [True]

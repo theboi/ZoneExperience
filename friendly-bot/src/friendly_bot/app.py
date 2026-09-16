@@ -1542,7 +1542,7 @@ class FriendlyBotRuntime:
             await self._engine.dispose()
 
 
-async def build_application() -> FriendlyBotRuntime:
+async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
     """Compose and idempotently publish Zone X without polling or sending anything."""
 
     database_settings = DatabaseSettings.model_validate({})
@@ -1552,7 +1552,7 @@ async def build_application() -> FriendlyBotRuntime:
     unit_of_work_factory: UnitOfWorkFactory = lambda: UnitOfWork(session_factory)
     telegram = TelegramApiClient(telegram_settings.telegram_bot_token)
     try:
-        router_gateway = OpenRouterGateway.from_environment()
+        router_gateway = OpenRouterGateway.from_environment(debug=debug)
         services = ServiceAttendanceService(unit_of_work_factory)
         onboarding = OnboardingService(unit_of_work_factory)
         lifecycle = ServiceLifecycleService(unit_of_work_factory)
@@ -1618,10 +1618,10 @@ async def build_application() -> FriendlyBotRuntime:
         raise
 
 
-async def run_application() -> None:
+async def run_application(*, debug: bool = False) -> None:
     """Run the sole local polling and scheduler process until stopped."""
 
-    runtime = await build_application()
+    runtime = await build_application(debug=debug)
     try:
         await runtime.preflight.ensure_polling_ready()
         runtime_lock = await TelegramRuntimeLock.acquire(

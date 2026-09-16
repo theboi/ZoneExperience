@@ -96,6 +96,14 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    The process publishes the bundled Zone X seed idempotently, verifies Telegram webhook state, obtains one PostgreSQL advisory lock, then runs polling, outbox delivery, and service scheduling together. A second process against the same database should refuse to start rather than compete for Telegram updates.
 
+   To inspect OpenRouter routing during local debugging, run:
+
+   ```sh
+   uv run python -m friendly_bot --debug
+   ```
+
+   This prints each OpenRouter request and response body to that terminal. It can include user message content and must only be used in a private local terminal.
+
 6. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
 
 ## Stopping and local data lifecycle
