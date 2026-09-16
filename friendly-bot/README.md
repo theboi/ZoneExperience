@@ -50,6 +50,8 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    If this reports `Docker Compose v2 plugin is unavailable`, start Colima, confirm `docker context show` prints `colima`, then install or register the Homebrew Compose plugin as described above and rerun the command. Do not work around the guard with a differently named Compose project or another database.
 
+   Else try restarting/starting `colima stop -f; colima start` first.
+
 2. Start the local PostgreSQL container. On its first run, the guard creates a mode-`600`, ignored credential file at `.runtime/u<uid>/postgres.env`, where `<uid>` is the value of `id -u`.
 
    ```sh
