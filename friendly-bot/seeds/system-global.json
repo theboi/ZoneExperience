@@ -13,23 +13,23 @@
         "buttons": [
           {
             "button_id": "system.global.menu.timings",
-            "text": "When do we gather?"
+            "text": "when do we gather?"
           },
           {
             "button_id": "system.global.menu.directions",
-            "text": "How to get to service?"
+            "text": "how to get to service?"
           },
           {
             "button_id": "system.global.menu.expect",
-            "text": "What to expect?"
+            "text": "what to expect?"
           },
           {
             "button_id": "system.global.menu.zone",
-            "text": "What is The Zone?"
+            "text": "what is The Zone?"
           },
           {
             "button_id": "system.global.menu.connect",
-            "text": "Get connected"
+            "text": "get connected!"
           }
         ]
       }
@@ -38,7 +38,7 @@
     "return_actions": [
       {
         "type": "send_message",
-        "text": "Is there anything else I can help you with?"
+        "text": "Is there anything else I can help you with? (you can ask me any question!)"
       },
       {
         "type": "send_buttons",
@@ -46,23 +46,23 @@
         "buttons": [
           {
             "button_id": "system.global.menu.timings",
-            "text": "When do we gather?"
+            "text": "when do we gather?"
           },
           {
             "button_id": "system.global.menu.directions",
-            "text": "How to get to service?"
+            "text": "how to get to service?"
           },
           {
             "button_id": "system.global.menu.expect",
-            "text": "What to expect?"
+            "text": "what to expect?"
           },
           {
             "button_id": "system.global.menu.zone",
-            "text": "What is The Zone?"
+            "text": "what is The Zone?"
           },
           {
             "button_id": "system.global.menu.connect",
-            "text": "Get connected"
+            "text": "get connected!"
           }
         ]
       }
@@ -188,17 +188,11 @@
         "actions": [
           {
             "type": "send_message",
-            "text": "which service are you asking about? you can choose Arrow below or reply with a service name."
+            "text": "we have different youth groups for different ages! which are you referring to?"
           },
           {
-            "type": "send_buttons",
-            "service_bound": false,
-            "buttons": [
-              {
-                "button_id": "system.global.menu.timings.arrow",
-                "text": "Arrow"
-              }
-            ]
+            "type": "send_message_fixed",
+            "text": "DARE: for secondary school students aged 13-17yo\n Arrow: for post-secondary school students and NSFs aged 17-23yo\n Varsity: for university students"
           }
         ],
         "next_flow_mode": "ALLOW_MANY",
@@ -211,12 +205,8 @@
               "type": "any_of",
               "triggers": [
                 {
-                  "type": "button",
-                  "button_id": "system.global.menu.timings.arrow"
-                },
-                {
                   "type": "message",
-                  "llm_gist": "The person answers the current service-timing question by naming Arrow or asks for Arrow service timings."
+                  "llm_gist": "The person asks for Arrow service timings."
                 }
               ]
             },
