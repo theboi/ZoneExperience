@@ -357,7 +357,7 @@ class OpenRouterGateway:
                 self._payload(
                     request,
                     _MULTI_INTENT_RESPONSE_INSTRUCTION,
-                    response_format={"type": "json_object"},
+                    response_format=_multi_intent_response_format(request),
                     reasoning={"effort": "none"},
                     max_tokens=1024,
                 ),
@@ -373,7 +373,7 @@ class OpenRouterGateway:
                 self._payload(
                     request,
                     _MULTI_INTENT_RESPONSE_INSTRUCTION,
-                    response_format={"type": "json_object"},
+                    response_format=_known_flow_response_format(request),
                     reasoning={"effort": "none"},
                     max_tokens=1024,
                 ),
@@ -433,11 +433,13 @@ class OpenRouterGateway:
         ),
         instruction: str,
         *,
-        response_format: dict[str, str] | None = None,
+        response_format: dict[str, object] | None = None,
         reasoning: dict[str, str] | None = None,
         max_tokens: int | None = None,
     ) -> dict[str, object]:
         provider: dict[str, object] = {"data_collection": "deny"}
+        if response_format is not None and response_format.get("type") == "json_schema":
+            provider["require_parameters"] = True
         if self._enforce_zdr:
             provider = {"zdr": True, **provider}
         payload: dict[str, object] = {
@@ -612,8 +614,11 @@ class OpenRouterGateway:
                 return _ProviderProtocolFailure(capability)
             try:
                 parsed = json.loads(content)
+            except json.JSONDecodeError:
+                return _ProviderProtocolFailure(capability)
+            try:
                 proposed = _MULTI_INTENT_RESULT_ADAPTER.validate_python(parsed)
-            except (json.JSONDecodeError, ValidationError):
+            except ValidationError:
                 return _ProviderProtocolFailure(capability)
             if isinstance(proposed, MultiIntentTerminal):
                 return _DecodedProviderValue(proposed, capability)
@@ -745,6 +750,96 @@ def _normalize_match(
             for reply in (replies[slot_id],)
         ),
     )
+
+
+def _multi_intent_response_format(request: MultiIntentRequest) -> dict[str, object]:
+    """Require the provider to emit the current multi-intent contract at source."""
+
+    flow_ids = sorted(candidate.flow_id for candidate in request.candidates)
+    return _json_schema_response_format(
+        name="friendly_bot_multi_intent",
+        schema={
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["matches", "terminal"],
+                    "description": "Use matches for selected configured flows or terminal otherwise.",
+                },
+                "matches": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": _planned_flow_schema(flow_ids),
+                },
+                "terminal": {
+                    "type": "string",
+                    "enum": ["no_match", "clarify_ambiguous_context"],
+                },
+            },
+            "required": ["kind"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def _known_flow_response_format(request: KnownFlowRequest) -> dict[str, object]:
+    """Require the provider to emit one current known-flow reply plan at source."""
+
+    return _json_schema_response_format(
+        name="friendly_bot_known_flow",
+        schema={
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "string", "enum": [request.flow_id]},
+                "replies": _planned_reply_list_schema(),
+            },
+            "required": ["flow_id", "replies"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def _planned_flow_schema(flow_ids: list[str]) -> dict[str, object]:
+    """Describe a model-selected local flow without exposing durable identity."""
+
+    return {
+        "type": "object",
+        "properties": {
+            "flow_id": {"type": "string", "enum": flow_ids},
+            "replies": _planned_reply_list_schema(),
+        },
+        "required": ["flow_id", "replies"],
+        "additionalProperties": False,
+    }
+
+
+def _planned_reply_list_schema() -> dict[str, object]:
+    """Describe typed reply fields; local validation still protects template syntax."""
+
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "slot_id": {"type": "string", "pattern": "^r[0-9]+$"},
+                "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+            },
+            "required": ["slot_id", "text"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _json_schema_response_format(
+    *, name: str, schema: dict[str, object]
+) -> dict[str, object]:
+    """Build OpenRouter's strict structured-output request shape."""
+
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": name, "strict": True, "schema": schema},
+    }
 
 
 def _reply_preserves_template(slot: ReplyTemplateSlot, text: str) -> bool:

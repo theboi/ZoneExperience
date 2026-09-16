@@ -21,9 +21,7 @@ from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.triggers import ActionEventDiscussionFlowTrigger
 
-DEFAULT_UNHANDLED_ERROR_TEXT = (
-    "Sorry, an error occurred. Error log: {telegram_user_id}."
-)
+DEFAULT_UNHANDLED_ERROR_TEXT = "Sorry, an error occurred. Error log: {correlation_id}."
 LOGGER = logging.getLogger(__name__)
 
 
@@ -208,9 +206,7 @@ async def send_unhandled_action_error(context: ActionContext) -> None:
     """Queue the exact code-owned fallback, never a configurable flow action."""
 
     await context.enqueue_text(
-        DEFAULT_UNHANDLED_ERROR_TEXT.format(
-            telegram_user_id=context.user.telegram_user_id
-        )
+        DEFAULT_UNHANDLED_ERROR_TEXT.format(correlation_id=context.correlation_id)
     )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-OPENROUTER_MODEL = "mistralai/mistral-nemo"
+OPENROUTER_MODEL = "google/gemini-2.5-flash"
 OPENROUTER_TIMEOUT_SECONDS = 10.0
 OPENROUTER_MAX_RESPONSE_BYTES = 64 * 1024
 ROUTING_MAX_ATTEMPTS = 3

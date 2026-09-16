@@ -3,28 +3,28 @@
 This is the local operator runbook for the Friendly Bot MVP. Run every command from this directory:
 
 ```sh
-cd /Users/ryanthe/Dev/ZoneExperience/friendly-bot
+cd /path/to/ZoneExperience/friendly-bot
 ```
 
 This is a live Telegram runtime, not a harmless preview. Starting it clears a configured webhook before long polling (while preserving pending updates), processes queued deliveries, and runs scheduled work. Use the intended bot token and database only.
 
 ## Runtime boundary
 
-The local database is deliberately locked to this machine's `ryanthe` account and this checkout:
+The local database is deliberately isolated to the macOS user and checkout that invoke the runtime guard:
 
 | Setting | Required value |
 | --- | --- |
-| macOS user ID | `501` (`ryanthe`) |
-| Compose project and network | `friendly-bot-ryanthe` |
-| PostgreSQL volume | `friendly-bot-ryanthe-postgres` |
+| macOS user ID | The invoking user's `id -u` |
+| Compose project and network | `friendly-bot-u<uid>` |
+| PostgreSQL volume | `friendly-bot-u<uid>-postgres` |
 | PostgreSQL address | `127.0.0.1:5833` |
-| Local PostgreSQL credentials | `.runtime/ryanthe/postgres.env` |
+| Local PostgreSQL credentials | `.runtime/u<uid>/postgres.env` |
 
 Do not override these values, change the port, or point the bot at an arbitrary or shared database. The guarded runtime script rejects a different account, checkout, project, network, volume, or port before it invokes Docker.
 
 ## Prerequisites
 
-- Run as the macOS `ryanthe` user (`id -u` must print `501`).
+- Run the guarded commands as the macOS user who owns this checkout. The guard derives the local UID namespace automatically.
 - Install Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
 - Install Colima, the Docker CLI, and Docker Compose with Homebrew; Docker Desktop is not required:
 
@@ -50,13 +50,13 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    If this reports `Docker Compose v2 plugin is unavailable`, start Colima, confirm `docker context show` prints `colima`, then install or register the Homebrew Compose plugin as described above and rerun the command. Do not work around the guard with a differently named Compose project or another database.
 
-2. Start the local PostgreSQL container. On its first run, the guard creates a mode-`600`, ignored credential file at `.runtime/ryanthe/postgres.env`.
+2. Start the local PostgreSQL container. On its first run, the guard creates a mode-`600`, ignored credential file at `.runtime/u<uid>/postgres.env`, where `<uid>` is the value of `id -u`.
 
    ```sh
    uv run python scripts/db_runtime_check.py up
    ```
 
-3. Create the local environment file and replace every placeholder. Copy the PostgreSQL password from the generated `.runtime/ryanthe/postgres.env` file into the database URL; do not paste it into source control, logs, tickets, or chat.
+3. Create the local environment file and replace every placeholder. Copy the PostgreSQL password from the generated `.runtime/u<uid>/postgres.env` file into the database URL; do not paste it into source control, logs, tickets, or chat.
 
    ```sh
    cp .env.example .env
@@ -68,12 +68,12 @@ Do not override these values, change the port, or point the bot at an arbitrary 
    FRIENDLY_BOT_DATABASE_URL=postgresql+asyncpg://friendly_bot:<POSTGRES_PASSWORD>@127.0.0.1:5833/friendly_bot
    TELEGRAM_BOT_TOKEN=<dedicated_telegram_bot_token>
    OPENROUTER_API_KEY=<openrouter_api_key>
-   OPENROUTER_MODEL=mistralai/mistral-nemo
+   OPENROUTER_MODEL=google/gemini-2.5-flash
    FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=true
    FRIENDLY_BOT_OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION=disabled-globally-or-friendly-bot-key-excluded
    ```
 
-   For an explicitly approved non-ZDR test, set `OPENROUTER_MODEL=qwen/qwen3.7-flash` and `FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=false`. Leave `data_collection` protection enabled; restore ZDR before normal use.
+   The default model supports strict JSON-schema output through a ZDR-capable provider. For an explicitly approved non-ZDR test, set `OPENROUTER_MODEL=qwen/qwen3.7-flash` and `FRIENDLY_BOT_OPENROUTER_ENFORCE_ZDR=false`. Leave `data_collection` protection enabled; restore ZDR before normal use.
 
    The literal attestation value is required. It does not contain a secret; it records the operator's confirmation that the configured OpenRouter account/key meets the privacy requirement.
 
@@ -112,14 +112,14 @@ To delete all local PostgreSQL data and immediately recreate the container, stop
 uv run python scripts/db_runtime_check.py reset --confirm-reset
 ```
 
-`reset` deletes the `friendly-bot-ryanthe-postgres` volume. It is irreversible for this local database; use it only when a clean MVP database is intended.
+`reset` deletes the local `friendly-bot-u<uid>-postgres` volume. It is irreversible for this local database; use it only when a clean MVP database is intended.
 
 ## Operator failure guide
 
 | Symptom | Correct response |
 | --- | --- |
 | `Docker Compose v2 plugin is unavailable` | Start Colima, confirm the `colima` Docker context, then install/register the Homebrew Compose plugin and rerun the guarded command. Docker Desktop is not required. |
-| `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run as `ryanthe` from `/Users/ryanthe/Dev/ZoneExperience/friendly-bot`; do not pass overrides to bypass the guard. |
+| `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run from the intended `ZoneExperience/friendly-bot` checkout as its owning macOS user; do not pass overrides to bypass the guard. |
 | Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
 | `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |
 | OpenRouter routing is temporarily unavailable or returns an invalid response | Friendly Bot records a redacted diagnostic, sends the user the fixed error-log message, commits that update, and continues polling. Restore the provider rather than weakening the privacy configuration. |

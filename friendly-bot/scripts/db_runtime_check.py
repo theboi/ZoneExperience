@@ -11,14 +11,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-EXPECTED_UID = 501
-EXPECTED_CHECKOUT = Path("/Users/ryanthe/Dev/ZoneExperience")
-FRIENDLY_BOT_DIRECTORY = EXPECTED_CHECKOUT / "friendly-bot"
+FRIENDLY_BOT_DIRECTORY = Path(__file__).resolve().parents[1]
+EXPECTED_UID = os.getuid()
+EXPECTED_CHECKOUT = FRIENDLY_BOT_DIRECTORY.parent
 COMPOSE_FILE = FRIENDLY_BOT_DIRECTORY / "compose.yaml"
-POSTGRES_ENV_FILE = FRIENDLY_BOT_DIRECTORY / ".runtime/ryanthe/postgres.env"
-PROJECT_NAME = "friendly-bot-ryanthe"
-NETWORK_NAME = "friendly-bot-ryanthe"
-VOLUME_NAME = "friendly-bot-ryanthe-postgres"
+RUNTIME_PROFILE = f"u{EXPECTED_UID}"
+POSTGRES_ENV_FILE = (
+    FRIENDLY_BOT_DIRECTORY / ".runtime" / RUNTIME_PROFILE / "postgres.env"
+)
+PROJECT_NAME = f"friendly-bot-{RUNTIME_PROFILE}"
+NETWORK_NAME = PROJECT_NAME
+VOLUME_NAME = f"{PROJECT_NAME}-postgres"
 POSTGRES_PORT = 5833
 
 
@@ -139,6 +142,12 @@ def run_compose(arguments: tuple[str, ...]) -> None:
         != 0
     ):
         raise RuntimeGuardError("Docker Compose v2 plugin is unavailable")
+    compose_environment = os.environ | {
+        "FRIENDLY_BOT_RUNTIME_NETWORK": NETWORK_NAME,
+        "FRIENDLY_BOT_RUNTIME_PROFILE": RUNTIME_PROFILE,
+        "FRIENDLY_BOT_RUNTIME_PROJECT": PROJECT_NAME,
+        "FRIENDLY_BOT_RUNTIME_VOLUME": VOLUME_NAME,
+    }
     subprocess.run(
         (
             "docker",
@@ -151,6 +160,7 @@ def run_compose(arguments: tuple[str, ...]) -> None:
         ),
         check=True,
         cwd=FRIENDLY_BOT_DIRECTORY,
+        env=compose_environment,
     )
 
 

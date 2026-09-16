@@ -1129,7 +1129,7 @@ class FriendlyBotApplication:
         self._append_fixed_text(
             presentations,
             user,
-            DEFAULT_UNHANDLED_ERROR_TEXT.format(telegram_user_id=user.telegram_user_id),
+            DEFAULT_UNHANDLED_ERROR_TEXT.format(correlation_id=correlation_id),
         )
         return self._result("failed", (), presentations)
 

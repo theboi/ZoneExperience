@@ -211,19 +211,23 @@ class RejectingMatches:
 
 class RecordingDiagnostics:
     reason_codes: list[str]
+    records: list[DiagnosticRecord]
 
     def __init__(self) -> None:
         self.reason_codes = []
+        self.records = []
 
     async def record(self, **kwargs: object) -> DiagnosticRecord:
         safe_context = cast(dict[str, JsonValue], kwargs["safe_context"])
         self.reason_codes.append(cast(str, safe_context["reason_code"]))
-        return DiagnosticRecord(
+        record = DiagnosticRecord(
             id=uuid4(),
             correlation_id=cast(UUID, kwargs["correlation_id"]),
             severity=cast(str, kwargs["severity"]),
             safe_summary=cast(str, kwargs["safe_summary"]),
         )
+        self.records.append(record)
+        return record
 
 
 @dataclass
@@ -741,7 +745,11 @@ async def test_routing_failure_commits_a_redacted_fallback(
     assert result == DispatchResult(
         "failed",
         presentations=(
-            TelegramTextPresentation(77, "Sorry, an error occurred. Error log: 77."),
+            TelegramTextPresentation(
+                77,
+                "Sorry, an error occurred. Error log: "
+                f"{uow.diagnostics.records[0].correlation_id}.",
+            ),
         ),
     )
     assert uow.diagnostics.reason_codes == [reason_code]

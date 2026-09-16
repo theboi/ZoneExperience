@@ -327,7 +327,18 @@ async def test_route_and_plan_returns_all_valid_matches_in_one_request() -> None
     )
     assert len(client.requests) == 1
     payload = client.requests[0]["json"]
-    assert payload["response_format"] == {"type": "json_object"}
+    response_format = payload["response_format"]
+    assert response_format["type"] == "json_schema"
+    json_schema = response_format["json_schema"]
+    assert json_schema["name"] == "friendly_bot_multi_intent"
+    assert json_schema["strict"] is True
+    schema = json_schema["schema"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["matches"]["items"]["properties"]["flow_id"] == {
+        "type": "string",
+        "enum": ["system.directions", "system.expect"],
+    }
+    assert payload["provider"]["require_parameters"] is True
     assert payload["reasoning"] == {"effort": "none"}
     assert payload["max_tokens"] == 1024
 
@@ -453,6 +464,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
                 {"flow_id": "unknown.flow", "replies": []},
             ],
         },
+        {"flows": [{"flow_id": "system.directions", "reply": "ignored"}]},
         {"kind": "terminal", "terminal": "no_match", "extra": True},
     ],
 )
@@ -692,7 +704,7 @@ async def test_request_requires_policy_and_excludes_identifier_sentinels() -> No
 
     payload = client.requests[0]["json"]
     serialized = json.dumps(payload)
-    assert payload["model"] == "mistralai/mistral-nemo"
+    assert payload["model"] == "google/gemini-2.5-flash"
     assert payload["provider"] == {"zdr": True, "data_collection": "deny"}
     assert set(payload) == {"model", "provider", "messages"}
     assert all(sentinel not in serialized for sentinel in _IDENTIFIER_SENTINELS)
@@ -1426,7 +1438,7 @@ async def test_gateway_cancellation_keeps_stdlib_worker_request_snapshots(
         (
             {"Authorization": "Bearer test-only", "Content-Type": "application/json"},
             {
-                "model": "mistralai/mistral-nemo",
+                "model": "google/gemini-2.5-flash",
                 "provider": {"zdr": True, "data_collection": "deny"},
                 "messages": [
                     {

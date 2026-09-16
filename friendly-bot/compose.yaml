@@ -1,10 +1,10 @@
-name: friendly-bot-ryanthe
+name: ${FRIENDLY_BOT_RUNTIME_PROJECT:-friendly-bot-local}
 
 services:
   postgres:
     image: postgres:16-alpine
     env_file:
-      - path: .runtime/ryanthe/postgres.env
+      - path: .runtime/${FRIENDLY_BOT_RUNTIME_PROFILE:-local}/postgres.env
         required: false
     ports:
       - "127.0.0.1:5833:5432"
@@ -15,14 +15,14 @@ services:
       retries: 30
       start_period: 2s
     networks:
-      - friendly-bot-ryanthe
+      - friendly-bot
     volumes:
-      - friendly-bot-ryanthe-postgres:/var/lib/postgresql/data
+      - friendly-bot-postgres:/var/lib/postgresql/data
 
 networks:
-  friendly-bot-ryanthe:
-    name: friendly-bot-ryanthe
+  friendly-bot:
+    name: ${FRIENDLY_BOT_RUNTIME_NETWORK:-friendly-bot-local}
 
 volumes:
-  friendly-bot-ryanthe-postgres:
-    name: friendly-bot-ryanthe-postgres
+  friendly-bot-postgres:
+    name: ${FRIENDLY_BOT_RUNTIME_VOLUME:-friendly-bot-local-postgres}
