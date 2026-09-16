@@ -6,7 +6,12 @@ yaml_text = markdown.match(/^```yaml\n(.*?)^```$/m)&.captures&.first
 abort("canonical YAML fence not found") if yaml_text.nil?
 
 canonical = YAML.safe_load(yaml_text, aliases: false)
-seed = JSON.parse(File.read(ARGV.fetch(1)))
+system_global = JSON.parse(File.read(ARGV.fetch(1)))
+service = JSON.parse(File.read(ARGV.fetch(2)))
+seed = {
+  "system_global_root" => system_global.fetch("root"),
+  "service" => service.fetch("service")
+}
 
 def first_difference(expected, actual, path = "")
   return nil if expected == actual

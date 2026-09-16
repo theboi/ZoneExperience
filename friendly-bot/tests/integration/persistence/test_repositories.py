@@ -17,7 +17,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from friendly_bot.app import load_zone_x_seed, publish_zone_x_seed
+from friendly_bot.app import (
+    load_system_global_seed,
+    load_zone_x_seed,
+    publish_zone_x_seed,
+)
 from friendly_bot.domain.publication import PublishedFlowDefinition
 from friendly_bot.domain.state import (
     CheckpointReturnTransition,
@@ -789,13 +793,13 @@ async def test_zone_x_seed_publishes_immutable_roots_and_seven_timestamp_binding
 ) -> None:
     """The canonical seed may be repeated without duplicating any active root binding."""
 
-    seed = load_zone_x_seed(
-        Path(__file__).resolve().parents[3] / "seeds" / "zone-x.json"
-    )
+    seed_directory = Path(__file__).resolve().parents[3] / "seeds"
+    system_global_seed = load_system_global_seed(seed_directory / "system-global.json")
+    seed = load_zone_x_seed(seed_directory / "services" / "zone-x.json")
     async with uow_factory() as uow:
-        first = await publish_zone_x_seed(seed, uow)
+        first = await publish_zone_x_seed(seed, system_global_seed, uow)
     async with uow_factory() as uow:
-        second = await publish_zone_x_seed(seed, uow)
+        second = await publish_zone_x_seed(seed, system_global_seed, uow)
 
     assert first.service.id == second.service.id
     assert first.service.key == "zone_x_2026_10_18"

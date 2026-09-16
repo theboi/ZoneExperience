@@ -1,324 +1,4 @@
 {
-  "system_global_root_excerpt": {
-    "key": "system.global",
-    "trigger": null,
-    "actions": [
-      {
-        "type": "send_message",
-        "text": "Hey {{ user.name }}! Nice to meet you! Welcome to The Zone! I'm Friendly Bot, here to help you get connected to our wonderful community!"
-      },
-      {
-        "type": "send_buttons",
-        "service_bound": false,
-        "buttons": [
-          {
-            "button_id": "system.global.menu.timings",
-            "text": "When do we gather?"
-          },
-          {
-            "button_id": "system.global.menu.directions",
-            "text": "How to get to service?"
-          },
-          {
-            "button_id": "system.global.menu.expect",
-            "text": "What to expect?"
-          },
-          {
-            "button_id": "system.global.menu.zone",
-            "text": "What is The Zone?"
-          },
-          {
-            "button_id": "system.global.menu.connect",
-            "text": "Get connected"
-          }
-        ]
-      }
-    ],
-    "next_flow_mode": "CHECKPOINT",
-    "return_actions": [
-      {
-        "type": "send_message",
-        "text": "Is there anything else I can help you with?"
-      },
-      {
-        "type": "send_buttons",
-        "service_bound": false,
-        "buttons": [
-          {
-            "button_id": "system.global.menu.timings",
-            "text": "When do we gather?"
-          },
-          {
-            "button_id": "system.global.menu.directions",
-            "text": "How to get to service?"
-          },
-          {
-            "button_id": "system.global.menu.expect",
-            "text": "What to expect?"
-          },
-          {
-            "button_id": "system.global.menu.zone",
-            "text": "What is The Zone?"
-          },
-          {
-            "button_id": "system.global.menu.connect",
-            "text": "Get connected"
-          }
-        ]
-      }
-    ],
-    "next_flows": [
-      {
-        "key": "system.global.never_mind",
-        "trigger": {
-          "type": "message",
-          "llm_gist": "The person wants to stop, cancel, go back, leave the current topic, or says never mind."
-        },
-        "actions": [
-          {
-            "type": "return_to_nearest_checkpoint"
-          }
-        ],
-        "next_flow_mode": "ONE_AND_ONCE_ONLY",
-        "return_actions": [
-
-        ],
-        "next_flows": [
-
-        ]
-      },
-      {
-        "key": "system.global.safety",
-        "trigger": {
-          "type": "message",
-          "llm_gist": "Select only when the person's current message clearly says they face immediate physical danger, are considering suicide or self-harm, are being abused, or urgently need a safe responsible adult. Do not select this for greetings, ordinary questions, general distress, ambiguous requests for help, jokes, or figurative language."
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "Hey, thank you for telling me... you do not have to handle this alone. Let me help you find someone to talk to..."
-          },
-          {
-            "type": "show_activity",
-            "activity": "typing"
-          },
-          {
-            "type": "find_and_reserve_safety_responder",
-            "service_id": "{{ active_service.id | optional }}",
-            "require_service_attendance_or_always_available": true,
-            "capacity_required": 1
-          }
-        ],
-        "next_flow_mode": "ONE_AND_ONCE_ONLY",
-        "return_actions": [
-
-        ],
-        "next_flows": [
-          {
-            "key": "system.global.safety.responder_found",
-            "trigger": {
-              "type": "action_event",
-              "event_key": "safety_match.found"
-            },
-            "actions": [
-              {
-                "type": "notify_matched_human",
-                "text": "Urgent support request from {{ user.name }}. Please contact them as soon as possible. Only information the person provided in this flow may be included."
-              },
-              {
-                "type": "share_human_contact",
-                "text": "{{ matched_human.name }} is a trusted person you can contact now: {{ matched_human.telegram_url }}"
-              }
-            ],
-            "next_flow_mode": "ONE_AND_ONCE_ONLY",
-            "return_actions": [
-
-            ],
-            "next_flows": [
-
-            ]
-          },
-          {
-            "key": "system.global.safety.no_responder",
-            "trigger": {
-              "type": "action_event",
-              "event_key": "safety_match.not_found"
-            },
-            "actions": [
-              {
-                "type": "send_message_fixed",
-                "text": "I can’t reach a trusted person through the bot right now. If you may be in immediate danger, call emergency services or go to a trusted adult near you now."
-              },
-              {
-                "type": "notify_all_admins",
-                "severity": "urgent",
-                "safe_summary": "A safety connection request has no eligible responder."
-              },
-              {
-                "type": "mark_safety_request_pending"
-              }
-            ],
-            "next_flow_mode": "ONE_AND_ONCE_ONLY",
-            "return_actions": [
-
-            ],
-            "next_flows": [
-
-            ]
-          }
-        ]
-      },
-      {
-        "key": "system.global.options",
-        "trigger": {
-          "type": "message",
-          "llm_gist": "The person asks what options are available, what the bot can do, how the bot can help, or asks for a menu."
-        },
-        "actions": [
-          {
-            "type": "return_to_nearest_checkpoint"
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      },
-      {
-        "key": "system.global.menu.timings",
-        "multi_intent_mode": "answer",
-        "trigger": {
-          "type": "any_of",
-          "triggers": [
-            {
-              "type": "button",
-              "button_id": "system.global.menu.timings"
-            },
-            {
-              "type": "message",
-              "llm_gist": "The person asks for service timings, youth group times, or when a youth service happens."
-            }
-          ]
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "Service timings placeholder: add the timings for each youth group here."
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      },
-      {
-        "key": "system.global.menu.directions",
-        "multi_intent_mode": "answer",
-        "trigger": {
-          "type": "any_of",
-          "triggers": [
-            {
-              "type": "button",
-              "button_id": "system.global.menu.directions"
-            },
-            {
-              "type": "message",
-              "llm_gist": "The person asks for directions to the Star Performing Arts Centre, Star Vista, The Zone or church."
-            }
-          ]
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "Our services are held at Star Vista! Take the MRT to Buona Vista and follow the signs!"
-          },
-          {
-            "type": "send_message_fixed",
-            "text": "1 Vista Exchange Green, Singapore 138617\nhttps://maps.google.com/?q=The+Star+Performing+Arts+Centre"
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      },
-      {
-        "key": "system.global.menu.expect",
-        "multi_intent_mode": "answer",
-        "trigger": {
-          "type": "any_of",
-          "triggers": [
-            {
-              "type": "button",
-              "button_id": "system.global.menu.expect"
-            },
-            {
-              "type": "message",
-              "llm_gist": "The person asks what to expect at The Zone, what will happen, what to wear, or whether they may come alone."
-            }
-          ]
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "Come as you are. You can expect music, a message about Jesus, and time to meet other youths. It’s okay to come alone, sit quietly, or ask for someone to meet you before you enter."
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      },
-      {
-        "key": "system.global.menu.zone",
-        "multi_intent_mode": "answer",
-        "trigger": {
-          "type": "any_of",
-          "triggers": [
-            {
-              "type": "button",
-              "button_id": "system.global.menu.zone"
-            },
-            {
-              "type": "message",
-              "llm_gist": "The person asks what The Zone is, what this youth community is, or wants to learn about The Zone."
-            }
-          ]
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "The Zone is a youth community where you can come as you are, meet other youths, and learn about Jesus."
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      },
-      {
-        "key": "system.global.menu.connect",
-        "multi_intent_mode": "answer",
-        "trigger": {
-          "type": "any_of",
-          "triggers": [
-            {
-              "type": "button",
-              "button_id": "system.global.menu.connect"
-            },
-            {
-              "type": "message",
-              "llm_gist": "The person wants to get connected with The Zone or asks for a connection link."
-            }
-          ]
-        },
-        "actions": [
-          {
-            "type": "send_message",
-            "text": "Get connected at https://bit.ly//thezonenew! We would love to hear from you!"
-          }
-        ],
-        "next_flow_mode": "ALLOW_MANY",
-        "return_actions": [],
-        "next_flows": []
-      }
-    ]
-  },
   "service": {
     "key": "zone_x_2026_10_18",
     "name": "Zone X",
@@ -408,7 +88,7 @@
           },
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange Green! Take the MRT to Buona Vista and follow the signs to The Star Vista. You'll meet our friendly welcome team in blue near the venue entrance to guide you."
             },
             {
@@ -423,9 +103,7 @@
             }
           ],
           "next_flow_mode": "ALLOW_MANY",
-          "return_actions": [
-
-          ],
+          "return_actions": [],
           "next_flows": [
             {
               "key": "service.zone_x.directions.open_map",
@@ -440,12 +118,8 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         },
@@ -482,12 +156,8 @@
             }
           ],
           "next_flow_mode": "ALLOW_MANY",
-          "return_actions": [
-
-          ],
-          "next_flows": [
-
-          ]
+          "return_actions": [],
+          "next_flows": []
         },
         {
           "key": "service.zone_x.connect.start",
@@ -511,9 +181,7 @@
             }
           ],
           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-          "return_actions": [
-
-          ],
+          "return_actions": [],
           "next_flows": [
             {
               "key": "service.zone_x.connect.capture_interest",
@@ -544,9 +212,7 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
+              "return_actions": [],
               "next_flows": [
                 {
                   "key": "service.zone_x.connect.match_found",
@@ -556,7 +222,7 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message_fixed",
+                      "type": "send_message",
                       "text": "I found {{ matched_server.name }} from {{ matched_server.cg_name }}. How would you like to meet?"
                     },
                     {
@@ -575,9 +241,7 @@
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
+                  "return_actions": [],
                   "next_flows": [
                     {
                       "key": "service.zone_x.connect.join_group",
@@ -610,9 +274,7 @@
                         }
                       ],
                       "next_flow_mode": "ALLOW_MANY",
-                      "return_actions": [
-
-                      ],
+                      "return_actions": [],
                       "next_flows": [
                         {
                           "key": "service.zone_x.connect.join_group.not_responding",
@@ -644,9 +306,7 @@
                             }
                           ],
                           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                          "return_actions": [
-
-                          ],
+                          "return_actions": [],
                           "next_flows": [
                             {
                               "key": "service.zone_x.connect.join_group.rematch_found",
@@ -665,12 +325,8 @@
                                 }
                               ],
                               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                              "return_actions": [
-
-                              ],
-                              "next_flows": [
-
-                              ]
+                              "return_actions": [],
+                              "next_flows": []
                             },
                             {
                               "key": "service.zone_x.connect.join_group.rematch_not_found",
@@ -680,17 +336,13 @@
                               },
                               "actions": [
                                 {
-                                  "type": "send_message_fixed",
+                                  "type": "send_message",
                                   "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue."
                                 }
                               ],
                               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                              "return_actions": [
-
-                              ],
-                              "next_flows": [
-
-                              ]
+                              "return_actions": [],
+                              "next_flows": []
                             }
                           ]
                         }
@@ -727,9 +379,7 @@
                         }
                       ],
                       "next_flow_mode": "ALLOW_MANY",
-                      "return_actions": [
-
-                      ],
+                      "return_actions": [],
                       "next_flows": [
                         {
                           "key": "service.zone_x.connect.join_me.not_responding",
@@ -761,9 +411,7 @@
                             }
                           ],
                           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                          "return_actions": [
-
-                          ],
+                          "return_actions": [],
                           "next_flows": [
                             {
                               "key": "service.zone_x.connect.join_me.rematch_found",
@@ -782,12 +430,8 @@
                                 }
                               ],
                               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                              "return_actions": [
-
-                              ],
-                              "next_flows": [
-
-                              ]
+                              "return_actions": [],
+                              "next_flows": []
                             },
                             {
                               "key": "service.zone_x.connect.join_me.rematch_not_found",
@@ -797,17 +441,13 @@
                               },
                               "actions": [
                                 {
-                                  "type": "send_message_fixed",
+                                  "type": "send_message",
                                   "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue."
                                 }
                               ],
                               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                              "return_actions": [
-
-                              ],
-                              "next_flows": [
-
-                              ]
+                              "return_actions": [],
+                              "next_flows": []
                             }
                           ]
                         }
@@ -823,17 +463,13 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message_fixed",
+                      "type": "send_message",
                       "text": "Sorry, nobody is available to meet right now. Please try again later or speak to a Zone team member at the venue."
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
-                  "next_flows": [
-
-                  ]
+                  "return_actions": [],
+                  "next_flows": []
                 }
               ]
             }
@@ -862,9 +498,7 @@
             }
           ],
           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-          "return_actions": [
-
-          ],
+          "return_actions": [],
           "next_flows": [
             {
               "key": "service.zone_x.change_service.choice_required",
@@ -880,9 +514,7 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
+              "return_actions": [],
               "next_flows": [
                 {
                   "key": "service.zone_x.change_service.select",
@@ -896,9 +528,7 @@
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
+                  "return_actions": [],
                   "next_flows": [
                     {
                       "key": "service.zone_x.change_service.selected",
@@ -912,12 +542,8 @@
                         }
                       ],
                       "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                      "return_actions": [
-
-                      ],
-                      "next_flows": [
-
-                      ]
+                      "return_actions": [],
+                      "next_flows": []
                     },
                     {
                       "key": "service.zone_x.change_service.latecomer",
@@ -931,12 +557,8 @@
                         }
                       ],
                       "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                      "return_actions": [
-
-                      ],
-                      "next_flows": [
-
-                      ]
+                      "return_actions": [],
+                      "next_flows": []
                     },
                     {
                       "key": "service.zone_x.change_service.ended",
@@ -946,17 +568,13 @@
                       },
                       "actions": [
                         {
-                          "type": "send_message_fixed",
+                          "type": "send_message",
                           "text": "Sorry, the service is over!"
                         }
                       ],
                       "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                      "return_actions": [
-
-                      ],
-                      "next_flows": [
-
-                      ]
+                      "return_actions": [],
+                      "next_flows": []
                     }
                   ]
                 }
@@ -970,17 +588,13 @@
               },
               "actions": [
                 {
-                  "type": "send_message_fixed",
+                  "type": "send_message",
                   "text": "There are no other ongoing services to switch to."
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         }
@@ -999,7 +613,7 @@
           "flow_key": "service.zone_x.home"
         },
         {
-          "type": "send_message_fixed",
+          "type": "send_message",
           "text": "Yes, you can still join Zone X. Service has started, so head to the venue entrance and ask a Zone team member to help you find a seat."
         },
         {
@@ -1018,12 +632,8 @@
         }
       ],
       "next_flow_mode": "ALLOW_MANY",
-      "return_actions": [
-
-      ],
-      "next_flows": [
-
-      ]
+      "return_actions": [],
+      "next_flows": []
     },
     "timestamps": [
       {
@@ -1075,12 +685,8 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             },
             {
               "key": "service.zone_x.timestamp.marketing.directions",
@@ -1095,12 +701,8 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         }
@@ -1114,7 +716,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing Arts Centre."
             },
             {
@@ -1149,12 +751,8 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         }
@@ -1168,7 +766,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Doors are open for Zone X. Are you here with us?"
             },
             {
@@ -1186,9 +784,7 @@
             }
           ],
           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-          "return_actions": [
-
-          ],
+          "return_actions": [],
           "next_flows": [
             {
               "key": "service.zone_x.timestamp.doors_open.check_in",
@@ -1202,9 +798,7 @@
                 }
               ],
               "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [
-
-              ],
+              "return_actions": [],
               "next_flows": [
                 {
                   "key": "service.zone_x.timestamp.doors_open.attending",
@@ -1218,12 +812,8 @@
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
-                  "next_flows": [
-
-                  ]
+                  "return_actions": [],
+                  "next_flows": []
                 },
                 {
                   "key": "service.zone_x.timestamp.doors_open.latecomer",
@@ -1237,12 +827,8 @@
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
-                  "next_flows": [
-
-                  ]
+                  "return_actions": [],
+                  "next_flows": []
                 },
                 {
                   "key": "service.zone_x.timestamp.doors_open.ended",
@@ -1252,17 +838,13 @@
                   },
                   "actions": [
                     {
-                      "type": "send_message_fixed",
+                      "type": "send_message",
                       "text": "Sorry, the service is over!"
                     }
                   ],
                   "next_flow_mode": "ONE_AND_ONCE_ONLY",
-                  "return_actions": [
-
-                  ],
-                  "next_flows": [
-
-                  ]
+                  "return_actions": [],
+                  "next_flows": []
                 }
               ]
             }
@@ -1278,7 +860,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Service has started. You can ask a question here at any time."
             },
             {
@@ -1336,17 +918,13 @@
               },
               "actions": [
                 {
-                  "type": "send_message_fixed",
+                  "type": "send_message",
                   "text": "The nearest toilets are on Level 4 beside the lifts. Ask a Zone team member if you’d like someone to show you."
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             },
             {
               "key": "service.zone_x.service.who_is_jesus",
@@ -1366,7 +944,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message_fixed",
+                  "type": "send_message",
                   "text": "At NCC, we believe Jesus is the Son of God who came to reveal God’s love and give us new life through His death and resurrection. I can connect you with someone if you’d like to talk about this personally."
                 },
                 {
@@ -1381,12 +959,8 @@
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             },
             {
               "key": "service.zone_x.service.unknown_question",
@@ -1397,7 +971,7 @@
               },
               "actions": [
                 {
-                  "type": "send_message_fixed",
+                  "type": "send_message",
                   "text": "I don’t have an approved answer for that question, but I can connect you with someone who can talk with you."
                 },
                 {
@@ -1412,12 +986,8 @@
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         }
@@ -1431,7 +1001,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Service has ended. What would you like to do next?"
             },
             {
@@ -1477,12 +1047,8 @@
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             },
             {
               "key": "service.zone_x.after.ask",
@@ -1504,12 +1070,8 @@
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
-              "return_actions": [
-
-              ],
-              "next_flows": [
-
-              ]
+              "return_actions": [],
+              "next_flows": []
             }
           ]
         }
@@ -1523,17 +1085,13 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Thank you for coming to Zone X today. We’re glad you were here. You can still use the service options until 6:00 pm."
             }
           ],
           "next_flow_mode": "ALLOW_MANY",
-          "return_actions": [
-
-          ],
-          "next_flows": [
-
-          ]
+          "return_actions": [],
+          "next_flows": []
         }
       },
       {
@@ -1545,7 +1103,7 @@
           "trigger": null,
           "actions": [
             {
-              "type": "send_message_fixed",
+              "type": "send_message",
               "text": "Zone X has ended, but you can still ask for directions to Star or learn more about NCC here anytime."
             },
             {
@@ -1556,12 +1114,8 @@
             }
           ],
           "next_flow_mode": "ONE_AND_ONCE_ONLY",
-          "return_actions": [
-
-          ],
-          "next_flows": [
-
-          ]
+          "return_actions": [],
+          "next_flows": []
         }
       }
     ]

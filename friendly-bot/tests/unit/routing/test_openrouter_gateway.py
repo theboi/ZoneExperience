@@ -497,6 +497,10 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert (
+        "ALL_CAPS placeholders (including underscores) verbatim"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
         "shared keyword, topic, place, name, or available candidate never "
         "establishes intent" in first_payload["messages"][0]["content"]
     )

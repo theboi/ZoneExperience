@@ -168,12 +168,19 @@ class ZoneXServiceSeed(BaseModel):
 
 
 class ZoneXSeed(BaseModel):
-    """The complete canonical Zone X JSON document."""
+    """One service-specific Zone X JSON document."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    system_global_root_excerpt: DiscussionFlow
     service: ZoneXServiceSeed
+
+
+class SystemGlobalSeed(BaseModel):
+    """The system-wide root that is shared by every service seed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    root: DiscussionFlow
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,8 +460,7 @@ class FriendlyBotApplication:
                 presentations,
                 user,
                 text=(
-                    self._routing_policy.no_match_text
-                    or "sorry, what did you mean?"
+                    self._routing_policy.no_match_text or "sorry, what did you mean?"
                 ),
             )
             return self._result("no_match", tuple(selected), presentations)
@@ -1415,7 +1421,7 @@ def _direct_action_event_child(
 
 
 def load_zone_x_seed(path: Path) -> ZoneXSeed:
-    """Decode only the exact JSON seed shape; YAML is never a runtime configuration input."""
+    """Decode one Zone X service JSON document; YAML is never a runtime input."""
 
     if not isinstance(path, Path):
         raise TypeError("Zone X seed path must be a pathlib path")
@@ -1423,13 +1429,24 @@ def load_zone_x_seed(path: Path) -> ZoneXSeed:
     return ZoneXSeed.model_validate(_normalize_seed_document(raw))
 
 
+def load_system_global_seed(path: Path) -> SystemGlobalSeed:
+    """Decode the one system-global JSON document shared by every service."""
+
+    if not isinstance(path, Path):
+        raise TypeError("system-global seed path must be a pathlib path")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return SystemGlobalSeed.model_validate(_normalize_seed_document(raw))
+
+
 async def publish_zone_x_seed(
-    seed: ZoneXSeed, unit_of_work: UnitOfWork
+    seed: ZoneXSeed, system_global_seed: SystemGlobalSeed, unit_of_work: UnitOfWork
 ) -> PublishedZoneX:
     """Validate and publish Zone X through F01's public immutable/version seed boundary."""
 
     if not isinstance(seed, ZoneXSeed):
         raise TypeError("Zone X seed is invalid")
+    if not isinstance(system_global_seed, SystemGlobalSeed):
+        raise TypeError("system-global seed is invalid")
     service = await unit_of_work.services.upsert(
         NewService(
             key=seed.service.key,
@@ -1444,7 +1461,7 @@ async def publish_zone_x_seed(
         )
     )
     system_root = await _publish_root(
-        seed.system_global_root_excerpt,
+        system_global_seed.root,
         unit_of_work=unit_of_work,
         scope_kind=FlowScopeKind.SYSTEM,
         service_id=None,
@@ -1579,9 +1596,12 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
                 matching=matching,
             )
         )
-        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "zone-x.json")
+        system_global_seed = load_system_global_seed(
+            PROJECT_ROOT / "seeds" / "system-global.json"
+        )
+        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "services" / "zone-x.json")
         async with unit_of_work_factory() as unit_of_work:
-            zone_x = await publish_zone_x_seed(seed, unit_of_work)
+            zone_x = await publish_zone_x_seed(seed, system_global_seed, unit_of_work)
         application = FriendlyBotApplication(
             dependencies=ActionDependencies(
                 telegram=telegram,

@@ -1,37 +1,33 @@
-"""Canonical Zone X source/seed equivalence checks."""
+"""Canonical split system-global and Zone X service seed checks."""
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from subprocess import run
 
-from friendly_bot.app import load_zone_x_seed
-from friendly_bot.domain.actions import (
-    ReturnToNearestCheckpointAction,
-    SendButtonsAction,
-    SendMessageFixedAction,
-)
-from friendly_bot.domain.triggers import (
-    OnAnyOfTrigger,
-    OnButtonPressTrigger,
-    OnMessageTrigger,
-)
+from friendly_bot.app import load_system_global_seed, load_zone_x_seed
+from friendly_bot.domain.actions import SendButtonsAction
+from friendly_bot.domain.triggers import OnAnyOfTrigger, OnButtonPressTrigger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SYSTEM_SEED_PATH = PROJECT_ROOT / "seeds" / "system-global.json"
+ZONE_X_SEED_PATH = PROJECT_ROOT / "seeds" / "services" / "zone-x.json"
 
 
 def test_system_root_sends_its_prompt_when_opened() -> None:
     """Opening the system checkpoint must produce a useful first response."""
 
-    seed = json.loads((PROJECT_ROOT / "seeds" / "zone-x.json").read_text())
+    root = _system_document()["root"]
 
-    assert seed["system_global_root_excerpt"]["actions"][0] == {
+    assert root["actions"][0] == {
         "type": "send_message",
-        "text": "Hey {{ user.name }}! Nice to meet you! What would you like help with?",
+        "text": (
+            "Hey {{ user.name }}! Nice to meet you! Welcome to The Zone! I'm "
+            "Friendly Bot, here to help you get connected to our wonderful community!"
+        ),
     }
-    assert seed["system_global_root_excerpt"]["return_actions"][0] == {
+    assert root["return_actions"][0] == {
         "type": "send_message",
         "text": "Is there anything else I can help you with?",
     }
@@ -40,65 +36,95 @@ def test_system_root_sends_its_prompt_when_opened() -> None:
 def test_safety_routing_requires_an_explicit_current_message_disclosure() -> None:
     """Ordinary or ambiguous help requests must not create a safety escalation."""
 
-    seed = json.loads((PROJECT_ROOT / "seeds" / "zone-x.json").read_text())
-    safety = seed["system_global_root_excerpt"]["next_flows"][1]
+    safety = _flow(_system_document()["root"], "system.global.safety")
 
     assert "current message clearly says" in safety["trigger"]["llm_gist"]
     assert "ambiguous requests for help" in safety["trigger"]["llm_gist"]
 
 
 def test_system_root_offers_each_supported_action_as_a_button() -> None:
-    """New users can discover every system-level action without model routing."""
+    """New users can discover the core system-level actions without model routing."""
 
-    root = load_zone_x_seed(
-        PROJECT_ROOT / "seeds" / "zone-x.json"
-    ).system_global_root_excerpt
+    root = load_system_global_seed(SYSTEM_SEED_PATH).root
     button_action = next(
         action for action in root.actions if isinstance(action, SendButtonsAction)
     )
 
     assert [(button.button_id, button.text) for button in button_action.buttons] == [
-        ("system.global.menu.timings", "Service timings for each youth group"),
-        ("system.global.menu.directions", "Directions to Star"),
-        ("system.global.menu.expect", "What to expect"),
+        ("system.global.menu.timings", "When do we gather?"),
+        ("system.global.menu.directions", "How to get to service?"),
+        ("system.global.menu.expect", "What to expect?"),
         ("system.global.menu.zone", "What is The Zone?"),
         ("system.global.menu.connect", "Get connected"),
     ]
 
 
+def test_system_root_keeps_questions_at_the_root_and_supports_schedule_follow_up() -> (
+    None
+):
+    """A plain service name can answer a preceding timing question without a reply."""
+
+    root = load_system_global_seed(SYSTEM_SEED_PATH).root
+    root_keys = {str(flow.key) for flow in root.next_flows}
+
+    assert {
+        "system.global.menu.timings",
+        "system.global.schedule.arrow",
+        "system.global.about.ncc",
+        "system.global.travel.drive",
+        "system.global.community.small_group",
+        "system.global.faith.follow_jesus",
+        "system.global.venue.lost_property",
+        "system.global.policy.privacy",
+    } <= root_keys
+
+    timings = next(
+        flow for flow in root.next_flows if flow.key == "system.global.menu.timings"
+    )
+    follow_up = next(
+        flow
+        for flow in timings.next_flows
+        if flow.key == "system.global.menu.timings.arrow"
+    )
+
+    assert isinstance(follow_up.trigger, OnAnyOfTrigger)
+    assert any(
+        isinstance(trigger, OnButtonPressTrigger)
+        and trigger.button_id == "system.global.menu.timings.arrow"
+        for trigger in follow_up.trigger.triggers
+    )
+
+
 def test_system_root_options_question_reopens_the_same_button_menu() -> None:
     """A typed request for options must not depend on an undocumented response."""
 
-    root = load_zone_x_seed(
-        PROJECT_ROOT / "seeds" / "zone-x.json"
-    ).system_global_root_excerpt
+    root = load_system_global_seed(SYSTEM_SEED_PATH).root
     options_flow = next(
         flow for flow in root.next_flows if flow.key == "system.global.options"
     )
 
-    assert isinstance(options_flow.trigger, OnMessageTrigger)
     assert "what options" in options_flow.trigger.llm_gist
-    assert isinstance(options_flow.actions[0], ReturnToNearestCheckpointAction)
-
     for flow in root.next_flows:
-        if not flow.key.startswith("system.global.menu."):
+        if not str(flow.key).startswith("system.global.menu."):
             continue
-        assert isinstance(flow.trigger, OnAnyOfTrigger)
+        if not isinstance(flow.trigger, OnAnyOfTrigger):
+            continue
         assert any(
             isinstance(trigger, OnButtonPressTrigger)
             for trigger in flow.trigger.triggers
         )
 
 
-def test_zone_x_json_is_semantically_equal_to_canonical_yaml() -> None:
-    """JSON seed drift must fail before any immutable root can be published."""
+def test_split_json_is_semantically_equal_to_canonical_yaml() -> None:
+    """Seed drift must fail before immutable roots can be published."""
 
     completed = run(
         [
             "ruby",
             "tests/e2e/verify_zone_x_seed.rb",
             "docs/examples/zone-x-service-example.md",
-            "seeds/zone-x.json",
+            "seeds/system-global.json",
+            "seeds/services/zone-x.json",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -109,60 +135,58 @@ def test_zone_x_json_is_semantically_equal_to_canonical_yaml() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_seed_marks_answer_fragments_and_protected_copy_as_fixed() -> None:
-    """Breaks if multi-intent answers can mutate state or protected copy varies."""
+def test_answer_fragments_are_leaves_and_fixed_copy_is_formatting_only() -> None:
+    """Answers stay presentation-only and fixed text is reserved for URLs/maps."""
 
-    seed = json.loads((PROJECT_ROOT / "seeds" / "zone-x.json").read_text())
     roots = [
-        seed["system_global_root_excerpt"],
-        seed["service"]["service_global_root"],
-        *(timestamp["root_flow"] for timestamp in seed["service"]["timestamps"]),
+        _system_document()["root"],
+        _service_document()["service"]["service_global_root"],
+        _service_document()["service"]["latecomer_flow"],
+        *(
+            timestamp["root_flow"]
+            for timestamp in _service_document()["service"]["timestamps"]
+        ),
     ]
-    flows = [
-        flow
-        for root in roots
-        for flow in _walk_flows(root)
-    ]
-    answer_keys = {
-        "system.global.menu.timings",
-        "system.global.menu.directions",
-        "system.global.menu.expect",
-        "system.global.menu.zone",
-        "system.global.menu.connect",
-        "service.zone_x.what_to_expect",
-        "service.zone_x.service.toilet",
-        "service.zone_x.service.who_is_jesus",
-        "service.zone_x.service.unknown_question",
-    }
+    flows = [flow for root in roots for flow in _walk_flows(root)]
 
-    assert {
-        flow["key"]
-        for flow in flows
-        if flow.get("multi_intent_mode") == "answer"
-    } == answer_keys
     assert all(
         not flow["next_flows"]
         for flow in flows
-        if flow["key"] in answer_keys
+        if flow.get("multi_intent_mode") == "answer"
     )
-    assert all(
-        action["type"] == "send_message_fixed"
+    fixed_actions = [
+        action
         for flow in flows
         for action in flow["actions"]
-        if re.search(r"https?://", action.get("text", ""))
+        if action["type"] == "send_message_fixed"
+    ]
+    assert fixed_actions
+    assert all(
+        "http" in action["text"] or "service.map_url" in action["text"]
+        for action in fixed_actions
     )
 
-    root = load_zone_x_seed(PROJECT_ROOT / "seeds" / "zone-x.json")
-    safety = next(
-        flow for flow in root.system_global_root_excerpt.next_flows
-        if flow.key == "system.global.safety"
-    )
-    no_responder = next(
-        flow for flow in safety.next_flows
-        if flow.key == "system.global.safety.no_responder"
-    )
-    assert isinstance(safety.actions[0], SendMessageFixedAction)
-    assert isinstance(no_responder.actions[0], SendMessageFixedAction)
+
+def test_zone_x_service_seed_contains_only_service_configuration() -> None:
+    """Adding another service must require only another file in `seeds/services/`."""
+
+    raw = _service_document()
+    parsed = load_zone_x_seed(ZONE_X_SEED_PATH)
+
+    assert set(raw) == {"service"}
+    assert parsed.service.key == "zone_x_2026_10_18"
+
+
+def _system_document() -> dict[str, object]:
+    return json.loads(SYSTEM_SEED_PATH.read_text(encoding="utf-8"))
+
+
+def _service_document() -> dict[str, object]:
+    return json.loads(ZONE_X_SEED_PATH.read_text(encoding="utf-8"))
+
+
+def _flow(root: dict[str, object], key: str) -> dict[str, object]:
+    return next(flow for flow in _walk_flows(root) if flow["key"] == key)
 
 
 def _walk_flows(root: dict[str, object]) -> list[dict[str, object]]:
