@@ -20,7 +20,7 @@ from friendly_bot.domain.actions import (
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.triggers import OnActionEventTrigger
-from friendly_bot.error_logs import error_log_reference, write_error_log
+from friendly_bot.error_logs import error_log_name, write_error_log
 
 DEFAULT_UNHANDLED_ERROR_TEXT = "Sorry, an error occurred. Error log: {error_log_path}."
 LOGGER = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ class ActionRunner:
             safe_summary="action execution failed",
             safe_context=safe_context,
         )
-        return error_log_reference(error_log_path)
+        return error_log_name(error_log_path)
 
     async def _record_unhandled_event(
         self, context: ActionContext, flow: DiscussionFlow, event_key: str

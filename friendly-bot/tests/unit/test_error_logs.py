@@ -5,7 +5,7 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
-from friendly_bot.error_logs import write_error_log
+from friendly_bot.error_logs import error_log_name, write_error_log
 
 
 def test_write_error_log_records_context_traceback_and_private_permissions(
@@ -32,3 +32,5 @@ def test_write_error_log_records_context_traceback_and_private_permissions(
     assert "RuntimeError: test failure" in contents
     assert stat.S_IMODE(directory.stat().st_mode) == 0o700
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert error_log_name(path) == path.name
+    assert error_log_name(None) == "unavailable"

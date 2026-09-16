@@ -830,8 +830,7 @@ async def test_routing_failure_commits_a_redacted_fallback(
         presentations=(
             TelegramTextPresentation(
                 77,
-                "Sorry, an error occurred. Error log: "
-                ".runtime/error-logs/test-provider.log.",
+                "Sorry, an error occurred. Error log: test-provider.log.",
             ),
         ),
     )

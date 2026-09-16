@@ -232,7 +232,7 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
 
     assert direct_context.texts == [
         "custom recovery",
-        "Sorry, an error occurred. Error log: .runtime/error-logs/test-action.log.",
+        "Sorry, an error occurred. Error log: test-action.log.",
     ]
     assert direct_context.diagnostics.reason_codes == [
         "action_execution.failed",

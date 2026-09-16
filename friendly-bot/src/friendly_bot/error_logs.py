@@ -58,12 +58,9 @@ def write_error_log(
         return None
 
 
-def error_log_reference(path: Path | None) -> str:
-    """Return the project-relative path safe to show in a local error response."""
+def error_log_name(path: Path | None) -> str:
+    """Return only the local log filename safe to show in an error response."""
 
     if path is None:
         return "unavailable"
-    try:
-        return str(path.relative_to(PROJECT_ROOT))
-    except ValueError:
-        return str(path)
+    return path.name

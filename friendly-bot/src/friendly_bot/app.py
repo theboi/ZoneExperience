@@ -51,7 +51,7 @@ from friendly_bot.domain.triggers import (
     OnCommandTrigger,
     OnMessageTrigger,
 )
-from friendly_bot.error_logs import error_log_reference, write_error_log
+from friendly_bot.error_logs import error_log_name, write_error_log
 from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.onboarding.service import OnboardingService
@@ -1159,7 +1159,7 @@ class FriendlyBotApplication:
             presentations,
             user,
             DEFAULT_UNHANDLED_ERROR_TEXT.format(
-                error_log_path=error_log_reference(error_log_path)
+                error_log_path=error_log_name(error_log_path)
             ),
         )
         return self._result("failed", (), presentations)

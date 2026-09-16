@@ -34,10 +34,7 @@ def test_main_logs_an_unexpected_runtime_failure(
         (
             "friendly_bot.__main__",
             logging.ERROR,
-            (
-                "friendly bot runtime stopped unexpectedly; error log: "
-                ".runtime/error-logs/test-main.log"
-            ),
+            ("friendly bot runtime stopped unexpectedly; error log: test-main.log"),
         )
     ]
 

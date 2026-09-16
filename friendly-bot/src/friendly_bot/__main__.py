@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 
 from friendly_bot.app import run_application
-from friendly_bot.error_logs import error_log_reference, write_error_log
+from friendly_bot.error_logs import error_log_name, write_error_log
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def main(argv: Sequence[str] = ()) -> None:
         )
         LOGGER.exception(
             "friendly bot runtime stopped unexpectedly; error log: %s",
-            error_log_reference(error_log_path),
+            error_log_name(error_log_path),
         )
         raise
 
