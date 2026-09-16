@@ -1119,15 +1119,12 @@ class FriendlyBotApplication:
         presentations: PresentationBuffer,
     ) -> DispatchResult:
         LOGGER.error("routing provider failure: %s", reason_code)
-        diagnostic = await unit_of_work.diagnostics.record(
+        await unit_of_work.diagnostics.record(
             correlation_id=correlation_id,
             severity="error",
             safe_summary="routing provider failed",
             safe_context={"reason_code": reason_code},
             at=now,
-        )
-        await unit_of_work.diagnostics.enqueue_admin_notifications(
-            diagnostic.id, at=now
         )
         self._append_fixed_text(
             presentations,

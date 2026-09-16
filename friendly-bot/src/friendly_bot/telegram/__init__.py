@@ -39,7 +39,6 @@ from friendly_bot.telegram.models import (
     normalize_command,
     parse_update,
 )
-from friendly_bot.telegram.outbox import OutboundDeliveryWorker, TelegramDeliveryGateway
 from friendly_bot.telegram.poller import (
     TelegramIngress,
     TelegramPoller,
@@ -80,7 +79,6 @@ class TelegramActivityGateway(Protocol):
 
 class TelegramGateway(
     TelegramPollingGateway,
-    TelegramDeliveryGateway,
     TelegramWebhookGateway,
     TelegramActivityGateway,
     Protocol,
@@ -93,7 +91,6 @@ __all__ = [
     "DirectSendResult",
     "IncomingTelegramUpdate",
     "LocalTelegramAssetResolver",
-    "OutboundDeliveryWorker",
     "OutboundTelegramMessage",
     "OutboundTelegramPhoto",
     "OutboundTelegramRequest",

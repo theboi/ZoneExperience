@@ -37,12 +37,6 @@ class RecordingDiagnostics:
             safe_summary="safe",
         )
 
-    async def enqueue_admin_notifications(
-        self, diagnostic_id: object, *, at: object
-    ) -> int:
-        del diagnostic_id, at
-        return 0
-
 
 @dataclass
 class RecordingContext:

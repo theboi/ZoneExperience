@@ -17,7 +17,6 @@ def test_i04_can_import_the_documented_t02_composition_surface() -> None:
             for name in (
                 "TelegramGateway",
                 "TelegramPoller",
-                "OutboundDeliveryWorker",
             )
             if not hasattr(telegram, name)
         },

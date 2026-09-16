@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
-from types import MappingProxyType
+from datetime import UTC, date, datetime
 from typing import Literal, Protocol, cast
 from uuid import UUID, uuid4
 
@@ -22,7 +21,6 @@ from friendly_bot.domain.state import (
     SelectionTransition,
 )
 from friendly_bot.persistence.models import (
-    AdminNotificationDelivery,
     CapacityReservation,
     ConversationMessage,
     FlowScopeKind,
@@ -34,8 +32,6 @@ from friendly_bot.persistence.models import (
     OperationalLogin,
     OperationalProfile,
     OperationalRole,
-    OutboundDelivery,
-    OutboundDeliveryAttempt,
     PendingFlowIntent,
     PersonaCursor,
     ProcessedTelegramUpdate,
@@ -43,7 +39,6 @@ from friendly_bot.persistence.models import (
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
-    TelegramOutboundPause,
     TelegramPollState,
     TimestampDeliveryClaim,
     User,
@@ -53,17 +48,10 @@ from friendly_bot.persistence.models import (
 )
 
 type LoginAttachmentKind = Literal["attached", "occupied", "not_found"]
-type DeliveryOutcome = Literal["sent", "retry", "rejected", "uncertain"]
 type MatchRequestKind = Literal["normal", "safety"]
 type MatchRequestStatus = Literal["pending", "reserved", "confirmed", "resolved"]
 type MeetingPreference = Literal["nbnc_joins_human", "human_joins_nbnc"]
-DEFAULT_SAFE_CLAIM_LEASE = timedelta(minutes=1)
-_NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL = datetime(1970, 1, 1, tzinfo=UTC)
 SERVICE_INTERACTION_END_RELEASE_REASON = "service_interaction_ended"
-
-
-class DeliveryClaimLostError(RuntimeError):
-    """Raised when a worker no longer owns a safe outbound-delivery claim."""
 
 
 class ServiceInteractionClosedError(RuntimeError):
@@ -279,47 +267,6 @@ class PollStateRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class NewOutboundDelivery:
-    idempotency_key: str
-    user_id: UUID
-    telegram_chat_id: int
-    kind: str
-    payload: dict[str, JsonValue]
-    status: str = "pending"
-    eligible_at: datetime | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OutboundDeliveryMessage:
-    """Provider-neutral durable send inputs reconstructed from the outbox row."""
-
-    chat_id: int
-    kind: str
-    payload: Mapping[str, JsonValue]
-
-
-@dataclass(frozen=True, slots=True)
-class OutboundDeliveryRecord:
-    id: UUID
-    idempotency_key: str
-    status: str
-    message: OutboundDeliveryMessage
-    eligible_at: datetime
-    claim_token: UUID | None
-    claim_expires_at: datetime | None
-    confirmed_telegram_message_id: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class DeliveryAttemptRecord:
-    id: UUID
-    delivery_id: UUID
-    attempt_number: int
-    started_at: datetime
-    correlation_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
 class DiagnosticRecord:
     id: UUID
     correlation_id: UUID
@@ -397,6 +344,10 @@ class ServiceRepository(Protocol):
     async def list_due_timestamps(
         self, *, now: datetime
     ) -> list[ServiceTimestampRecord]: ...
+
+    async def claim_timestamp_delivery(
+        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
+    ) -> bool: ...
 
     async def list_audience_user_ids(
         self, audience: ServiceAudience, service_id: UUID | None, *, now: datetime
@@ -573,52 +524,6 @@ class OpenSelectionRepository(Protocol):
     ) -> ServiceBoundSelectionExpiry: ...
 
 
-class DeliveryRepository(Protocol):
-    async def claim_timestamp_delivery(
-        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
-    ) -> bool: ...
-
-    async def enqueue(
-        self, delivery: NewOutboundDelivery
-    ) -> OutboundDeliveryRecord: ...
-
-    async def claim_next_safe(
-        self, *, now: datetime, lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE
-    ) -> OutboundDeliveryRecord | None: ...
-
-    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime: ...
-
-    async def renew_claim(
-        self,
-        delivery_id: UUID,
-        *,
-        claim_token: UUID,
-        now: datetime,
-        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
-    ) -> OutboundDeliveryRecord: ...
-
-    async def start_attempt(
-        self,
-        delivery_id: UUID,
-        correlation_id: UUID,
-        *,
-        claim_token: UUID,
-        started_at: datetime,
-    ) -> DeliveryAttemptRecord: ...
-
-    async def finish_attempt(
-        self,
-        delivery_id: UUID,
-        attempt_id: UUID,
-        outcome: DeliveryOutcome,
-        *,
-        now: datetime,
-        retry_at: datetime | None = None,
-        safe_error: str | None = None,
-        confirmed_telegram_message_id: int | None = None,
-    ) -> None: ...
-
-
 class DiagnosticRepository(Protocol):
     async def record(
         self,
@@ -629,10 +534,6 @@ class DiagnosticRepository(Protocol):
         safe_context: dict[str, JsonValue],
         at: datetime,
     ) -> DiagnosticRecord: ...
-
-    async def enqueue_admin_notifications(
-        self, diagnostic_id: UUID, *, at: datetime
-    ) -> int: ...
 
 
 class FlowVersionRepository(Protocol):
@@ -650,11 +551,6 @@ class FlowVersionRepository(Protocol):
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _validate_lease_duration(lease_duration: timedelta) -> None:
-    if lease_duration <= timedelta():
-        raise ValueError("safe claim lease duration must be positive")
 
 
 def _user_record(row: User) -> UserRecord:
@@ -899,54 +795,6 @@ def _match_request_record(row: HumanMatchRequest) -> MatchRequestRecord:
         status=cast(MatchRequestStatus, row.status),
         created_at=row.created_at,
         resolved_at=row.resolved_at,
-    )
-
-
-def _freeze_json(value: JsonValue) -> JsonValue:
-    """Make JSON values immutable before exposing them through a frozen DTO."""
-
-    if isinstance(value, dict):
-        return cast(
-            JsonValue,
-            MappingProxyType({key: _freeze_json(item) for key, item in value.items()}),
-        )
-    if isinstance(value, list):
-        return cast(JsonValue, tuple(_freeze_json(item) for item in value))
-    return value
-
-
-def _freeze_payload(payload: dict[str, JsonValue]) -> Mapping[str, JsonValue]:
-    """Detach the returned message payload from the ORM row and freeze it recursively."""
-
-    return MappingProxyType(
-        {key: _freeze_json(value) for key, value in payload.items()}
-    )
-
-
-def _delivery_record(row: OutboundDelivery) -> OutboundDeliveryRecord:
-    return OutboundDeliveryRecord(
-        id=row.id,
-        idempotency_key=row.idempotency_key,
-        status=row.status,
-        message=OutboundDeliveryMessage(
-            chat_id=row.telegram_chat_id,
-            kind=row.kind,
-            payload=_freeze_payload(row.payload),
-        ),
-        eligible_at=row.eligible_at,
-        claim_token=row.claim_token,
-        claim_expires_at=row.claim_expires_at,
-        confirmed_telegram_message_id=row.confirmed_telegram_message_id,
-    )
-
-
-def _attempt_record(row: OutboundDeliveryAttempt) -> DeliveryAttemptRecord:
-    return DeliveryAttemptRecord(
-        id=row.id,
-        delivery_id=row.delivery_id,
-        attempt_number=row.attempt_number,
-        started_at=row.started_at,
-        correlation_id=row.correlation_id,
     )
 
 
@@ -1267,6 +1115,37 @@ class SqlAlchemyServiceRepository:
             .order_by(ServiceTimestamp.occurs_at, ServiceTimestamp.id)
         )
         return [_timestamp_record(row) for row in rows]
+
+    async def claim_timestamp_delivery(
+        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
+    ) -> bool:
+        """Claim one timestamp recipient while holding its service closure fence."""
+
+        timestamp = await self._session.scalar(
+            select(ServiceTimestamp)
+            .where(ServiceTimestamp.id == service_timestamp_id)
+            .with_for_update()
+        )
+        if timestamp is None:
+            raise LookupError("service timestamp was not found")
+        await _lock_timestamp_delivery_service(self._session, timestamp, at=now)
+        row = await self._session.scalar(
+            pg_insert(TimestampDeliveryClaim)
+            .values(
+                service_timestamp_id=service_timestamp_id,
+                user_id=user_id,
+                claimed_at=now,
+                status="claimed",
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    TimestampDeliveryClaim.service_timestamp_id,
+                    TimestampDeliveryClaim.user_id,
+                ]
+            )
+            .returning(TimestampDeliveryClaim.id)
+        )
+        return row is not None
 
     async def list_audience_user_ids(
         self, audience: ServiceAudience, service_id: UUID | None, *, now: datetime
@@ -2481,254 +2360,6 @@ class SqlAlchemyOpenSelectionRepository:
             setattr(row, field, value)
 
 
-class SqlAlchemyDeliveryRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def claim_timestamp_delivery(
-        self, service_timestamp_id: UUID, user_id: UUID, *, now: datetime
-    ) -> bool:
-        timestamp = await self._session.scalar(
-            select(ServiceTimestamp)
-            .where(ServiceTimestamp.id == service_timestamp_id)
-            .with_for_update()
-        )
-        if timestamp is None:
-            raise LookupError("service timestamp was not found")
-        await _lock_timestamp_delivery_service(self._session, timestamp, at=now)
-        row = await self._session.scalar(
-            pg_insert(TimestampDeliveryClaim)
-            .values(
-                service_timestamp_id=service_timestamp_id,
-                user_id=user_id,
-                claimed_at=now,
-                status="claimed",
-            )
-            .on_conflict_do_nothing(
-                index_elements=[
-                    TimestampDeliveryClaim.service_timestamp_id,
-                    TimestampDeliveryClaim.user_id,
-                ]
-            )
-            .returning(TimestampDeliveryClaim.id)
-        )
-        return row is not None
-
-    async def enqueue(self, delivery: NewOutboundDelivery) -> OutboundDeliveryRecord:
-        row = await self._session.scalar(
-            pg_insert(OutboundDelivery)
-            .values(
-                idempotency_key=delivery.idempotency_key,
-                user_id=delivery.user_id,
-                telegram_chat_id=delivery.telegram_chat_id,
-                kind=delivery.kind,
-                payload=delivery.payload,
-                status=delivery.status,
-                eligible_at=delivery.eligible_at or _now(),
-            )
-            .on_conflict_do_nothing(index_elements=[OutboundDelivery.idempotency_key])
-            .returning(OutboundDelivery)
-        )
-        if row is None:
-            row = await self._session.scalar(
-                select(OutboundDelivery).where(
-                    OutboundDelivery.idempotency_key == delivery.idempotency_key
-                )
-            )
-        if row is None:
-            raise RuntimeError("outbound delivery could not be enqueued")
-        return _delivery_record(row)
-
-    async def claim_next_safe(
-        self,
-        *,
-        now: datetime,
-        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
-    ) -> OutboundDeliveryRecord | None:
-        """Atomically lease due work or an expired unstarted lease, never a send."""
-
-        _validate_lease_duration(lease_duration)
-        row = await self._session.scalar(
-            select(OutboundDelivery)
-            .where(
-                or_(
-                    and_(
-                        OutboundDelivery.status.in_(("pending", "retry")),
-                        OutboundDelivery.eligible_at <= now,
-                    ),
-                    and_(
-                        OutboundDelivery.status == "claimed",
-                        OutboundDelivery.claim_expires_at.is_not(None),
-                        OutboundDelivery.claim_expires_at <= now,
-                    ),
-                )
-            )
-            .order_by(OutboundDelivery.created_at, OutboundDelivery.id)
-            .with_for_update(skip_locked=True)
-            .limit(1)
-        )
-        if row is None:
-            return None
-        pause = await self._locked_telegram_outbound_pause()
-        if pause.pause_until > now:
-            return None
-        row.status = "claimed"
-        row.claim_token = uuid4()
-        row.claim_expires_at = now + lease_duration
-        return _delivery_record(row)
-
-    async def extend_telegram_pause(self, *, pause_until: datetime) -> datetime:
-        """Extend the singleton Telegram pause without allowing it to move backward."""
-
-        pause = await self._locked_telegram_outbound_pause()
-        pause.pause_until = max(pause.pause_until, pause_until)
-        return pause.pause_until
-
-    async def renew_claim(
-        self,
-        delivery_id: UUID,
-        *,
-        claim_token: UUID,
-        now: datetime,
-        lease_duration: timedelta = DEFAULT_SAFE_CLAIM_LEASE,
-    ) -> OutboundDeliveryRecord:
-        """Extend a still-live claim only for its exact opaque owner token."""
-
-        _validate_lease_duration(lease_duration)
-        delivery = await self._session.scalar(
-            select(OutboundDelivery)
-            .where(OutboundDelivery.id == delivery_id)
-            .with_for_update()
-        )
-        if (
-            delivery is None
-            or delivery.status != "claimed"
-            or delivery.claim_token != claim_token
-            or delivery.claim_expires_at is None
-            or delivery.claim_expires_at <= now
-        ):
-            raise DeliveryClaimLostError("outbound delivery claim was lost")
-        delivery.claim_expires_at = now + lease_duration
-        return _delivery_record(delivery)
-
-    async def start_attempt(
-        self,
-        delivery_id: UUID,
-        correlation_id: UUID,
-        *,
-        claim_token: UUID,
-        started_at: datetime,
-    ) -> DeliveryAttemptRecord:
-        delivery = await self._session.scalar(
-            select(OutboundDelivery)
-            .where(OutboundDelivery.id == delivery_id)
-            .with_for_update()
-        )
-        if (
-            delivery is None
-            or delivery.status != "claimed"
-            or delivery.claim_token != claim_token
-            or delivery.claim_expires_at is None
-            or delivery.claim_expires_at <= started_at
-        ):
-            raise DeliveryClaimLostError("outbound delivery claim was lost")
-        # Delivery operations always acquire the delivery row before the
-        # singleton pause row.  Keeping this order consistent with
-        # ``claim_next_safe`` prevents a recovering worker and a stale starter
-        # from holding the two locks in opposite orders.
-        pause = await self._locked_telegram_outbound_pause()
-        if pause.pause_until > started_at:
-            raise DeliveryClaimLostError("outbound delivery claim was paused")
-        attempt_number = await self._session.scalar(
-            select(
-                func.coalesce(func.max(OutboundDeliveryAttempt.attempt_number), 0)
-            ).where(OutboundDeliveryAttempt.delivery_id == delivery_id)
-        )
-        next_attempt_number = 1 if attempt_number is None else attempt_number + 1
-        attempt = OutboundDeliveryAttempt(
-            delivery_id=delivery_id,
-            attempt_number=next_attempt_number,
-            started_at=started_at,
-            correlation_id=correlation_id,
-        )
-        delivery.status = "sending"
-        delivery.claim_token = None
-        delivery.claim_expires_at = None
-        self._session.add(attempt)
-        await self._session.flush()
-        return _attempt_record(attempt)
-
-    async def finish_attempt(
-        self,
-        delivery_id: UUID,
-        attempt_id: UUID,
-        outcome: DeliveryOutcome,
-        *,
-        now: datetime,
-        retry_at: datetime | None = None,
-        safe_error: str | None = None,
-        confirmed_telegram_message_id: int | None = None,
-    ) -> None:
-        attempt = await self._session.scalar(
-            select(OutboundDeliveryAttempt)
-            .where(
-                OutboundDeliveryAttempt.id == attempt_id,
-                OutboundDeliveryAttempt.delivery_id == delivery_id,
-            )
-            .with_for_update()
-        )
-        if attempt is None:
-            raise LookupError("outbound delivery attempt was not found")
-        if attempt.finished_at is not None:
-            raise RuntimeError("outbound delivery attempt is already finished")
-        delivery = await self._session.scalar(
-            select(OutboundDelivery)
-            .where(OutboundDelivery.id == delivery_id)
-            .with_for_update()
-        )
-        if delivery is None:
-            raise LookupError("outbound delivery was not found")
-        if delivery.status != "sending":
-            raise RuntimeError("outbound delivery is not sending")
-        if (
-            confirmed_telegram_message_id is not None
-            and confirmed_telegram_message_id <= 0
-        ):
-            raise ValueError("confirmed Telegram message id must be positive")
-        attempt.finished_at = now
-        attempt.outcome = outcome
-        attempt.safe_error = safe_error
-        delivery.status = outcome
-        delivery.claim_token = None
-        delivery.claim_expires_at = None
-        if outcome == "retry":
-            delivery.eligible_at = retry_at or now
-        if outcome == "sent":
-            delivery.sent_at = now
-        if confirmed_telegram_message_id is not None:
-            delivery.confirmed_telegram_message_id = confirmed_telegram_message_id
-
-    async def _locked_telegram_outbound_pause(self) -> TelegramOutboundPause:
-        """Materialize and lock the one row that serializes outbound claims."""
-
-        await self._session.execute(
-            pg_insert(TelegramOutboundPause)
-            .values(
-                singleton_id=1,
-                pause_until=_NO_TELEGRAM_OUTBOUND_PAUSE_UNTIL,
-            )
-            .on_conflict_do_nothing(index_elements=[TelegramOutboundPause.singleton_id])
-        )
-        pause = await self._session.scalar(
-            select(TelegramOutboundPause)
-            .where(TelegramOutboundPause.singleton_id == 1)
-            .with_for_update()
-        )
-        if pause is None:
-            raise RuntimeError("Telegram outbound pause could not be initialized")
-        return pause
-
-
 class SqlAlchemyDiagnosticRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -2756,33 +2387,6 @@ class SqlAlchemyDiagnosticRepository:
         if row is None:
             raise RuntimeError("diagnostic record could not be created")
         return _diagnostic_record(row)
-
-    async def enqueue_admin_notifications(
-        self, diagnostic_id: UUID, *, at: datetime
-    ) -> int:
-        admin_ids = await self._session.scalars(
-            select(User.id).where(User.is_admin.is_(True))
-        )
-        inserted = 0
-        for admin_id in admin_ids:
-            row = await self._session.scalar(
-                pg_insert(AdminNotificationDelivery)
-                .values(
-                    diagnostic_id=diagnostic_id,
-                    admin_user_id=admin_id,
-                    status="pending",
-                    created_at=at,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[
-                        AdminNotificationDelivery.diagnostic_id,
-                        AdminNotificationDelivery.admin_user_id,
-                    ]
-                )
-                .returning(AdminNotificationDelivery.id)
-            )
-            inserted += row is not None
-        return inserted
 
 
 class SqlAlchemyFlowVersionRepository:

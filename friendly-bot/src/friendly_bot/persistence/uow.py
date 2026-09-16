@@ -16,7 +16,6 @@ from friendly_bot.persistence.models import UserProcessingLock
 from friendly_bot.persistence.repositories import (
     AttendanceRepository,
     ConversationRepository,
-    DeliveryRepository,
     DiagnosticRepository,
     FlowVersionRepository,
     MatchRepository,
@@ -29,7 +28,6 @@ from friendly_bot.persistence.repositories import (
     ServiceRepository,
     SqlAlchemyAttendanceRepository,
     SqlAlchemyConversationRepository,
-    SqlAlchemyDeliveryRepository,
     SqlAlchemyDiagnosticRepository,
     SqlAlchemyFlowVersionRepository,
     SqlAlchemyMatchRepository,
@@ -69,7 +67,6 @@ class UnitOfWork:
         self._pending_intents: PendingIntentRepository | None = None
         self._matches: MatchRepository | None = None
         self._open_selections: OpenSelectionRepository | None = None
-        self._deliveries: DeliveryRepository | None = None
         self._diagnostics: DiagnosticRepository | None = None
         self._flow_versions: FlowVersionRepository | None = None
 
@@ -97,7 +94,6 @@ class UnitOfWork:
         self._open_selections = SqlAlchemyOpenSelectionRepository(
             self._session, self._locked_user_ids
         )
-        self._deliveries = SqlAlchemyDeliveryRepository(self._session)
         self._diagnostics = SqlAlchemyDiagnosticRepository(self._session)
         self._flow_versions = SqlAlchemyFlowVersionRepository(self._session)
         return self
@@ -185,10 +181,6 @@ class UnitOfWork:
     @property
     def open_selections(self) -> OpenSelectionRepository:
         return self._required_repository(self._open_selections)
-
-    @property
-    def deliveries(self) -> DeliveryRepository:
-        return self._required_repository(self._deliveries)
 
     @property
     def diagnostics(self) -> DiagnosticRepository:

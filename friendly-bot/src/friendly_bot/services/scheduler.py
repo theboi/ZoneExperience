@@ -113,7 +113,7 @@ class ServiceDeliveryScheduler:
                 prepared: TimestampRootPreparation | None = None
                 async with self._uow_factory() as uow:
                     try:
-                        claimed = await uow.deliveries.claim_timestamp_delivery(
+                        claimed = await uow.services.claim_timestamp_delivery(
                             timestamp.id, user_id, now=now
                         )
                     except ServiceInteractionClosedError:

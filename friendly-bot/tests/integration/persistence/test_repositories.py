@@ -34,19 +34,14 @@ from friendly_bot.persistence.models import (
     OpenFlowSelection,
     OperationalProfile,
     OperationalRole,
-    OutboundDelivery,
-    OutboundDeliveryAttempt,
     Service,
     ServiceAttendance,
     ServiceAudience,
     ServiceTimestamp,
-    TelegramOutboundPause,
     TimestampDeliveryClaim,
     User,
 )
 from friendly_bot.persistence.repositories import (
-    DeliveryClaimLostError,
-    NewOutboundDelivery,
     NewService,
     NewServiceTimestamp,
     ServiceInteractionClosedError,
@@ -1517,7 +1512,7 @@ async def test_concurrent_timestamp_claim_has_exactly_one_winner(
 
     async def claim() -> bool:
         async with uow_factory() as uow:
-            return await uow.deliveries.claim_timestamp_delivery(
+            return await uow.services.claim_timestamp_delivery(
                 timestamp_id, user_id, now=NOW
             )
 
@@ -1560,11 +1555,11 @@ async def test_timestamp_delivery_claim_is_idempotent(
         )
 
     async with uow_factory() as uow:
-        assert await uow.deliveries.claim_timestamp_delivery(
+        assert await uow.services.claim_timestamp_delivery(
             timestamp_id, user_id, now=NOW
         )
     async with uow_factory() as uow:
-        assert not await uow.deliveries.claim_timestamp_delivery(
+        assert not await uow.services.claim_timestamp_delivery(
             timestamp_id, user_id, now=NOW
         )
 
@@ -1607,9 +1602,7 @@ async def test_timestamp_claim_at_interaction_boundary_creates_no_durable_claim(
 
     with pytest.raises(ServiceInteractionClosedError):
         async with uow_factory() as uow:
-            await uow.deliveries.claim_timestamp_delivery(
-                timestamp_id, user_id, now=NOW
-            )
+            await uow.services.claim_timestamp_delivery(timestamp_id, user_id, now=NOW)
 
     async with session_factory() as session:
         claims = list(
@@ -1623,423 +1616,16 @@ async def test_timestamp_claim_at_interaction_boundary_creates_no_durable_claim(
     assert claims == []
 
 
-async def test_delivery_claim_exposes_a_provider_neutral_immutable_message(
+async def test_flow_publication_is_idempotent(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
-    """The worker must receive all send inputs without reaching into an ORM row."""
+    """Repeated canonical publication must return one immutable durable version."""
 
-    user_id = await _seed_user(session_factory)
-    delivery = NewOutboundDelivery(
-        idempotency_key="delivery:message",
-        user_id=user_id,
-        telegram_chat_id=71,
-        kind="message",
-        payload={"text": "hello", "buttons": [{"label": "Continue"}]},
-    )
-    async with uow_factory() as uow:
-        enqueued = await uow.deliveries.enqueue(delivery)
-
-    async with uow_factory() as first:
-        claimed = await first.deliveries.claim_next_safe(now=NOW)
-
-        async def contend() -> object:
-            async with uow_factory() as second:
-                return await second.deliveries.claim_next_safe(now=NOW)
-
-        assert await contend() is None
-        assert claimed is not None
-        assert claimed.id == enqueued.id
-        assert claimed.status == "claimed"
-        assert claimed.message.chat_id == 71
-        assert claimed.message.kind == "message"
-        assert dict(claimed.message.payload) == {
-            "text": "hello",
-            "buttons": ({"label": "Continue"},),
-        }
-        with pytest.raises(TypeError):
-            claimed.message.payload["text"] = "changed"
-        buttons = claimed.message.payload["buttons"]
-        assert isinstance(buttons, tuple)
-        assert isinstance(buttons[0], dict) is False
-        with pytest.raises(TypeError):
-            buttons[0]["label"] = "changed"
-        assert claimed.claim_token is not None
-        assert claimed.claim_expires_at is not None
-
-    async with session_factory() as session:
-        stored = await session.get(OutboundDelivery, enqueued.id)
-
-    assert stored is not None
-    assert stored.status == "claimed"
-
-
-async def test_expired_claim_recovery_and_stale_start_do_not_deadlock(
-    session_factory: _SESSION_FACTORY,
-    uow_factory: Callable[[], UnitOfWork],
-) -> None:
-    """A recovering worker and stale starter must serialize without a lock cycle."""
-
-    user_id = await _seed_user(session_factory)
-    delivery = NewOutboundDelivery(
-        idempotency_key="delivery:stale-start",
-        user_id=user_id,
-        telegram_chat_id=72,
-        kind="message",
-        payload={"text": "stale start"},
-        eligible_at=NOW,
-    )
-    lease_duration = timedelta(minutes=1)
-    expired_at = NOW + lease_duration
-    async with uow_factory() as uow:
-        enqueued = await uow.deliveries.enqueue(delivery)
-    async with uow_factory() as uow:
-        original_claim = await uow.deliveries.claim_next_safe(
-            now=NOW, lease_duration=lease_duration
-        )
-
-    assert original_claim is not None
-    assert original_claim.claim_token is not None
-    async with session_factory.begin() as pause_holder:
-        await pause_holder.scalar(
-            select(TelegramOutboundPause)
-            .where(TelegramOutboundPause.singleton_id == 1)
-            .with_for_update()
-        )
-
-        async def stale_start() -> object:
-            async with uow_factory() as uow:
-                try:
-                    return await uow.deliveries.start_attempt(
-                        enqueued.id,
-                        uuid4(),
-                        claim_token=original_claim.claim_token,
-                        started_at=expired_at,
-                    )
-                except DeliveryClaimLostError as error:
-                    return error
-
-        async def recover() -> object:
-            async with uow_factory() as uow:
-                return await uow.deliveries.claim_next_safe(
-                    now=expired_at, lease_duration=lease_duration
-                )
-
-        stale_task = asyncio.create_task(stale_start())
-        await asyncio.sleep(0.05)
-        recovery_task = asyncio.create_task(recover())
-        await asyncio.sleep(0.05)
-
-    recovered, stale = await asyncio.wait_for(
-        asyncio.gather(recovery_task, stale_task), timeout=1
-    )
-
-    assert recovered is not None
-    assert recovered.claim_token is not None
-    assert recovered.claim_token != original_claim.claim_token
-    assert isinstance(stale, DeliveryClaimLostError)
-
-
-async def test_delivery_retry_at_is_exact_and_attempt_result_metadata_persists(
-    session_factory: _SESSION_FACTORY,
-    uow_factory: Callable[[], UnitOfWork],
-) -> None:
-    """A parsed retry delay must gate the next claim and retain safe result details."""
-
-    user_id = await _seed_user(session_factory)
-    retry_at = NOW + timedelta(minutes=7)
-    delivery = NewOutboundDelivery(
-        idempotency_key="delivery:exact-retry",
-        user_id=user_id,
-        telegram_chat_id=72,
-        kind="message",
-        payload={"text": "retry later"},
-        eligible_at=NOW,
-    )
-    async with uow_factory() as uow:
-        enqueued = await uow.deliveries.enqueue(delivery)
-    async with uow_factory() as uow:
-        claim = await uow.deliveries.claim_next_safe(now=NOW)
-        assert claim is not None
-        assert claim.claim_token is not None
-        correlation_id = uuid4()
-        first_attempt = await uow.deliveries.start_attempt(
-            claim.id,
-            correlation_id,
-            claim_token=claim.claim_token,
-            started_at=NOW,
-        )
-        await uow.deliveries.finish_attempt(
-            claim.id,
-            first_attempt.id,
-            "retry",
-            now=NOW + timedelta(seconds=1),
-            retry_at=retry_at,
-            safe_error="telegram_rate_limited",
-        )
-
-    async with session_factory() as session:
-        stored = await session.get(OutboundDelivery, enqueued.id)
-        attempts = list(
-            await session.scalars(
-                select(OutboundDeliveryAttempt)
-                .where(OutboundDeliveryAttempt.delivery_id == enqueued.id)
-                .order_by(OutboundDeliveryAttempt.attempt_number)
-            )
-        )
-
-    assert stored is not None
-    assert stored.status == "retry"
-    assert stored.eligible_at == retry_at
-    assert stored.claim_token is None
-    assert stored.claim_expires_at is None
-    assert [(attempt.correlation_id, attempt.safe_error) for attempt in attempts] == [
-        (correlation_id, "telegram_rate_limited")
-    ]
-
-    async with uow_factory() as uow:
-        assert (
-            await uow.deliveries.claim_next_safe(
-                now=retry_at - timedelta(microseconds=1)
-            )
-            is None
-        )
-    async with uow_factory() as uow:
-        retry_claim = await uow.deliveries.claim_next_safe(now=retry_at)
-        assert retry_claim is not None
-        assert retry_claim.claim_token is not None
-        completed_attempt = await uow.deliveries.start_attempt(
-            retry_claim.id,
-            uuid4(),
-            claim_token=retry_claim.claim_token,
-            started_at=retry_at,
-        )
-        await uow.deliveries.finish_attempt(
-            retry_claim.id,
-            completed_attempt.id,
-            "sent",
-            now=retry_at,
-            confirmed_telegram_message_id=9182,
-        )
-    async with session_factory() as session:
-        stored = await session.get(OutboundDelivery, enqueued.id)
-
-    assert stored is not None
-    assert stored.status == "sent"
-    assert stored.confirmed_telegram_message_id == 9182
-
-    immediate = NewOutboundDelivery(
-        idempotency_key="delivery:legacy-immediate-retry",
-        user_id=user_id,
-        telegram_chat_id=72,
-        kind="message",
-        payload={"text": "retry now"},
-        eligible_at=NOW,
-    )
-    async with uow_factory() as uow:
-        immediate_record = await uow.deliveries.enqueue(immediate)
-    async with uow_factory() as uow:
-        immediate_claim = await uow.deliveries.claim_next_safe(now=NOW)
-        assert immediate_claim is not None
-        assert immediate_claim.claim_token is not None
-        immediate_attempt = await uow.deliveries.start_attempt(
-            immediate_claim.id,
-            uuid4(),
-            claim_token=immediate_claim.claim_token,
-            started_at=NOW,
-        )
-        await uow.deliveries.finish_attempt(
-            immediate_claim.id,
-            immediate_attempt.id,
-            "retry",
-            now=NOW,
-        )
-    async with uow_factory() as uow:
-        immediate_retry = await uow.deliveries.claim_next_safe(now=NOW)
-
-    assert immediate_retry is not None
-    assert immediate_retry.id == immediate_record.id
-
-
-async def test_only_an_expired_unstarted_claim_is_recoverable_and_stale_tokens_are_fenced(
-    session_factory: _SESSION_FACTORY,
-    uow_factory: Callable[[], UnitOfWork],
-) -> None:
-    """Recovery must never replay a started or uncertain network boundary crossing."""
-
-    user_id = await _seed_user(session_factory)
-    lease_duration = timedelta(minutes=1)
-
-    def new_delivery(idempotency_key: str) -> NewOutboundDelivery:
-        return NewOutboundDelivery(
-            idempotency_key=idempotency_key,
-            user_id=user_id,
-            telegram_chat_id=73,
-            kind="message",
-            payload={"text": idempotency_key},
-            eligible_at=NOW,
-        )
-
-    async with uow_factory() as uow:
-        unstarted = await uow.deliveries.enqueue(new_delivery("delivery:unstarted"))
-    async with uow_factory() as uow:
-        unstarted_claim = await uow.deliveries.claim_next_safe(
-            now=NOW, lease_duration=lease_duration
-        )
-        assert unstarted_claim is not None
-        assert unstarted_claim.id == unstarted.id
-        assert unstarted_claim.claim_token is not None
-        stale_token = unstarted_claim.claim_token
-        renewed = await uow.deliveries.renew_claim(
-            unstarted_claim.id,
-            claim_token=stale_token,
-            now=NOW + timedelta(seconds=1),
-            lease_duration=lease_duration,
-        )
-        assert renewed.claim_expires_at == NOW + timedelta(minutes=1, seconds=1)
-        with pytest.raises(DeliveryClaimLostError):
-            await uow.deliveries.renew_claim(
-                unstarted_claim.id,
-                claim_token=uuid4(),
-                now=NOW + timedelta(seconds=1),
-                lease_duration=lease_duration,
-            )
-
-    async with uow_factory() as uow:
-        started = await uow.deliveries.enqueue(new_delivery("delivery:started"))
-    async with uow_factory() as uow:
-        started_claim = await uow.deliveries.claim_next_safe(
-            now=NOW + timedelta(seconds=2), lease_duration=lease_duration
-        )
-        assert started_claim is not None
-        assert started_claim.id == started.id
-        assert started_claim.claim_token is not None
-        await uow.deliveries.start_attempt(
-            started_claim.id,
-            uuid4(),
-            claim_token=started_claim.claim_token,
-            started_at=NOW + timedelta(seconds=2),
-        )
-    async with uow_factory() as uow:
-        uncertain = await uow.deliveries.enqueue(new_delivery("delivery:uncertain"))
-    async with uow_factory() as uow:
-        uncertain_claim = await uow.deliveries.claim_next_safe(
-            now=NOW + timedelta(seconds=3), lease_duration=lease_duration
-        )
-        assert uncertain_claim is not None
-        assert uncertain_claim.id == uncertain.id
-        assert uncertain_claim.claim_token is not None
-        uncertain_attempt = await uow.deliveries.start_attempt(
-            uncertain_claim.id,
-            uuid4(),
-            claim_token=uncertain_claim.claim_token,
-            started_at=NOW + timedelta(seconds=3),
-        )
-        await uow.deliveries.finish_attempt(
-            uncertain_claim.id,
-            uncertain_attempt.id,
-            "uncertain",
-            now=NOW + timedelta(seconds=4),
-            safe_error="telegram_transport_error",
-        )
-
-    async with uow_factory() as uow:
-        recovered = await uow.deliveries.claim_next_safe(
-            now=NOW + timedelta(minutes=1, seconds=1),
-            lease_duration=lease_duration,
-        )
-        assert recovered is not None
-        assert recovered.id == unstarted.id
-        assert recovered.claim_token is not None
-        assert recovered.claim_token != stale_token
-        with pytest.raises(DeliveryClaimLostError):
-            await uow.deliveries.renew_claim(
-                unstarted.id,
-                claim_token=stale_token,
-                now=NOW + timedelta(minutes=1, seconds=1),
-                lease_duration=lease_duration,
-            )
-        with pytest.raises(DeliveryClaimLostError):
-            await uow.deliveries.start_attempt(
-                unstarted.id,
-                uuid4(),
-                claim_token=stale_token,
-                started_at=NOW + timedelta(minutes=1, seconds=1),
-            )
-
-    async with uow_factory() as uow:
-        assert (
-            await uow.deliveries.claim_next_safe(
-                now=NOW + timedelta(minutes=1, seconds=2),
-                lease_duration=lease_duration,
-            )
-            is None
-        )
-
-
-async def test_recovered_claim_rejects_stale_token_renewal(
-    session_factory: _SESSION_FACTORY,
-    uow_factory: Callable[[], UnitOfWork],
-) -> None:
-    """Recovery must fence the previous owner from renewing an unstarted claim."""
-
-    user_id = await _seed_user(session_factory)
-    lease_duration = timedelta(minutes=1)
-    delivery = NewOutboundDelivery(
-        idempotency_key="delivery:stale-renewal",
-        user_id=user_id,
-        telegram_chat_id=74,
-        kind="message",
-        payload={"text": "stale renewal"},
-        eligible_at=NOW,
-    )
-    async with uow_factory() as uow:
-        enqueued = await uow.deliveries.enqueue(delivery)
-    async with uow_factory() as uow:
-        first_claim = await uow.deliveries.claim_next_safe(
-            now=NOW, lease_duration=lease_duration
-        )
-
-    assert first_claim is not None
-    assert first_claim.claim_token is not None
-    stale_token = first_claim.claim_token
-
-    async with uow_factory() as uow:
-        recovered_claim = await uow.deliveries.claim_next_safe(
-            now=NOW + lease_duration, lease_duration=lease_duration
-        )
-        assert recovered_claim is not None
-        assert recovered_claim.id == enqueued.id
-        assert recovered_claim.claim_token is not None
-        assert recovered_claim.claim_token != stale_token
-        with pytest.raises(DeliveryClaimLostError):
-            await uow.deliveries.renew_claim(
-                enqueued.id,
-                claim_token=stale_token,
-                now=NOW + lease_duration,
-                lease_duration=lease_duration,
-            )
-
-
-async def test_flow_publication_and_delivery_enqueue_are_idempotent(
-    session_factory: _SESSION_FACTORY,
-    uow_factory: Callable[[], UnitOfWork],
-) -> None:
-    """Repeated canonical publication or outbound enqueue must return one durable row."""
-
-    user_id = await _seed_user(session_factory)
     definition = PublishedFlowDefinition(
         document={"key": "system.home", "next_flows": []},
         flow_key_index={"system.home": ()},
     )
-    delivery = NewOutboundDelivery(
-        idempotency_key="welcome:one",
-        user_id=user_id,
-        telegram_chat_id=500,
-        kind="message",
-        payload={"text": "hello"},
-    )
-
     async with uow_factory() as uow:
         first_version = await uow.flow_versions.publish(
             definition,
@@ -2047,7 +1633,6 @@ async def test_flow_publication_and_delivery_enqueue_are_idempotent(
             service_id=None,
             published_by_user_id=None,
         )
-        first_delivery = await uow.deliveries.enqueue(delivery)
     async with uow_factory() as uow:
         second_version = await uow.flow_versions.publish(
             definition,
@@ -2055,8 +1640,6 @@ async def test_flow_publication_and_delivery_enqueue_are_idempotent(
             service_id=None,
             published_by_user_id=None,
         )
-        second_delivery = await uow.deliveries.enqueue(delivery)
 
     assert second_version.id == first_version.id
     assert second_version.definition == definition.document
-    assert second_delivery == first_delivery

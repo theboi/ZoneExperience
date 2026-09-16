@@ -40,7 +40,7 @@ def _outbound() -> OutboundTelegramMessage:
 
 
 async def test_send_confirms_only_a_positive_message_identifier() -> None:
-    """A valid receipt must retain only the delivery identifier needed by the outbox."""
+    """A valid receipt retains only the provider message identifier."""
 
     async def telegram(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/bottest-token/sendMessage"
@@ -194,8 +194,8 @@ async def test_send_marks_a_transport_failure_uncertain() -> None:
     await client.aclose()
 
 
-async def test_send_propagates_cancellation_to_the_durable_outbox_owner() -> None:
-    """Only the outbox worker can persist an uncertain result before shutdown exits."""
+async def test_send_propagates_cancellation_to_the_direct_sender() -> None:
+    """Cancellation must escape so the direct sender can stop immediately."""
 
     async def telegram(_request: httpx.Request) -> httpx.Response:
         raise asyncio.CancelledError()

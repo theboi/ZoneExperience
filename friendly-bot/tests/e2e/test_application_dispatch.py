@@ -225,12 +225,6 @@ class RecordingDiagnostics:
             safe_summary=cast(str, kwargs["safe_summary"]),
         )
 
-    async def enqueue_admin_notifications(
-        self, diagnostic_id: object, *, at: datetime
-    ) -> int:
-        del diagnostic_id, at
-        return 0
-
 
 @dataclass
 class RecordingVersions:
@@ -840,9 +834,7 @@ async def test_unknown_match_callback_is_ignored_without_branch_or_output_work()
     assert result == DispatchResult("ignored")
 
 
-async def test_timestamp_preparer_opens_the_root_and_returns_presentations() -> (
-    None
-):
+async def test_timestamp_preparer_opens_the_root_and_returns_presentations() -> None:
     app, uow, user = _fixture()
     service = next(iter(uow.services_by_id.values()))
     root = DiscussionFlow.model_validate(

@@ -9,7 +9,6 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -26,7 +25,6 @@ from friendly_bot.persistence.base import Base
 
 PROJECT_DIRECTORY = Path(__file__).parents[3]
 F01_TABLES = {
-    "admin_notification_deliveries",
     "capacity_reservations",
     "conversation_messages",
     "diagnostic_records",
@@ -37,15 +35,12 @@ F01_TABLES = {
     "open_flow_selections",
     "operational_logins",
     "operational_profiles",
-    "outbound_deliveries",
-    "outbound_delivery_attempts",
     "pending_flow_intents",
     "persona_cursors",
     "processed_telegram_updates",
     "service_attendances",
     "service_timestamps",
     "services",
-    "telegram_outbound_pauses",
     "telegram_poll_state",
     "timestamp_delivery_claims",
     "user_processing_locks",
@@ -317,75 +312,38 @@ async def test_pending_intent_revision_is_reversible(
     }
 
 
-async def test_delivery_contract_upgrade_from_0001_is_complete_and_reversible(
+async def test_outbound_delivery_removal_is_reversible(
     migrated_database: MigratedDatabase,
 ) -> None:
-    """The additive delivery revision must preserve the 0001 upgrade path exactly."""
+    """Head removes delivery queue tables while its downgrade restores history."""
 
-    _run_alembic(migrated_database.database_url, "downgrade", "0001_foundation")
+    engine = create_async_engine(migrated_database.database_url)
+    try:
+        async with engine.connect() as connection:
+            at_head = await connection.run_sync(_schema_snapshot)
+    finally:
+        await engine.dispose()
+    removed_tables = {
+        "admin_notification_deliveries",
+        "outbound_deliveries",
+        "outbound_delivery_attempts",
+        "telegram_outbound_pauses",
+    }
+    assert removed_tables.isdisjoint(at_head["tables"])
+    assert "timestamp_delivery_claims" in at_head["tables"]
+
+    _run_alembic(
+        migrated_database.database_url, "downgrade", "0005_pending_flow_intents"
+    )
     engine = create_async_engine(migrated_database.database_url)
     try:
         async with engine.connect() as connection:
             before_upgrade = await connection.run_sync(_schema_snapshot)
     finally:
         await engine.dispose()
-
-    assert "eligible_at" not in before_upgrade["columns"]["outbound_deliveries"]
-    assert "claim_token" not in before_upgrade["columns"]["outbound_deliveries"]
-    assert "telegram_outbound_pauses" not in before_upgrade["tables"]
-    assert (
-        "correlation_id" not in before_upgrade["columns"]["outbound_delivery_attempts"]
-    )
+    assert removed_tables <= before_upgrade["tables"]
 
     _run_alembic(migrated_database.database_url, "upgrade", "head")
-    engine = create_async_engine(migrated_database.database_url)
-    try:
-        async with engine.connect() as connection:
-            after_upgrade = await connection.run_sync(_schema_snapshot)
-    finally:
-        await engine.dispose()
-
-    delivery_columns = after_upgrade["columns"]["outbound_deliveries"]
-    attempt_columns = after_upgrade["columns"]["outbound_delivery_attempts"]
-    assert {"eligible_at", "claim_token", "claim_expires_at"} <= set(delivery_columns)
-    assert delivery_columns["eligible_at"]["nullable"] is False
-    assert "confirmed_telegram_message_id" in delivery_columns
-    assert attempt_columns["correlation_id"]["nullable"] is False
-    pause_columns = after_upgrade["columns"]["telegram_outbound_pauses"]
-    assert set(pause_columns) == {"singleton_id", "pause_until"}
-    assert pause_columns["pause_until"]["nullable"] is False
-    assert {
-        "ix_outbound_deliveries_due",
-        "ix_outbound_deliveries_expired_claim",
-    } <= set(after_upgrade["index_definitions"])
-    engine = create_async_engine(migrated_database.database_url)
-    try:
-        async with engine.connect() as connection:
-            pause_row = (
-                await connection.execute(
-                    text(
-                        "SELECT singleton_id, pause_until FROM telegram_outbound_pauses"
-                    )
-                )
-            ).one()
-    finally:
-        await engine.dispose()
-    assert pause_row == (1, datetime(1970, 1, 1, tzinfo=UTC))
-
-    _run_alembic(migrated_database.database_url, "downgrade", "0001_foundation")
-    engine = create_async_engine(migrated_database.database_url)
-    try:
-        async with engine.connect() as connection:
-            after_downgrade = await connection.run_sync(_schema_snapshot)
-    finally:
-        await engine.dispose()
-
-    assert "eligible_at" not in after_downgrade["columns"]["outbound_deliveries"]
-    assert "claim_token" not in after_downgrade["columns"]["outbound_deliveries"]
-    assert "telegram_outbound_pauses" not in after_downgrade["tables"]
-    assert (
-        "correlation_id" not in after_downgrade["columns"]["outbound_delivery_attempts"]
-    )
 
 
 async def test_alembic_head_enables_pgcrypto_and_named_f01_enums(
@@ -440,9 +398,6 @@ async def test_alembic_head_preserves_foreign_keys_and_named_constraints(
     }
     assert actual["checks"]["telegram_poll_state"] == {
         "ck_telegram_poll_state_singleton": "singleton_id = 1"
-    }
-    assert actual["checks"]["telegram_outbound_pauses"] == {
-        "ck_telegram_outbound_pauses_singleton": "singleton_id = 1"
     }
     expected_named_unique_constraints = {
         table_name: {

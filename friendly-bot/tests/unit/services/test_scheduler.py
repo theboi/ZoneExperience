@@ -61,6 +61,9 @@ class FakeServices:
     audience_calls: list[tuple[ServiceAudience, UUID | None, datetime]] = field(
         default_factory=list
     )
+    claimed_pairs: set[tuple[UUID, UUID]] = field(default_factory=set)
+    successful_claims: list[tuple[UUID, UUID]] = field(default_factory=list)
+    close_timestamp_claims: bool = False
 
     async def list_due_timestamps(
         self, *, now: datetime
@@ -73,15 +76,6 @@ class FakeServices:
     ) -> list[UUID]:
         self.audience_calls.append((audience, service_id, now))
         return list(self.audience_user_ids.get((audience, service_id), []))
-
-
-@dataclass
-class FakeDeliveries:
-    """Share the unique timestamp claim across independently opened UoWs."""
-
-    claimed_pairs: set[tuple[UUID, UUID]] = field(default_factory=set)
-    successful_claims: list[tuple[UUID, UUID]] = field(default_factory=list)
-    close_timestamp_claims: bool = False
 
     async def claim_timestamp_delivery(
         self, timestamp_id: UUID, user_id: UUID, *, now: datetime
@@ -100,9 +94,8 @@ class FakeDeliveries:
 class FakeUow:
     """Expose only the scheduler collaborators in one commit-shaped context."""
 
-    def __init__(self, services: FakeServices, deliveries: FakeDeliveries) -> None:
+    def __init__(self, services: FakeServices) -> None:
         self.services = services
-        self.deliveries = deliveries
 
     async def __aenter__(self) -> Self:
         return self
@@ -162,24 +155,19 @@ def scheduler_fixture(
     audience_user_ids: dict[tuple[ServiceAudience, UUID | None], list[UUID]],
     roots: RecordingTimestampRoots | None = None,
 ) -> tuple[
-    ServiceDeliveryScheduler, FakeServices, FakeDeliveries, RecordingTimestampRoots
+    ServiceDeliveryScheduler, FakeServices, FakeServices, RecordingTimestampRoots
 ]:
     """Compose the scheduler over shared fake durable state."""
 
     services = FakeServices(
         due_timestamps=due_timestamps, audience_user_ids=audience_user_ids
     )
-    deliveries = FakeDeliveries()
-    resolver = AudienceResolver(
-        lambda: FakeUow(services, deliveries), clock=lambda: NOW
-    )
+    resolver = AudienceResolver(lambda: FakeUow(services), clock=lambda: NOW)
     timestamp_roots = roots or RecordingTimestampRoots()
     return (
-        ServiceDeliveryScheduler(
-            lambda: FakeUow(services, deliveries), resolver, timestamp_roots
-        ),
+        ServiceDeliveryScheduler(lambda: FakeUow(services), resolver, timestamp_roots),
         services,
-        deliveries,
+        services,
         timestamp_roots,
     )
 
@@ -202,9 +190,7 @@ async def test_audience_resolver_preserves_authoritative_membership_for_each_aud
     """Changing the requested audience or dropping members loses authoritative scope."""
 
     services = FakeServices(audience_user_ids={(audience, service_id): expected})
-    resolver = AudienceResolver(
-        lambda: FakeUow(services, FakeDeliveries()), clock=lambda: NOW
-    )
+    resolver = AudienceResolver(lambda: FakeUow(services), clock=lambda: NOW)
 
     assert await resolver.resolve(audience, service_id) == expected
     assert services.audience_calls == [(audience, service_id, NOW)]
@@ -216,9 +202,7 @@ async def test_leader_audience_includes_staff_but_not_admin_only() -> None:
     services = FakeServices(
         audience_user_ids={(ServiceAudience.ALL_LEADERS, None): [LEADER, STAFF]}
     )
-    resolver = AudienceResolver(
-        lambda: FakeUow(services, FakeDeliveries()), clock=lambda: NOW
-    )
+    resolver = AudienceResolver(lambda: FakeUow(services), clock=lambda: NOW)
 
     recipients = await resolver.resolve(ServiceAudience.ALL_LEADERS, None)
 
@@ -326,11 +310,10 @@ async def test_scheduler_sends_once_after_each_claimed_recipient() -> None:
         due_timestamps=[timestamp()],
         audience_user_ids={(ServiceAudience.ALL_NBNCS, SERVICE_ID): [NBNC, LEADER]},
     )
-    deliveries = FakeDeliveries()
     roots = RecordingTimestampRoots()
     scheduler = ServiceDeliveryScheduler(
-        lambda: FakeUow(services, deliveries),
-        AudienceResolver(lambda: FakeUow(services, deliveries), clock=lambda: NOW),
+        lambda: FakeUow(services),
+        AudienceResolver(lambda: FakeUow(services), clock=lambda: NOW),
         roots,
         sender,
     )

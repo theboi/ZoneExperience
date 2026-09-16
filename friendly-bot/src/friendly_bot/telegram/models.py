@@ -97,7 +97,7 @@ class TelegramUpdates:
 
 @dataclass(frozen=True, slots=True)
 class OutboundTelegramMessage:
-    """An immutable text operation that the durable delivery worker may send once."""
+    """An immutable text operation that the direct sender may attempt once."""
 
     chat_id: int
     text: str
@@ -158,7 +158,7 @@ class ResolvedTelegramPhoto:
 
 @dataclass(frozen=True, slots=True)
 class OutboundTelegramPhoto:
-    """An immutable resolved-photo operation that the durable worker may send once."""
+    """An immutable resolved-photo operation that the direct sender may attempt once."""
 
     chat_id: int
     photo: ResolvedTelegramPhoto

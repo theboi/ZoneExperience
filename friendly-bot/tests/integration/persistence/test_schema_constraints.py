@@ -30,7 +30,6 @@ _JSON_COLUMNS = {
     "diagnostic_records": {"safe_context"},
     "flow_versions": {"definition"},
     "operational_profiles": {"interests"},
-    "outbound_deliveries": {"payload"},
 }
 
 
@@ -215,7 +214,6 @@ async def test_metadata_creates_every_f01_durable_table(
         "SELECT tablename FROM pg_tables WHERE schemaname = $1", session.schema
     )
     assert {row["tablename"] for row in rows} == {
-        "admin_notification_deliveries",
         "capacity_reservations",
         "conversation_messages",
         "diagnostic_records",
@@ -226,8 +224,6 @@ async def test_metadata_creates_every_f01_durable_table(
         "open_flow_selections",
         "operational_logins",
         "operational_profiles",
-        "outbound_deliveries",
-        "outbound_delivery_attempts",
         "pending_flow_intents",
         "persona_cursors",
         "processed_telegram_updates",
@@ -235,7 +231,6 @@ async def test_metadata_creates_every_f01_durable_table(
         "service_timestamps",
         "services",
         "telegram_poll_state",
-        "telegram_outbound_pauses",
         "timestamp_delivery_claims",
         "user_processing_locks",
         "users",
@@ -576,10 +571,10 @@ async def test_released_history_permits_a_later_active_login_and_match(
     )
 
 
-async def test_delivery_and_message_idempotency_constraints(
+async def test_message_idempotency_constraint(
     session: SchemaConnection,
 ) -> None:
-    """A duplicate external source or outbox key cannot create a second durable row."""
+    """A duplicate external source cannot create a second durable message row."""
 
     user_id = await _user(session)
     message_values = {
@@ -592,19 +587,6 @@ async def test_delivery_and_message_idempotency_constraints(
     await session.insert("conversation_messages", id=uuid4(), **message_values)
     with pytest.raises(asyncpg.UniqueViolationError):
         await session.insert("conversation_messages", id=uuid4(), **message_values)
-
-    delivery_values = {
-        "idempotency_key": "telegram:42",
-        "user_id": user_id,
-        "telegram_chat_id": 42,
-        "kind": "message",
-        "payload": {"text": "hello"},
-        "status": "pending",
-        "eligible_at": NOW,
-    }
-    await session.insert("outbound_deliveries", id=uuid4(), **delivery_values)
-    with pytest.raises(asyncpg.UniqueViolationError):
-        await session.insert("outbound_deliveries", id=uuid4(), **delivery_values)
 
 
 async def test_service_timestamp_persona_and_user_lock_keys(
@@ -725,14 +707,13 @@ async def test_match_constraints_allow_only_one_active_assignment(
         )
 
 
-async def test_match_exclusion_capacity_and_admin_delivery_keys(
+async def test_match_exclusion_and_capacity_keys(
     session: SchemaConnection,
 ) -> None:
-    """Matching work cannot duplicate a live reservation, exclusion, or fan-out."""
+    """Matching work cannot duplicate a live reservation or exclusion."""
 
     requester_id = await _user(session)
     responder_id = await _user(session, role=OperationalRole.SERVER)
-    admin_id = await _user(session)
     profile_id = uuid4()
     await session.insert(
         "operational_profiles",
@@ -772,32 +753,9 @@ async def test_match_exclusion_capacity_and_admin_delivery_keys(
     with pytest.raises(asyncpg.UniqueViolationError):
         await session.insert("human_match_exclusions", id=uuid4(), **exclusion_values)
 
-    diagnostic_id = uuid4()
-    await session.insert(
-        "diagnostic_records",
-        id=diagnostic_id,
-        correlation_id=uuid4(),
-        severity="error",
-        safe_summary="safe",
-        safe_context={},
-        created_at=NOW,
-    )
-    notification_values = {
-        "diagnostic_id": diagnostic_id,
-        "admin_user_id": admin_id,
-        "status": "pending",
-    }
-    await session.insert(
-        "admin_notification_deliveries", id=uuid4(), **notification_values
-    )
-    with pytest.raises(asyncpg.UniqueViolationError):
-        await session.insert(
-            "admin_notification_deliveries", id=uuid4(), **notification_values
-        )
 
-
-async def test_remaining_claim_and_attempt_keys(session: SchemaConnection) -> None:
-    """Scheduler claims and delivery attempts reject their durable duplicates."""
+async def test_timestamp_claim_key(session: SchemaConnection) -> None:
+    """Scheduler claims reject duplicate timestamp-recipient work."""
 
     user_id = await _user(session)
     service_id = await _service(session, key="zone_x_claims")
@@ -822,28 +780,6 @@ async def test_remaining_claim_and_attempt_keys(session: SchemaConnection) -> No
     await session.insert("timestamp_delivery_claims", id=uuid4(), **claim_values)
     with pytest.raises(asyncpg.UniqueViolationError):
         await session.insert("timestamp_delivery_claims", id=uuid4(), **claim_values)
-
-    delivery_id = uuid4()
-    await session.insert(
-        "outbound_deliveries",
-        id=delivery_id,
-        idempotency_key="attempt:1",
-        user_id=user_id,
-        telegram_chat_id=99,
-        kind="message",
-        payload={},
-        status="pending",
-        eligible_at=NOW,
-    )
-    attempt_values = {
-        "delivery_id": delivery_id,
-        "attempt_number": 1,
-        "started_at": NOW,
-        "correlation_id": uuid4(),
-    }
-    await session.insert("outbound_delivery_attempts", id=uuid4(), **attempt_values)
-    with pytest.raises(asyncpg.UniqueViolationError):
-        await session.insert("outbound_delivery_attempts", id=uuid4(), **attempt_values)
 
 
 async def test_foreign_keys_reject_an_attendance_without_a_service(

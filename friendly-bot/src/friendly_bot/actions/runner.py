@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from pydantic import JsonValue
@@ -23,6 +24,7 @@ from friendly_bot.domain.triggers import ActionEventDiscussionFlowTrigger
 DEFAULT_UNHANDLED_ERROR_TEXT = (
     "Sorry, an error occurred. Error log: {telegram_user_id}."
 )
+LOGGER = logging.getLogger(__name__)
 
 
 class DirectEventHandlerInvariantError(RuntimeError):
@@ -176,15 +178,13 @@ class ActionRunner:
         safe_summary: str,
         safe_context: dict[str, JsonValue],
     ) -> None:
-        diagnostic = await context.diagnostics.record(
+        LOGGER.error("action_diagnostic reason_code=%s", safe_context["reason_code"])
+        await context.diagnostics.record(
             correlation_id=context.correlation_id,
             severity="error",
             safe_summary=safe_summary,
             safe_context=safe_context,
             at=context.now,
-        )
-        await context.diagnostics.enqueue_admin_notifications(
-            diagnostic.id, at=context.now
         )
 
 

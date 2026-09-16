@@ -515,22 +515,6 @@ class TelegramPollState(Base):
     )
 
 
-class TelegramOutboundPause(Base):
-    """The one durable pause that gates account-wide outbound Telegram claims."""
-
-    __tablename__ = "telegram_outbound_pauses"
-    __table_args__ = (
-        CheckConstraint(
-            "singleton_id = 1", name="ck_telegram_outbound_pauses_singleton"
-        ),
-    )
-
-    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    pause_until: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
 class ProcessedTelegramUpdate(Base):
     """A claimed incoming Telegram update, keyed by Telegram's update identifier."""
 
@@ -579,82 +563,6 @@ class TimestampDeliveryClaim(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(64), nullable=False)
-
-
-class OutboundDelivery(Base):
-    """A logical outbound delivery protected by an idempotency key."""
-
-    __tablename__ = "outbound_deliveries"
-    __table_args__ = (
-        Index(
-            "ix_outbound_deliveries_due",
-            "eligible_at",
-            "created_at",
-            "id",
-            postgresql_where=text("status IN ('pending', 'retry')"),
-        ),
-        Index(
-            "ix_outbound_deliveries_expired_claim",
-            "claim_expires_at",
-            "created_at",
-            "id",
-            postgresql_where=text("status = 'claimed'"),
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    idempotency_key: Mapped[str] = mapped_column(
-        String(256), nullable=False, unique=True
-    )
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    telegram_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    eligible_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    claim_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
-    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    confirmed_telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
-
-
-class OutboundDeliveryAttempt(Base):
-    """An append-only attempt record for a logical outbound delivery."""
-
-    __tablename__ = "outbound_delivery_attempts"
-    __table_args__ = (
-        UniqueConstraint(
-            "delivery_id",
-            "attempt_number",
-            name="uq_outbound_delivery_attempts_delivery_number",
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    delivery_id: Mapped[UUID] = mapped_column(
-        ForeignKey("outbound_deliveries.id"), nullable=False
-    )
-    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    correlation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    outcome: Mapped[str | None] = mapped_column(String(64))
-    safe_error: Mapped[str | None] = mapped_column(Text)
 
 
 class HumanMatchRequest(Base):
@@ -797,31 +705,3 @@ class DiagnosticRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-
-
-class AdminNotificationDelivery(Base):
-    """A deduplicated admin-recipient delivery for one diagnostic."""
-
-    __tablename__ = "admin_notification_deliveries"
-    __table_args__ = (
-        UniqueConstraint(
-            "diagnostic_id",
-            "admin_user_id",
-            name="uq_admin_notification_deliveries_diagnostic_admin",
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    diagnostic_id: Mapped[UUID] = mapped_column(
-        ForeignKey("diagnostic_records.id"), nullable=False
-    )
-    admin_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

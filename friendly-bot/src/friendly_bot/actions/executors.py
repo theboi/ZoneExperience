@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from friendly_bot.actions.context import ActionContext
@@ -46,6 +47,8 @@ from friendly_bot.telegram import (
     TelegramInlineButton,
     encode_callback,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 async def send_message(action: SendMessageAction, context: ActionContext) -> None:
@@ -342,14 +345,14 @@ async def notify_all_admins(
 ) -> None:
     """Create one sanitized durable admin fan-out request without raw user content."""
 
-    diagnostic = await context.diagnostics.record(
+    LOGGER.error("safety_match outcome=no_responder")
+    await context.diagnostics.record(
         correlation_id=context.correlation_id,
         severity=action.severity,
         safe_summary=context.render(action.safe_summary),
         safe_context={"reason_code": "safety_match.no_responder"},
         at=context.now,
     )
-    await context.diagnostics.enqueue_admin_notifications(diagnostic.id, at=context.now)
 
 
 async def exclude_previous_human_from_next_attempt(

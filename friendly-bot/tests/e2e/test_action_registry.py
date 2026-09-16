@@ -63,18 +63,8 @@ from friendly_bot.telegram import (
 )
 
 
-class RecordingDeliveries:
-    def __init__(self) -> None:
-        self.enqueued: list[object] = []
-
-    async def enqueue(self, delivery: object) -> object:
-        self.enqueued.append(delivery)
-        return object()
-
-
 class RecordingUnitOfWork:
-    def __init__(self) -> None:
-        self.deliveries = RecordingDeliveries()
+    pass
 
 
 @dataclass
@@ -207,7 +197,7 @@ async def test_fixed_message_executor_renders_and_queues_exact_copy(
 ) -> None:
     """Breaks if fixed configured copy is sent through paraphrase behavior."""
 
-    context, uow = _context(now)
+    context, _ = _context(now)
     action = SendMessageFixedAction(
         type="send_message_fixed",
         text="Call a trusted adult now, {{ user.display_name }}.",
@@ -225,7 +215,6 @@ async def test_fixed_message_executor_renders_and_queues_exact_copy(
     await registry.resolve(action)(action, context)
     await context.flush_presentation()
 
-    assert uow.deliveries.enqueued == []
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(42, "Call a trusted adult now, Ryan."),
     )
@@ -294,7 +283,7 @@ async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(
 async def test_context_renders_locally_queues_delivery_and_allows_one_event(
     now: datetime,
 ) -> None:
-    context, uow = _context(now)
+    context, _ = _context(now)
 
     assert context.render("Hi {{user.display_name}} at {{service.id}}") == (
         "Hi Ryan at 30375598-1898-4d46-a1d8-2068453944e4"
@@ -304,7 +293,6 @@ async def test_context_renders_locally_queues_delivery_and_allows_one_event(
     )
     await context.enqueue_text("local fixed copy")
 
-    assert uow.deliveries.enqueued == []
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(42, "local fixed copy"),
     )
@@ -319,7 +307,7 @@ async def test_context_renders_locally_queues_delivery_and_allows_one_event(
 async def test_context_composes_text_or_photo_with_inline_buttons(
     now: datetime,
 ) -> None:
-    context, uow = _context(now)
+    context, _ = _context(now)
 
     await context.queue_text_presentation("Choose an option")
     await context.attach_presentation_buttons(
@@ -334,7 +322,6 @@ async def test_context_composes_text_or_photo_with_inline_buttons(
     )
     await context.flush_presentation()
 
-    assert uow.deliveries.enqueued == []
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(
             42,
@@ -362,13 +349,12 @@ async def test_context_rejects_orphan_textless_buttons(now: datetime) -> None:
 async def test_child_context_preserves_parent_presentation_order(
     now: datetime,
 ) -> None:
-    context, uow = _context(now)
+    context, _ = _context(now)
 
     await context.enqueue_text("parent")
     child = context.for_child(context.flow, event_payload=None)
     await child.enqueue_text("child")
 
-    assert uow.deliveries.enqueued == []
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(42, "parent"),
         TelegramTextPresentation(42, "child"),
@@ -380,13 +366,12 @@ async def test_parent_after_direct_child_keeps_shared_presentation_order(
 ) -> None:
     """Return actions after an event child retain their execution order."""
 
-    context, uow = _context(now)
+    context, _ = _context(now)
     child = context.for_child(context.flow, event_payload=None)
 
     await child.enqueue_text("event child")
     await context.enqueue_text("return action")
 
-    assert uow.deliveries.enqueued == []
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(42, "event child"),
         TelegramTextPresentation(42, "return action"),
@@ -396,7 +381,7 @@ async def test_parent_after_direct_child_keeps_shared_presentation_order(
 async def test_explicit_presentation_executors_use_typed_callbacks_and_activity(
     now: datetime,
 ) -> None:
-    context, uow = _context(now)
+    context, _ = _context(now)
     service_id = context.selected_service_id()
     registry = build_action_registry(
         ActionDependencies(
@@ -452,7 +437,6 @@ async def test_explicit_presentation_executors_use_typed_callbacks_and_activity(
     await registry.resolve(activity)(activity, context)
     await context.flush_presentation()
 
-    assert uow.deliveries.enqueued == []
     presentations = context.presentation_buffer.snapshot()
     assert [type(presentation) for presentation in presentations] == [
         TelegramTextPresentation,
