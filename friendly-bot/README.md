@@ -106,6 +106,12 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
 6. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
 
+To reset the database, run
+```sh
+uv run python scripts/db_runtime_check.py reset --confirm-reset
+uv run alembic upgrade head
+```
+
 ## Stopping and local data lifecycle
 
 Press `Ctrl-C` in the terminal running Friendly Bot. It stops the polling, outbox, and scheduler loops and releases the runtime lock.
