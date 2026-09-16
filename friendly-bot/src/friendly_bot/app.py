@@ -44,11 +44,11 @@ from friendly_bot.domain.publication import (
 )
 from friendly_bot.domain.state import OpenSelectionState, SelectionTransitionEngine
 from friendly_bot.domain.triggers import (
-    OnActionEventTrigger,
-    OnButtonPressTrigger,
-    OnAnyOfTrigger,
-    OnCommandTrigger,
     DiscussionTrigger,
+    OnActionEventTrigger,
+    OnAnyOfTrigger,
+    OnButtonPressTrigger,
+    OnCommandTrigger,
     OnMessageTrigger,
 )
 from friendly_bot.intents import PendingIntentService
@@ -1351,16 +1351,14 @@ def _has_duplicate_system_roots(
 
 def _matches_button(trigger: DiscussionTrigger | None, button_id: str) -> bool:
     return any(
-        isinstance(candidate, OnButtonPressTrigger)
-        and candidate.button_id == button_id
+        isinstance(candidate, OnButtonPressTrigger) and candidate.button_id == button_id
         for candidate in _trigger_options(trigger)
     )
 
 
 def _matches_command(trigger: DiscussionTrigger | None, command: str) -> bool:
     return any(
-        isinstance(candidate, OnCommandTrigger)
-        and candidate.command == command
+        isinstance(candidate, OnCommandTrigger) and candidate.command == command
         for candidate in _trigger_options(trigger)
     )
 
@@ -1396,8 +1394,7 @@ def _direct_action_event_child(
     matches = [
         child
         for child in parent.next_flows
-        if str(child.key) == key
-        and isinstance(child.trigger, OnActionEventTrigger)
+        if str(child.key) == key and isinstance(child.trigger, OnActionEventTrigger)
     ]
     if len(matches) > 1:
         raise ValueError("published flow has duplicate direct action-event children")
