@@ -16,13 +16,12 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateIndex, CreateTable
 
+from friendly_bot.app import DispatchResult
 from friendly_bot.persistence.base import Base
 from friendly_bot.persistence.models import (
     ConversationMessage,
-    OutboundDelivery,
     ProcessedTelegramUpdate,
 )
-from friendly_bot.persistence.repositories import NewOutboundDelivery
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.telegram.callback import (
     TelegramCallback,
@@ -39,6 +38,11 @@ from friendly_bot.telegram.models import (
     TelegramUser,
 )
 from friendly_bot.telegram.poller import TelegramIngress, TelegramPoller
+from friendly_bot.telegram.presentations import (
+    TelegramPresentation,
+    TelegramTextPresentation,
+)
+from friendly_bot.telegram.sender import DirectSendResult
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 _SESSION_FACTORY = async_sessionmaker[AsyncSession]
@@ -120,9 +124,9 @@ class RecordingDispatcher:
     """Observe normalized dispatch after real repository work remains in the UoW."""
 
     dispatched_message_ids: list[int] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)
     fail: bool = False
-    enqueue_delivery_before_failure: bool = False
-    enqueue_delivery: bool = False
+    presentations: tuple[TelegramPresentation, ...] = ()
 
     async def dispatch(
         self,
@@ -130,31 +134,37 @@ class RecordingDispatcher:
         user_id: UUID,
         incoming: TelegramMessage,
         unit_of_work: UnitOfWork,
-    ) -> None:
+    ) -> DispatchResult:
+        self.events.append("dispatch")
         if self.fail:
-            if self.enqueue_delivery_before_failure:
-                await unit_of_work.deliveries.enqueue(
-                    NewOutboundDelivery(
-                        idempotency_key=f"poller-failed-dispatch-{incoming.message_id}",
-                        user_id=user_id,
-                        telegram_chat_id=incoming.chat.id,
-                        kind="test.fixed_reply",
-                        payload={"template": "fixed"},
-                    )
-                )
             raise IngressFailure("dispatch failed")
         self.dispatched_message_ids.append(incoming.message_id)
-        if self.enqueue_delivery:
-            await unit_of_work.deliveries.enqueue(
-                NewOutboundDelivery(
-                    idempotency_key=f"poller-dispatch-{incoming.message_id}",
-                    user_id=user_id,
-                    telegram_chat_id=incoming.chat.id,
-                    kind="message",
-                    payload={"text": "Delivered from the claimed update"},
-                    eligible_at=NOW,
-                )
+        return DispatchResult("selected", presentations=self.presentations)
+
+
+@dataclass
+class CommitCheckingSender:
+    """Observe direct sends only after the real ingress transaction is durable."""
+
+    uow_factory: Callable[[], UnitOfWork]
+    expected_offsets: tuple[int, ...]
+    events: list[str] = field(default_factory=list)
+    presentations: list[tuple[TelegramPresentation, ...]] = field(default_factory=list)
+    fail_first: bool = False
+
+    async def send_all(
+        self, presentations: tuple[TelegramPresentation, ...]
+    ) -> DirectSendResult:
+        async with self.uow_factory() as uow:
+            assert (await uow.poll_state.get()).next_update_offset == (
+                self.expected_offsets[len(self.presentations)]
             )
+        self.events.extend(("offset_advanced", "transaction_committed"))
+        self.events.append("telegram_send_started")
+        self.presentations.append(presentations)
+        if self.fail_first and len(self.presentations) == 1:
+            return DirectSendResult(len(presentations), 0, len(presentations))
+        return DirectSendResult(len(presentations), len(presentations), 0)
 
 
 @dataclass
@@ -236,11 +246,6 @@ async def _processed_update_count(session_factory: _SESSION_FACTORY) -> int:
         return len(list(await session.scalars(select(ProcessedTelegramUpdate))))
 
 
-async def _outbound_delivery_count(session_factory: _SESSION_FACTORY) -> int:
-    async with session_factory() as session:
-        return len(list(await session.scalars(select(OutboundDelivery))))
-
-
 async def test_committed_duplicate_after_restart_is_a_noop_and_offset_is_monotonic(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
@@ -261,18 +266,23 @@ async def test_committed_duplicate_after_restart_is_a_noop_and_offset_is_monoton
     assert dispatcher.dispatched_message_ids == [71]
 
 
-async def test_restarted_poller_does_not_duplicate_claimed_update_or_its_delivery(
+async def test_restarted_poller_does_not_repeat_a_committed_update_presentation(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
     """A fresh poller must preserve the ingress transaction's durable boundary."""
 
     update = _message_update(71)
-    dispatcher = RecordingDispatcher(enqueue_delivery=True)
+    dispatcher = RecordingDispatcher(
+        presentations=(
+            TelegramTextPresentation(41, "Delivered from the claimed update"),
+        )
+    )
+    sender = CommitCheckingSender(uow_factory, expected_offsets=(72,))
     first_gateway = StaticTelegramGateway(TelegramUpdates((update,)))
     first = TelegramPoller(
         first_gateway,
-        TelegramIngress(uow_factory, dispatcher),
+        TelegramIngress(uow_factory, dispatcher, sender),
         uow_factory,
         timeout_seconds=25,
     )
@@ -282,7 +292,7 @@ async def test_restarted_poller_does_not_duplicate_claimed_update_or_its_deliver
     restarted_gateway = StaticTelegramGateway(TelegramUpdates((update,)))
     restarted = TelegramPoller(
         restarted_gateway,
-        TelegramIngress(uow_factory, dispatcher),
+        TelegramIngress(uow_factory, dispatcher, sender),
         uow_factory,
         timeout_seconds=25,
     )
@@ -291,11 +301,11 @@ async def test_restarted_poller_does_not_duplicate_claimed_update_or_its_deliver
     assert first_gateway.requested_offsets == [0]
     assert restarted_gateway.requested_offsets == [72]
     assert await _processed_update_count(session_factory) == 1
-    assert await _outbound_delivery_count(session_factory) == 1
     assert dispatcher.dispatched_message_ids == [71]
+    assert sender.presentations == [dispatcher.presentations]
 
 
-async def test_dispatch_failure_rolls_back_claim_message_delivery_and_cursor(
+async def test_dispatch_failure_rolls_back_claim_message_and_cursor(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
@@ -303,7 +313,7 @@ async def test_dispatch_failure_rolls_back_claim_message_delivery_and_cursor(
 
     ingress = TelegramIngress(
         uow_factory,
-        RecordingDispatcher(fail=True, enqueue_delivery_before_failure=True),
+        RecordingDispatcher(fail=True),
     )
 
     with pytest.raises(IngressFailure, match="^dispatch failed$"):
@@ -312,7 +322,57 @@ async def test_dispatch_failure_rolls_back_claim_message_delivery_and_cursor(
     assert await _polling_offset(uow_factory) == 0
     assert await _processed_update_count(session_factory) == 0
     assert await _conversation_rows(session_factory) == []
-    assert await _outbound_delivery_count(session_factory) == 0
+
+
+async def test_ingress_sends_only_after_its_transaction_commits(
+    session_factory: _SESSION_FACTORY,
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """A send before the cursor commits can repeat state after a process interruption."""
+
+    events: list[str] = []
+    dispatcher = RecordingDispatcher(
+        events=events,
+        presentations=(TelegramTextPresentation(41, "Committed reply"),),
+    )
+    sender = CommitCheckingSender(uow_factory, expected_offsets=(10,), events=events)
+
+    result = await TelegramIngress(uow_factory, dispatcher, sender).process(
+        _message_update(9), received_at=NOW
+    )
+
+    assert events == [
+        "dispatch",
+        "offset_advanced",
+        "transaction_committed",
+        "telegram_send_started",
+    ]
+    assert result.send_attempted == 1
+    assert result.send_failed == 0
+    assert await _polling_offset(uow_factory) == 10
+    assert await _processed_update_count(session_factory) == 1
+
+
+async def test_failed_direct_send_does_not_block_the_next_committed_update(
+    uow_factory: Callable[[], UnitOfWork],
+) -> None:
+    """Direct delivery is best effort and must not turn a committed update into a retry."""
+
+    dispatcher = RecordingDispatcher(
+        presentations=(TelegramTextPresentation(41, "Best effort reply"),)
+    )
+    sender = CommitCheckingSender(
+        uow_factory, expected_offsets=(11, 12), fail_first=True
+    )
+    ingress = TelegramIngress(uow_factory, dispatcher, sender)
+
+    first = await ingress.process(_message_update(10), received_at=NOW)
+    second = await ingress.process(_message_update(11), received_at=NOW)
+
+    assert first.send_failed == 1
+    assert second.disposition == "processed"
+    assert second.send_failed == 0
+    assert sender.presentations == [dispatcher.presentations, dispatcher.presentations]
 
 
 async def test_poller_sorts_a_returned_batch_before_dispatching_and_advancing_cursor(

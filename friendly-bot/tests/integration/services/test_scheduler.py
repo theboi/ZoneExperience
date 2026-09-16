@@ -23,7 +23,6 @@ from friendly_bot.persistence.models import (
     FlowScopeKind,
     OpenFlowSelection,
     OperationalRole,
-    OutboundDelivery,
     Service,
     ServiceAttendance,
     ServiceAudience,
@@ -31,16 +30,18 @@ from friendly_bot.persistence.models import (
     TimestampDeliveryClaim,
     User,
 )
-from friendly_bot.persistence.repositories import (
-    NewOutboundDelivery,
-    ServiceTimestampRecord,
-)
+from friendly_bot.persistence.repositories import ServiceTimestampRecord
 from friendly_bot.persistence.uow import UnitOfWork
 from friendly_bot.services.scheduler import (
     AudienceResolver,
     ServiceDeliveryScheduler,
     TimestampRootPreparation,
 )
+from friendly_bot.telegram.presentations import (
+    TelegramPresentation,
+    TelegramTextPresentation,
+)
+from friendly_bot.telegram.sender import DirectSendResult
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 _SESSION_FACTORY = async_sessionmaker[AsyncSession]
@@ -117,9 +118,9 @@ def uow_factory(
 class RecordingTimestampRoots:
     """Record only the exact I04 preparer inputs that T02 supplies."""
 
-    calls: list[
-        tuple[UnitOfWork, ServiceTimestampRecord, UUID, datetime, NewOutboundDelivery]
-    ] = field(default_factory=list)
+    calls: list[tuple[UnitOfWork, ServiceTimestampRecord, UUID, datetime]] = field(
+        default_factory=list
+    )
 
     async def open_for_recipient(
         self,
@@ -129,17 +130,10 @@ class RecordingTimestampRoots:
         *,
         now: datetime,
     ) -> TimestampRootPreparation:
-        delivery = NewOutboundDelivery(
-            idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
-            user_id=user_id,
-            telegram_chat_id=73,
-            kind="message",
-            payload={"text": "Service timestamp"},
-            eligible_at=now,
+        self.calls.append((uow, timestamp, user_id, now))
+        return TimestampRootPreparation(
+            (TelegramTextPresentation(73, "Service timestamp"),)
         )
-        self.calls.append((uow, timestamp, user_id, now, delivery))
-        await uow.deliveries.enqueue(delivery)
-        return TimestampRootPreparation(enqueued_delivery_count=1)
 
 
 class PersistingTimestampRoots:
@@ -170,17 +164,36 @@ class PersistingTimestampRoots:
             ),
             at=now,
         )
-        await uow.deliveries.enqueue(
-            NewOutboundDelivery(
-                idempotency_key=f"task8:timestamp:{timestamp.id}:{user_id}",
-                user_id=user_id,
-                telegram_chat_id=73,
-                kind="message",
-                payload={"text": "Service timestamp"},
-                eligible_at=now,
-            )
+        return TimestampRootPreparation(
+            (TelegramTextPresentation(73, "Service timestamp"),)
         )
-        return TimestampRootPreparation(enqueued_delivery_count=1)
+
+
+@dataclass
+class CommitCheckingSender:
+    """Verify each direct scheduler send observes a committed timestamp claim."""
+
+    session_factory: _SESSION_FACTORY
+    timestamp_id: UUID
+    presentations: list[tuple[TelegramPresentation, ...]] = field(default_factory=list)
+    fail_first: bool = False
+
+    async def send_all(
+        self, presentations: tuple[TelegramPresentation, ...]
+    ) -> DirectSendResult:
+        async with self.session_factory() as session:
+            claims = list(
+                await session.scalars(
+                    select(TimestampDeliveryClaim).where(
+                        TimestampDeliveryClaim.service_timestamp_id == self.timestamp_id
+                    )
+                )
+            )
+        assert len(claims) == len(self.presentations) + 1
+        self.presentations.append(presentations)
+        if self.fail_first and len(self.presentations) == 1:
+            return DirectSendResult(len(presentations), 0, len(presentations))
+        return DirectSendResult(len(presentations), len(presentations), 0)
 
 
 @dataclass
@@ -303,7 +316,7 @@ async def test_authoritative_audiences_apply_role_inheritance_without_admin_gran
     ) == {nbnc_id, server_id, leader_id, staff_id}
 
 
-async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_preparer_once(
+async def test_restarted_scheduler_claims_and_sends_timestamp_once_after_commit(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
@@ -311,6 +324,7 @@ async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_prepare
 
     service_id = uuid4()
     user_id = uuid4()
+    second_user_id = uuid4()
     timestamp_id = uuid4()
     timestamp_root = "service.task8.timestamp.service_questions"
     async with session_factory.begin() as session:
@@ -329,6 +343,11 @@ async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_prepare
                     interaction_ends_at=NOW + timedelta(hours=2),
                 ),
                 User(id=user_id, telegram_user_id=73, role=OperationalRole.NBNC),
+                User(
+                    id=second_user_id,
+                    telegram_user_id=74,
+                    role=OperationalRole.NBNC,
+                ),
             ]
         )
     async with uow_factory() as uow:
@@ -356,61 +375,41 @@ async def test_restarted_scheduler_claims_and_enqueues_timestamp_through_prepare
 
     roots = RecordingTimestampRoots()
     scheduler_uows = RecordingUnitOfWorkFactory(session_factory)
+    sender = CommitCheckingSender(session_factory, timestamp_id, fail_first=True)
     scheduler = ServiceDeliveryScheduler(
-        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots, sender
     )
 
     first = await scheduler.run_once(now=NOW)
-    assert len(roots.calls) == 1
+    assert len(roots.calls) == 2
     (
         prepared_uow,
         prepared_timestamp,
         prepared_user_id,
         prepared_now,
-        prepared_delivery,
     ) = roots.calls[0]
 
-    async with session_factory() as session:
-        deliveries = list(
-            await session.scalars(
-                select(OutboundDelivery).where(
-                    OutboundDelivery.idempotency_key
-                    == f"task8:timestamp:{timestamp_id}:{user_id}"
-                )
-            )
-        )
-
     restarted = ServiceDeliveryScheduler(
-        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots
+        scheduler_uows, AudienceResolver(uow_factory, clock=lambda: NOW), roots, sender
     )
     second = await restarted.run_once(now=NOW)
 
-    assert first.claimed_delivery_count == 1
-    assert first.enqueued_delivery_count == 1
+    assert first.claimed_delivery_count == 2
+    assert first.send_attempted == 2
+    assert first.send_failed == 1
     assert second.claimed_delivery_count == 0
-    assert second.enqueued_delivery_count == 0
+    assert second.send_attempted == 0
     assert prepared_uow is scheduler_uows.opened[1]
     assert prepared_timestamp.id == timestamp_id
     assert prepared_timestamp.service_id == service_id
     assert prepared_timestamp.root_flow_key == timestamp_root
-    assert prepared_user_id == user_id
+    assert prepared_user_id in {user_id, second_user_id}
     assert prepared_now == NOW
-    assert prepared_delivery == NewOutboundDelivery(
-        idempotency_key=f"task8:timestamp:{timestamp_id}:{user_id}",
-        user_id=user_id,
-        telegram_chat_id=73,
-        kind="message",
-        payload={"text": "Service timestamp"},
-        eligible_at=NOW,
-    )
-    assert len(roots.calls) == 1
-    assert len(deliveries) == 1
-    assert deliveries[0].status == "pending"
-    assert deliveries[0].user_id == prepared_delivery.user_id
-    assert deliveries[0].telegram_chat_id == prepared_delivery.telegram_chat_id
-    assert deliveries[0].kind == prepared_delivery.kind
-    assert deliveries[0].payload == prepared_delivery.payload
-    assert deliveries[0].eligible_at == prepared_delivery.eligible_at
+    assert {call[2] for call in roots.calls} == {user_id, second_user_id}
+    assert sender.presentations == [
+        (TelegramTextPresentation(73, "Service timestamp"),),
+        (TelegramTextPresentation(73, "Service timestamp"),),
+    ]
 
 
 async def test_timestamp_root_preserves_a_current_onboarding_branch(
@@ -500,13 +499,13 @@ async def test_timestamp_root_preserves_a_current_onboarding_branch(
         selections = await uow.open_selections.list_for_user(user_id, now=NOW)
 
     assert result.claimed_delivery_count == 1
-    assert result.enqueued_delivery_count == 1
+    assert result.send_attempted == 0
     assert {
         (selection.parent_flow_key, selection.is_current) for selection in selections
     } == {(onboarding_root, True), (timestamp_root, True)}
 
 
-async def test_closed_service_after_due_listing_cannot_claim_prepare_or_enqueue_timestamp(
+async def test_closed_service_after_due_listing_cannot_claim_prepare_or_send_timestamp(
     session_factory: _SESSION_FACTORY,
     uow_factory: Callable[[], UnitOfWork],
 ) -> None:
@@ -574,18 +573,12 @@ async def test_closed_service_after_due_listing_cannot_claim_prepare_or_enqueue_
                 )
             )
         )
-        deliveries = list(
-            await session.scalars(
-                select(OutboundDelivery).where(OutboundDelivery.user_id == user_id)
-            )
-        )
 
     assert result.due_timestamp_count == 1
     assert result.claimed_delivery_count == 0
-    assert result.enqueued_delivery_count == 0
+    assert result.send_attempted == 0
     assert roots.calls == []
     assert claims == []
-    assert deliveries == []
 
 
 async def test_terminal_timestamp_can_close_its_service_exactly_at_interaction_end(
@@ -648,7 +641,7 @@ async def test_terminal_timestamp_can_close_its_service_exactly_at_interaction_e
     result = await scheduler.run_once(now=NOW)
 
     assert result.claimed_delivery_count == 1
-    assert result.enqueued_delivery_count == 1
+    assert result.send_attempted == 0
     async with uow_factory() as uow:
         selections = await uow.open_selections.list_for_user(user_id, now=NOW)
     assert [selection.parent_flow_key for selection in selections] == [root_flow_key]

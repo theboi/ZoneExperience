@@ -96,6 +96,7 @@ class FakeDeliveries:
         self.successful_claims.append(pair)
         return True
 
+
 class FakeUow:
     """Expose only the scheduler collaborators in one commit-shaped context."""
 
@@ -300,7 +301,7 @@ async def test_timestamp_preparer_opens_an_independent_current_branch() -> None:
     roots = RecordingTimestampRoots(
         current_parent_keys={NBNC: {"onboarding.name_capture"}}
     )
-    scheduler, _, deliveries, prepared_roots = scheduler_fixture(
+    scheduler, _, _, prepared_roots = scheduler_fixture(
         due_timestamps=[timestamp()],
         audience_user_ids={(ServiceAudience.ALL_NBNCS, SERVICE_ID): [NBNC]},
         roots=roots,
