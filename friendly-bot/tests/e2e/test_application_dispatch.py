@@ -840,7 +840,7 @@ async def test_unknown_match_callback_is_ignored_without_branch_or_output_work()
     assert result == DispatchResult("ignored")
 
 
-async def test_timestamp_preparer_opens_the_root_and_counts_its_own_outbox_work() -> (
+async def test_timestamp_preparer_opens_the_root_and_returns_presentations() -> (
     None
 ):
     app, uow, user = _fixture()
@@ -877,7 +877,7 @@ async def test_timestamp_preparer_opens_the_root_and_counts_its_own_outbox_work(
         cast(UnitOfWork, uow), timestamp, user.id, now=NOW
     )
 
-    assert prepared.enqueued_delivery_count == 1
+    assert prepared.presentations == (TelegramTextPresentation(77, "Timestamp notice"),)
     assert [branch.parent_flow_key for branch in uow.open_selections.branches] == [
         "system.dispatch.root",
         "service.zone_x.timestamp.notice",

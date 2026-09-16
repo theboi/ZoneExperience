@@ -93,8 +93,8 @@ from friendly_bot.services import (
 )
 from friendly_bot.services.scheduler import TimestampRootPreparation
 from friendly_bot.telegram import (
+    BestEffortTelegramSender,
     LocalTelegramAssetResolver,
-    OutboundDeliveryWorker,
     PresentationBuffer,
     TelegramApiClient,
     TelegramApiError,
@@ -589,7 +589,8 @@ class FriendlyBotApplication:
             raise ValueError("timestamp does not belong to the composed Zone X service")
         user = await unit_of_work.users.require_by_id(user_id)
         version = await unit_of_work.flow_versions.get(timestamp.flow_version_id)
-        _, enqueued_delivery_count = await self._open_root(
+        presentations = PresentationBuffer()
+        await self._open_root(
             user=user,
             incoming=None,
             unit_of_work=unit_of_work,
@@ -598,8 +599,9 @@ class FriendlyBotApplication:
             service=self._zone_x.service,
             now=now,
             run_actions=True,
+            presentations=presentations,
         )
-        return TimestampRootPreparation(enqueued_delivery_count=enqueued_delivery_count)
+        return TimestampRootPreparation(presentations.snapshot())
 
     async def _dispatch_callback(
         self,
@@ -1493,7 +1495,6 @@ class FriendlyBotRuntime:
 
     application: FriendlyBotApplication
     poller: TelegramPoller
-    outbox: OutboundDeliveryWorker
     scheduler: ServiceDeliveryScheduler
     preflight: TelegramPreflight
     unit_of_work_factory: UnitOfWorkFactory
@@ -1552,7 +1553,14 @@ async def build_application() -> FriendlyBotRuntime:
             zone_x=zone_x,
             onboarding=onboarding,
         )
-        ingress = TelegramIngress(unit_of_work_factory, application)
+        sender = BestEffortTelegramSender(
+            telegram,
+            asset_resolver=LocalTelegramAssetResolver(
+                PROJECT_ROOT / "assets", PROJECT_ROOT / "assets" / "catalog.json"
+            ),
+            logger=LOGGER,
+        )
+        ingress = TelegramIngress(unit_of_work_factory, application, sender)
         return FriendlyBotRuntime(
             application=application,
             poller=TelegramPoller(
@@ -1561,17 +1569,11 @@ async def build_application() -> FriendlyBotRuntime:
                 unit_of_work_factory,
                 timeout_seconds=30,
             ),
-            outbox=OutboundDeliveryWorker(
-                unit_of_work_factory,
-                telegram,
-                asset_resolver=LocalTelegramAssetResolver(
-                    PROJECT_ROOT / "assets", PROJECT_ROOT / "assets" / "catalog.json"
-                ),
-            ),
             scheduler=ServiceDeliveryScheduler(
                 unit_of_work_factory,
                 AudienceResolver(unit_of_work_factory),
                 application,
+                sender,
             ),
             preflight=TelegramPreflight(telegram),
             unit_of_work_factory=unit_of_work_factory,
@@ -1586,7 +1588,7 @@ async def build_application() -> FriendlyBotRuntime:
 
 
 async def run_application() -> None:
-    """Run the sole local polling, outbox, and scheduler process until stopped."""
+    """Run the sole local polling and scheduler process until stopped."""
 
     runtime = await build_application()
     try:
@@ -1603,9 +1605,6 @@ async def run_application() -> None:
                     async with asyncio.TaskGroup() as task_group:
                         task_group.create_task(
                             _poll_forever(runtime, runtime_lock, stop_event)
-                        )
-                        task_group.create_task(
-                            _outbox_forever(runtime, runtime_lock, stop_event)
                         )
                         task_group.create_task(
                             _schedule_forever(runtime, runtime_lock, stop_event)
@@ -1634,18 +1633,6 @@ async def _poll_forever(
         result = await runtime.poller.run_once(now=datetime.now(UTC))
         if result.gateway_failure is not None:
             _log_telegram_poll_failure(result.gateway_failure)
-            await _wait_for_stop(stop_event, seconds=0.5)
-
-
-async def _outbox_forever(
-    runtime: FriendlyBotRuntime,
-    runtime_lock: TelegramRuntimeLock,
-    stop_event: asyncio.Event,
-) -> None:
-    while not stop_event.is_set():
-        await runtime_lock.ensure_healthy()
-        sent = await runtime.outbox.run_once()
-        if not sent:
             await _wait_for_stop(stop_event, seconds=0.5)
 
 

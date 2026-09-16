@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
@@ -14,8 +16,12 @@ from friendly_bot.telegram.models import (
     TelegramMessage,
     TelegramUpdates,
 )
+from friendly_bot.telegram.presentations import TelegramPresentation
+from friendly_bot.telegram.sender import DirectSendResult, TelegramPresentationSender
 
 type ProcessedUpdateDisposition = Literal["processed", "duplicate", "ignored"]
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TelegramPollingGateway(Protocol):
@@ -46,6 +52,8 @@ class ProcessedUpdate:
 
     update_id: int
     disposition: ProcessedUpdateDisposition
+    send_attempted: int = 0
+    send_failed: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,9 +72,11 @@ class TelegramIngress:
         self,
         unit_of_work_factory: UnitOfWorkFactory,
         dispatcher: TelegramUpdateDispatcher,
+        sender: TelegramPresentationSender | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._dispatcher = dispatcher
+        self._sender = sender
 
     async def process(
         self,
@@ -77,6 +87,7 @@ class TelegramIngress:
         """Commit one complete update transaction or let every mutation roll back."""
 
         next_offset = update.update_id + 1
+        presentations: tuple[TelegramPresentation, ...] = ()
         async with self._unit_of_work_factory() as unit_of_work:
             claimed = await unit_of_work.updates.claim_update(
                 update.update_id, received_at=received_at
@@ -105,7 +116,7 @@ class TelegramIngress:
                 replied_to_body=message.reply_text,
                 occurred_at=message.sent_at,
             )
-            await self._dispatcher.dispatch(
+            result = await self._dispatcher.dispatch(
                 user_id=user.id,
                 incoming=message,
                 unit_of_work=unit_of_work,
@@ -113,7 +124,27 @@ class TelegramIngress:
             await unit_of_work.poll_state.advance_monotonically(
                 next_offset, at=received_at
             )
-            return ProcessedUpdate(update.update_id, "processed")
+            presentations = tuple(getattr(result, "presentations", ()))
+        delivery = await self._send_after_commit(presentations)
+        return ProcessedUpdate(
+            update.update_id,
+            "processed",
+            send_attempted=delivery.attempted,
+            send_failed=delivery.failed,
+        )
+
+    async def _send_after_commit(
+        self, presentations: tuple[TelegramPresentation, ...]
+    ) -> DirectSendResult:
+        if self._sender is None or not presentations:
+            return DirectSendResult(0, 0, 0)
+        try:
+            return await self._sender.send_all(presentations)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            LOGGER.error("telegram_direct_send outcome=sender_error")
+            return DirectSendResult(len(presentations), 0, len(presentations))
 
 
 class TelegramPoller:

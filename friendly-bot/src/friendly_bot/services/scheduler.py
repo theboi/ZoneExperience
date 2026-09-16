@@ -14,6 +14,8 @@ from friendly_bot.persistence.repositories import (
     ServiceTimestampRecord,
 )
 from friendly_bot.persistence.uow import UnitOfWork, UnitOfWorkFactory
+from friendly_bot.telegram.presentations import TelegramPresentation
+from friendly_bot.telegram.sender import DirectSendResult, TelegramPresentationSender
 
 
 class AudienceResolution(Protocol):
@@ -36,18 +38,14 @@ class TimestampRootPreparer(Protocol):
         *,
         now: datetime,
     ) -> TimestampRootPreparation:
-        """Open the root and enqueue every composed delivery in the supplied UoW."""
+        """Open the root and return its post-commit presentations in the supplied UoW."""
 
 
 @dataclass(frozen=True, slots=True)
 class TimestampRootPreparation:
-    """Count I04-owned outbox rows without leaking their provider payloads."""
+    """Expose I04's in-memory output only until the caller commits its claim."""
 
-    enqueued_delivery_count: int
-
-    def __post_init__(self) -> None:
-        if self.enqueued_delivery_count < 0:
-            raise ValueError("timestamp preparation delivery count cannot be negative")
+    presentations: tuple[TelegramPresentation, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +54,8 @@ class SchedulerRunResult:
 
     due_timestamp_count: int
     claimed_delivery_count: int
-    enqueued_delivery_count: int
+    send_attempted: int
+    send_failed: int
 
 
 class AudienceResolver:
@@ -83,17 +82,19 @@ class AudienceResolver:
 
 
 class ServiceDeliveryScheduler:
-    """Claim timestamp recipients before I04 prepares roots and durable outbox work."""
+    """Claim timestamp recipients before I04 prepares and sends post-commit output."""
 
     def __init__(
         self,
         uow_factory: UnitOfWorkFactory,
         audiences: AudienceResolution,
         timestamp_roots: TimestampRootPreparer,
+        sender: TelegramPresentationSender | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._audiences = audiences
         self._timestamp_roots = timestamp_roots
+        self._sender = sender
 
     async def run_once(self, now: datetime) -> SchedulerRunResult:
         """Schedule every legal due timestamp, including overdue restart catch-up work."""
@@ -102,12 +103,14 @@ class ServiceDeliveryScheduler:
             due_timestamps = await timestamp_uow.services.list_due_timestamps(now=now)
 
         claimed_delivery_count = 0
-        enqueued_delivery_count = 0
+        send_attempted = 0
+        send_failed = 0
         for timestamp in due_timestamps:
             recipient_ids = await self._audiences.resolve(
                 timestamp.audience, timestamp.service_id
             )
             for user_id in recipient_ids:
+                prepared: TimestampRootPreparation | None = None
                 async with self._uow_factory() as uow:
                     try:
                         claimed = await uow.deliveries.claim_timestamp_delivery(
@@ -121,13 +124,24 @@ class ServiceDeliveryScheduler:
                     prepared = await self._timestamp_roots.open_for_recipient(
                         uow, timestamp, user_id, now=now
                     )
-                    enqueued_delivery_count += prepared.enqueued_delivery_count
+                assert prepared is not None
+                outcome = await self._send_after_commit(prepared.presentations)
+                send_attempted += outcome.attempted
+                send_failed += outcome.failed
 
         return SchedulerRunResult(
             due_timestamp_count=len(due_timestamps),
             claimed_delivery_count=claimed_delivery_count,
-            enqueued_delivery_count=enqueued_delivery_count,
+            send_attempted=send_attempted,
+            send_failed=send_failed,
         )
+
+    async def _send_after_commit(
+        self, presentations: tuple[TelegramPresentation, ...]
+    ) -> DirectSendResult:
+        if self._sender is None or not presentations:
+            return DirectSendResult(0, 0, 0)
+        return await self._sender.send_all(presentations)
 
 
 def _utc_now() -> datetime:

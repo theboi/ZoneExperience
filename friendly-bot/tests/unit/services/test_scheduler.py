@@ -13,7 +13,6 @@ import pytest
 
 from friendly_bot.persistence.models import ServiceAudience
 from friendly_bot.persistence.repositories import (
-    NewOutboundDelivery,
     ServiceInteractionClosedError,
     ServiceTimestampRecord,
 )
@@ -22,6 +21,8 @@ from friendly_bot.services.scheduler import (
     ServiceDeliveryScheduler,
     TimestampRootPreparation,
 )
+from friendly_bot.telegram import TelegramTextPresentation
+from friendly_bot.telegram.sender import DirectSendResult
 
 NOW = datetime(2026, 9, 14, 12, 0, tzinfo=UTC)
 SERVICE_ID = uuid4()
@@ -80,7 +81,6 @@ class FakeDeliveries:
 
     claimed_pairs: set[tuple[UUID, UUID]] = field(default_factory=set)
     successful_claims: list[tuple[UUID, UUID]] = field(default_factory=list)
-    enqueued: list[NewOutboundDelivery] = field(default_factory=list)
     close_timestamp_claims: bool = False
 
     async def claim_timestamp_delivery(
@@ -95,11 +95,6 @@ class FakeDeliveries:
         self.claimed_pairs.add(pair)
         self.successful_claims.append(pair)
         return True
-
-    async def enqueue(self, delivery: NewOutboundDelivery) -> NewOutboundDelivery:
-        self.enqueued.append(delivery)
-        return delivery
-
 
 class FakeUow:
     """Expose only the scheduler collaborators in one commit-shaped context."""
@@ -139,17 +134,25 @@ class RecordingTimestampRoots:
     ) -> TimestampRootPreparation:
         self.calls.append((uow, timestamp, user_id, now))
         self.current_parent_keys.setdefault(user_id, set()).add(timestamp.root_flow_key)
-        await uow.deliveries.enqueue(
-            NewOutboundDelivery(
-                idempotency_key=f"timestamp:{timestamp.id}:{user_id}",
-                user_id=user_id,
-                telegram_chat_id=900_001,
-                kind="message",
-                payload={"text": "Timestamp notice"},
-                eligible_at=now,
-            )
+        return TimestampRootPreparation(
+            (TelegramTextPresentation(900_001, "Timestamp notice"),)
         )
-        return TimestampRootPreparation(enqueued_delivery_count=1)
+
+
+@dataclass
+class RecordingSender:
+    presentations: list[tuple[TelegramTextPresentation, ...]] = field(
+        default_factory=list
+    )
+    fail_first: bool = False
+
+    async def send_all(
+        self, presentations: tuple[TelegramTextPresentation, ...]
+    ) -> DirectSendResult:
+        self.presentations.append(presentations)
+        if self.fail_first and len(self.presentations) == 1:
+            return DirectSendResult(len(presentations), 0, len(presentations))
+        return DirectSendResult(len(presentations), len(presentations), 0)
 
 
 def scheduler_fixture(
@@ -234,12 +237,9 @@ async def test_scheduler_catches_up_an_overdue_timestamp() -> None:
     result = await scheduler.run_once(now=NOW)
 
     assert result.due_timestamp_count == 1
-    assert result.enqueued_delivery_count == 1
+    assert result.send_attempted == 0
     assert services.due_calls == [NOW]
     assert deliveries.successful_claims == [(TIMESTAMP_ID, NBNC)]
-    assert [delivery.idempotency_key for delivery in deliveries.enqueued] == [
-        f"timestamp:{TIMESTAMP_ID}:{NBNC}"
-    ]
     assert roots.current_parent_keys[NBNC] == {"service.unit.timestamp.notice"}
 
 
@@ -254,7 +254,7 @@ async def test_scheduler_skips_timestamp_excluded_at_interaction_end() -> None:
     result = await scheduler.run_once(now=NOW)
 
     assert result.due_timestamp_count == 0
-    assert result.enqueued_delivery_count == 0
+    assert result.send_attempted == 0
     assert services.audience_calls == []
     assert deliveries.successful_claims == []
     assert roots.calls == []
@@ -272,7 +272,7 @@ async def test_scheduler_treats_a_final_closed_timestamp_claim_as_no_work() -> N
     result = await scheduler.run_once(now=NOW)
 
     assert result.claimed_delivery_count == 0
-    assert result.enqueued_delivery_count == 0
+    assert result.send_attempted == 0
     assert deliveries.successful_claims == []
     assert roots.calls == []
 
@@ -289,10 +289,9 @@ async def test_concurrent_scheduler_runs_create_one_claim_root_and_delivery() ->
         scheduler.run_once(now=NOW), scheduler.run_once(now=NOW)
     )
 
-    assert sum(result.enqueued_delivery_count for result in results) == 1
+    assert sum(result.claimed_delivery_count for result in results) == 1
     assert deliveries.successful_claims == [(TIMESTAMP_ID, NBNC)]
     assert len(roots.calls) == 1
-    assert len(deliveries.enqueued) == 1
 
 
 async def test_timestamp_preparer_opens_an_independent_current_branch() -> None:
@@ -318,4 +317,26 @@ async def test_timestamp_preparer_opens_an_independent_current_branch() -> None:
     assert received_timestamp.root_flow_key == "service.unit.timestamp.notice"
     assert received_user_id == NBNC
     assert received_now == NOW
-    assert len(deliveries.enqueued) == 1
+
+
+async def test_scheduler_sends_once_after_each_claimed_recipient() -> None:
+    sender = RecordingSender(fail_first=True)
+    services = FakeServices(
+        due_timestamps=[timestamp()],
+        audience_user_ids={(ServiceAudience.ALL_NBNCS, SERVICE_ID): [NBNC, LEADER]},
+    )
+    deliveries = FakeDeliveries()
+    roots = RecordingTimestampRoots()
+    scheduler = ServiceDeliveryScheduler(
+        lambda: FakeUow(services, deliveries),
+        AudienceResolver(lambda: FakeUow(services, deliveries), clock=lambda: NOW),
+        roots,
+        sender,
+    )
+
+    result = await scheduler.run_once(now=NOW)
+
+    assert result.claimed_delivery_count == 2
+    assert result.send_attempted == 2
+    assert result.send_failed == 1
+    assert len(sender.presentations) == 2
