@@ -22,7 +22,7 @@ The configuration uses these rules:
 
 - A `DiscussionFlow` is `trigger → actions → next_flows`.
 - `trigger: null` means the harness starts that root automatically.
-- A `message` trigger needs `llm_gist`, `possible_qns`, or both. Use `possible_qns` for concrete user wording and `llm_gist` for broad or context-dependent conditions.
+- A `message` trigger needs exactly one of `llm_gist` or `possible_qns`. Use `possible_qns` for concrete user wording and `llm_gist` for broad or context-dependent conditions.
 - A flow's `next_flow_mode` controls reuse of that flow's children.
 - `ONE_AND_ONCE_ONLY` removes that choice group after one child succeeds.
 - `ALLOW_MANY` keeps that choice group reusable in past selections.
@@ -129,7 +129,7 @@ system_global_root:
         event_key: safety_match.not_found
       actions:
       - type: send_message
-        text: I can’t reach a trusted person through the bot right now. If you may
+        text: I can't reach a trusted person through the bot right now. If you may
           be in immediate danger, call emergency services or go to a trusted adult
           near you now.
       - type: notify_all_admins
@@ -170,8 +170,8 @@ system_global_root:
     - type: send_message_fixed
       text: |-
         DARE: for secondary school students aged 13-17yo
-         Arrow: for post-secondary school students and NSFs aged 17-23yo
-         Varsity: for university students
+        Arrow: for post-secondary school students and NSFs aged 17-23yo
+        Varsity: for university students
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows:
@@ -185,7 +185,7 @@ system_global_root:
         - what time is Dare?
       actions:
       - type: send_message
-        text: Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
+        text: DARE services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
           service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME
           at DARE_SERVICE_VENUE.
       next_flow_mode: ALLOW_MANY
@@ -274,26 +274,8 @@ system_global_root:
     actions:
     - type: send_message
       text: Come as you are. You can expect music, a message about Jesus, and time
-        to meet other youths. It’s okay to come alone, sit quietly, or ask for someone
+        to meet other youths. It's okay to come alone, sit quietly, or ask for someone
         to meet you before you enter.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.menu.zone
-    multi_intent_mode: answer
-    trigger:
-      type: any_of
-      triggers:
-      - type: button
-        button_id: system.global.menu.zone
-      - type: message
-        possible_qns:
-        - what is The Zone?
-        - what do you mean by The Zone?
-    actions:
-    - type: send_message
-      text: The Zone is a youth community where you can come as you are, meet other
-        youths, and learn about Jesus.
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
@@ -418,6 +400,89 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
+  - key: system.global.about.zone
+    multi_intent_mode: answer
+    trigger:
+      type: any_of
+      triggers:
+      - type: button
+        button_id: system.global.menu.zone
+      - type: message
+        possible_qns:
+        - what is The Zone?
+        - what do you mean by The Zone?
+        - is The Zone part of a church?
+    actions:
+    - type: send_message
+      text: The Zone is New Creation Church's energy-packed youth ministry, and reaches
+        out to all secondary and tertiary students as well as full-time national servicemen
+        in community and in motion for the grace revolution. Centred on the foundation
+        of the Word of God, the ministry's call is wrapped up in the message of God's
+        unmerited, undeserved favour! The Zone is the place for building godly relationships
+        and growing in revelation of God's grace.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.about.dare
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      possible_qns:
+      - what is DARE?
+    actions:
+    - type: send_message
+      text: 'Growing up and trying to stay afloat amidst endless homework and responsibilities?
+        Come face to face with the One who wants to calm the storms in your life and
+        be the anchor of your soul. DARE is a place where you will discover your purpose
+        and meet authentic friends who will never let you walk alone. #DAREishome
+        (for secondary school students aged 13-17yo)'
+    - type: send_message
+      text: Follow us at @nccdare on Instagram for latest updates on service dates
+        and timings.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.about.arrow
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      possible_qns:
+      - what is Arrow?
+    actions:
+    - type: send_message
+      text: 'Ok, you''re in a new season and the world''s your oyster. Wondering what
+        the future holds? We know that God will use this season to prepare and set
+        you up for all the plans and the purposes He has for you. Because #ArrowIsFamily—you
+        don''t have to act, dress or talk in a certain way to belong. You can come
+        as you are. We believe that the message of Jesus will radically transform
+        your life. Come and discover His perfect love for you.  (for post-secondary
+        school students and NSFs aged 17-23yo)'
+    - type: send_message
+      text: Follow us at @nccarrow on Instagram for latest updates on service dates
+        and timings.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.about.varsity
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      possible_qns:
+      - what is V / Varsity?
+    actions:
+    - type: send_message
+      text: Whether you've got a packed semester, an intense elective, or a chill
+        internship—your university experience is shaped by the people you're surrounded
+        with. At V, we are committed to taking this journey together with unstoppable
+        faith and irresistible wisdom. We crave intimate and real relationships with
+        Jesus and with each other. We are a fam that will never let you walk through
+        life alone. (for university students)
+    - type: send_message
+      text: Follow us at @nccvarsity on Instagram for latest updates on service dates
+        and timings.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
   - key: system.global.about.eligibility
     multi_intent_mode: answer
     trigger:
@@ -425,11 +490,18 @@ system_global_root:
       possible_qns:
       - who is The Zone for?
       - am i too old for The Zone?
-      - can secondary school students come?
+      - can primary school/secondary school/junior college/JC/Poly/Polytechnic students
+        come?
     actions:
     - type: send_message
-      text: 'The Zone is for YOUTH_AGE_RANGE. Please add the school stages or ages
-        that are welcome: ELIGIBILITY_DETAILS.'
+      text: The Zone consists of three youth groups designed for students and NSF
+        aged 13-25yo. If you are a working adult, you can join our English care groups
+        and find support for the season you are in!
+    - type: send_message_fixed
+      text: |-
+        DARE: for secondary school students aged 13-17yo
+        Arrow: for post-secondary school students and NSFs aged 17-23yo
+        Varsity: for university students
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
@@ -705,7 +777,7 @@ system_global_root:
       - what do Christians believe about Jesus?
     actions:
     - type: send_message
-      text: At NCC, we believe Jesus is the Son of God who came to reveal God’s love
+      text: At NCC, we believe Jesus is the Son of God who came to reveal God's love
         and give us new life through His death and resurrection.
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -1114,10 +1186,6 @@ service:
               trigger:
                 type: message
                 llm_gist: The matched person is not responding or cannot be reached.
-                possible_qns:
-                - they are not responding
-                - i cannot reach them
-                - they have not replied
               actions:
               - type: release_human_match
               - type: notify_previous_human
@@ -1184,10 +1252,6 @@ service:
               trigger:
                 type: message
                 llm_gist: The matched person is not responding or cannot be reached.
-                possible_qns:
-                - they are not responding
-                - i cannot reach them
-                - they have not replied
               actions:
               - type: release_human_match
               - type: notify_previous_human

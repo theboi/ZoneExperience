@@ -77,6 +77,10 @@ def test_system_root_keeps_questions_at_the_root_and_supports_schedule_follow_up
         "system.global.schedule.arrow",
         "system.global.schedule.varsity",
         "system.global.about.ncc",
+        "system.global.about.zone",
+        "system.global.about.dare",
+        "system.global.about.arrow",
+        "system.global.about.varsity",
         "system.global.travel.drive",
         "system.global.community.small_group",
         "system.global.faith.follow_jesus",
@@ -93,8 +97,8 @@ def test_system_root_keeps_questions_at_the_root_and_supports_schedule_follow_up
     )
     assert timings.actions[1].type == "send_message_fixed"
     assert timings.actions[1].text == (
-        "DARE: for secondary school students aged 13-17yo\n "
-        "Arrow: for post-secondary school students and NSFs aged 17-23yo\n "
+        "DARE: for secondary school students aged 13-17yo\n"
+        "Arrow: for post-secondary school students and NSFs aged 17-23yo\n"
         "Varsity: for university students"
     )
 
@@ -106,6 +110,16 @@ def test_system_root_keeps_questions_at_the_root_and_supports_schedule_follow_up
         )
         assert isinstance(follow_up.trigger, OnMessageTrigger)
         assert group.capitalize() in follow_up.trigger.possible_qns
+
+    zone = next(
+        flow for flow in root.next_flows if flow.key == "system.global.about.zone"
+    )
+    assert isinstance(zone.trigger, OnAnyOfTrigger)
+    assert any(
+        isinstance(trigger, OnButtonPressTrigger)
+        and trigger.button_id == "system.global.menu.zone"
+        for trigger in zone.trigger.triggers
+    )
 
 
 def test_system_root_options_question_reopens_the_same_button_menu() -> None:

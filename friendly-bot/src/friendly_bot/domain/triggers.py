@@ -33,10 +33,12 @@ class OnMessageTrigger(DiscussionTriggerBase):
 
     @model_validator(mode="after")
     def has_routing_description(self) -> OnMessageTrigger:
-        """Require a semantic description, concrete examples, or both."""
+        """Require exactly one routing-description form."""
 
-        if self.llm_gist is None and not self.possible_qns:
-            raise ValueError("message trigger requires llm_gist or possible_qns")
+        if (self.llm_gist is None) == (not self.possible_qns):
+            raise ValueError(
+                "message trigger requires exactly one of llm_gist or possible_qns"
+            )
         return self
 
 

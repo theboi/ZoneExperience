@@ -250,12 +250,7 @@
                           "key": "service.zone_x.connect.join_group.not_responding",
                           "trigger": {
                             "type": "message",
-                            "llm_gist": "The matched person is not responding or cannot be reached.",
-                            "possible_qns": [
-                              "they are not responding",
-                              "i cannot reach them",
-                              "they have not replied"
-                            ]
+                            "llm_gist": "The matched person is not responding or cannot be reached."
                           },
                           "actions": [
                             {
@@ -354,12 +349,7 @@
                           "key": "service.zone_x.connect.join_me.not_responding",
                           "trigger": {
                             "type": "message",
-                            "llm_gist": "The matched person is not responding or cannot be reached.",
-                            "possible_qns": [
-                              "they are not responding",
-                              "i cannot reach them",
-                              "they have not replied"
-                            ]
+                            "llm_gist": "The matched person is not responding or cannot be reached."
                           },
                           "actions": [
                             {

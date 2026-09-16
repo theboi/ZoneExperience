@@ -32,6 +32,11 @@ def test_registered_trigger_forms_parse_their_canonical_fields() -> None:
         {"type": "message", "llm_gist": ""},
         {"type": "message", "possible_qns": []},
         {"type": "message"},
+        {
+            "type": "message",
+            "llm_gist": "asks for timings",
+            "possible_qns": ["when is Arrow?"],
+        },
         {"type": "button", "button_id": "Bad Button"},
         {"type": "command", "command": "start"},
         {"type": "command", "command": "/start@friendly_bot"},

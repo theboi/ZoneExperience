@@ -28,7 +28,6 @@ def test_message_routing_hints_extract_semantic_and_question_alternatives() -> N
             OnMessageTrigger(
                 type="message",
                 llm_gist="asks for directions",
-                possible_qns=["How do I get there?"],
             ),
             OnMessageTrigger(
                 type="message", possible_qns=["Can I get a map?", "Map please"]
@@ -38,7 +37,7 @@ def test_message_routing_hints_extract_semantic_and_question_alternatives() -> N
 
     assert message_routing_hints(trigger) == (
         ("asks for directions",),
-        ("How do I get there?", "Can I get a map?", "Map please"),
+        ("Can I get a map?", "Map please"),
     )
     assert message_routing_hints(
         OnAnyOfTrigger(

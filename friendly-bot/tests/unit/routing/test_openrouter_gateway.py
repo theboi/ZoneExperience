@@ -234,7 +234,6 @@ def _multi_intent_request() -> MultiIntentRequest:
         candidates=(
             RoutingPromptCandidate(
                 flow_id="system.directions",
-                gists=("asks for directions",),
                 possible_qns=("where is the zone?", "how do i get there?"),
                 context_label="current",
                 multi_intent_mode="answer",
@@ -502,6 +501,16 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert "gist or possible_qns" in first_payload["messages"][0]["content"]
+    assert (
+        "Select exactly one configured flow for each clause"
+        in first_payload["messages"][0]["content"]
+    )
+    assert "must produce exactly one match" in first_payload["messages"][0]["content"]
+    assert "two or more independent requests" in first_payload["messages"][0]["content"]
+    assert (
+        "'when are services?' is one request and must select only one timing flow"
+        in first_payload["messages"][0]["content"]
+    )
     assert (
         "shared keyword, topic, place, name, or available candidate never "
         "establishes intent" in first_payload["messages"][0]["content"]
