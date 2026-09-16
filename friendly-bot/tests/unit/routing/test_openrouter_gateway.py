@@ -485,6 +485,14 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     assert first_payload["messages"][0] == second_payload["messages"][0]
     assert first_payload["messages"][1] != second_payload["messages"][1]
     assert "system.directions" not in first_payload["messages"][0]["content"]
+    assert (
+        "every character you generate in lowercase"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "including the first word, names, and titles"
+        in first_payload["messages"][0]["content"]
+    )
 
 
 @pytest.mark.parametrize(
