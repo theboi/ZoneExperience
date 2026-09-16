@@ -440,7 +440,9 @@ class FriendlyBotApplication:
 
         if routing.terminal is RoutingTerminal.CLARIFY:
             self._append_fixed_text(
-                presentations, user, "Sorry, which message were you referring to?"
+                presentations,
+                user,
+                "could you tell me a bit more about what you'd like to know?",
             )
             return self._result("clarified", tuple(selected), presentations)
         if routing.terminal is RoutingTerminal.NO_MATCH:

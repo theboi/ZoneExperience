@@ -493,6 +493,14 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         "including the first word, names, and titles"
         in first_payload["messages"][0]["content"]
     )
+    assert (
+        "shared keyword, topic, place, name, or available candidate never "
+        "establishes intent" in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "'zone?' and 'the zone?' are ambiguous"
+        in first_payload["messages"][0]["content"]
+    )
 
 
 @pytest.mark.parametrize(

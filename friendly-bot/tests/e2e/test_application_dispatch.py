@@ -733,6 +733,30 @@ async def test_dispatch_repairs_duplicate_system_roots_before_routing() -> None:
     assert service_branch in uow.open_selections.branches
 
 
+async def test_ambiguous_topic_asks_the_user_for_context() -> None:
+    """A vague topic must lead to a useful clarification instead of a blind answer."""
+
+    router = ResultRouter(
+        MultiIntentRoutingResult((), None, (), RoutingTerminal.CLARIFY)
+    )
+    application, uow, user = _fixture(router=cast(ConstrainedRouter, router))
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=8, text="the zone?"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result == DispatchResult(
+        "clarified",
+        presentations=(
+            TelegramTextPresentation(
+                77, "could you tell me a bit more about what you'd like to know?"
+            ),
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("error", "reason_code"),
     [
