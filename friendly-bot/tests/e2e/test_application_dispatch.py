@@ -13,6 +13,7 @@ from pydantic import JsonValue
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.actions.registry import ActionDependencies, ActionExecutorRegistry
 from friendly_bot.app import DispatchResult, FriendlyBotApplication, PublishedZoneX
+from friendly_bot.config.settings import PROJECT_ROOT
 from friendly_bot.domain.actions import (
     SelectServiceAttendanceAction,
     SendMessageAction,
@@ -771,6 +772,7 @@ async def test_routing_failure_commits_a_redacted_fallback(
     error: GatewayTransportError | GatewayProtocolError,
     reason_code: str,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An exhausted provider must not terminate the Telegram runtime task group."""
 
@@ -812,6 +814,10 @@ async def test_routing_failure_commits_a_redacted_fallback(
         service,
         router=cast(ConstrainedRouter, FailingRouter(error)),
     )
+    error_log_path = PROJECT_ROOT / ".runtime" / "error-logs" / "test-provider.log"
+    monkeypatch.setattr(
+        "friendly_bot.app.write_error_log", lambda *args, **kwargs: error_log_path
+    )
 
     result = await application.dispatch(
         user_id=user.id,
@@ -825,7 +831,7 @@ async def test_routing_failure_commits_a_redacted_fallback(
             TelegramTextPresentation(
                 77,
                 "Sorry, an error occurred. Error log: "
-                f"{uow.diagnostics.records[0].correlation_id}.",
+                ".runtime/error-logs/test-provider.log.",
             ),
         ),
     )

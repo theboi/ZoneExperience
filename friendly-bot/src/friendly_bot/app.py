@@ -51,6 +51,7 @@ from friendly_bot.domain.triggers import (
     OnCommandTrigger,
     OnMessageTrigger,
 )
+from friendly_bot.error_logs import error_log_reference, write_error_log
 from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.onboarding.service import OnboardingService
@@ -354,22 +355,24 @@ class FriendlyBotApplication:
                 ),
                 now=now,
             )
-        except GatewayTransportError:
+        except GatewayTransportError as error:
             return await self._routing_failure_result(
                 unit_of_work,
                 user=user,
                 correlation_id=correlation_id,
                 now=now,
                 reason_code="routing.provider_unavailable",
+                error=error,
                 presentations=presentations,
             )
-        except GatewayProtocolError:
+        except GatewayProtocolError as error:
             return await self._routing_failure_result(
                 unit_of_work,
                 user=user,
                 correlation_id=correlation_id,
                 now=now,
                 reason_code="routing.provider_invalid_response",
+                error=error,
                 presentations=presentations,
             )
         executed_flow_keys: set[str] = set()
@@ -1136,9 +1139,15 @@ class FriendlyBotApplication:
         correlation_id: UUID,
         now: datetime,
         reason_code: str,
+        error: Exception,
         presentations: PresentationBuffer,
     ) -> DispatchResult:
         LOGGER.error("routing provider failure: %s", reason_code)
+        error_log_path = write_error_log(
+            error,
+            summary="routing provider failed",
+            context={"reason_code": reason_code},
+        )
         await unit_of_work.diagnostics.record(
             correlation_id=correlation_id,
             severity="error",
@@ -1149,7 +1158,9 @@ class FriendlyBotApplication:
         self._append_fixed_text(
             presentations,
             user,
-            DEFAULT_UNHANDLED_ERROR_TEXT.format(correlation_id=correlation_id),
+            DEFAULT_UNHANDLED_ERROR_TEXT.format(
+                error_log_path=error_log_reference(error_log_path)
+            ),
         )
         return self._result("failed", (), presentations)
 

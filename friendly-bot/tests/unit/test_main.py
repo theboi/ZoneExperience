@@ -7,6 +7,7 @@ import logging
 import pytest
 
 from friendly_bot import __main__
+from friendly_bot.config.settings import PROJECT_ROOT
 
 
 def test_main_logs_an_unexpected_runtime_failure(
@@ -18,6 +19,13 @@ def test_main_logs_an_unexpected_runtime_failure(
         raise RuntimeError("test runtime failure")
 
     monkeypatch.setattr(__main__, "run_application", broken_runtime)
+    monkeypatch.setattr(
+        __main__,
+        "write_error_log",
+        lambda *args, **kwargs: (
+            PROJECT_ROOT / ".runtime" / "error-logs" / "test-main.log"
+        ),
+    )
 
     with pytest.raises(RuntimeError, match="test runtime failure"):
         __main__.main()
@@ -26,7 +34,10 @@ def test_main_logs_an_unexpected_runtime_failure(
         (
             "friendly_bot.__main__",
             logging.ERROR,
-            "friendly bot runtime stopped unexpectedly",
+            (
+                "friendly bot runtime stopped unexpectedly; error log: "
+                ".runtime/error-logs/test-main.log"
+            ),
         )
     ]
 

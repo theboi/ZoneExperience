@@ -140,7 +140,8 @@ If the generated `.runtime/u<uid>/postgres.env` file is missing, `reset` creates
 | `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run from the intended `ZoneExperience/friendly-bot` checkout as its owning macOS user; do not pass overrides to bypass the guard. |
 | Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
 | `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |
-| OpenRouter routing is temporarily unavailable or returns an invalid response | Friendly Bot records a redacted diagnostic, sends the user the fixed error-log message, commits that update, and continues polling. Restore the provider rather than weakening the privacy configuration. |
+| An error message names an error log | Open the named file under `.runtime/error-logs/`. It contains the local traceback and safe context, is permission-restricted, and is already excluded from Git. |
+| OpenRouter routing is temporarily unavailable or returns an invalid response | Friendly Bot records a redacted diagnostic, writes a local error log, sends its path to the user, commits that update, and continues polling. Restore the provider rather than weakening the privacy configuration. |
 | Telegram webhook preflight fails | Check the dedicated bot token and Telegram connectivity. The runtime will not poll unless it can safely inspect and, when configured, clear the webhook. |
 | `telegram_runtime_already_running` | Another Friendly Bot process owns the database's polling lock. Stop that process; do not run two pollers. |
 

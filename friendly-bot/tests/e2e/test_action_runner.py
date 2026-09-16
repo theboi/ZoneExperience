@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
+import pytest
 from pydantic import JsonValue
 
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.actions.registry import ActionExecutorRegistry
 from friendly_bot.actions.runner import ActionRunner
+from friendly_bot.config.settings import PROJECT_ROOT
 from friendly_bot.domain.actions import (
     FindAndReserveServerAction,
     SendMessageAction,
@@ -192,9 +194,9 @@ async def test_event_never_bubbles_to_an_ancestor_or_reusable_past_selection() -
     assert context.diagnostics.reason_codes == ["action_event.unhandled_non_error"]
 
 
-async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_sender() -> (
-    None
-):
+async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_sender(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     direct_error_parent = _flow(
         "system.direct-error",
         actions=[{"type": "send_message", "text": "raise"}],
@@ -202,9 +204,7 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
             _flow(
                 "system.direct-error.recovery",
                 actions=[{"type": "send_message", "text": "custom recovery"}],
-                trigger=OnActionEventTrigger(
-                    type="action_event", event_key="error"
-                ),
+                trigger=OnActionEventTrigger(type="action_event", event_key="error"),
             )
         ],
     )
@@ -214,6 +214,11 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
     )
     direct_context = _context()
     runner = ActionRunner(_registry())
+    error_log_path = PROJECT_ROOT / ".runtime" / "error-logs" / "test-action.log"
+    monkeypatch.setattr(
+        "friendly_bot.actions.runner.write_error_log",
+        lambda *args, **kwargs: error_log_path,
+    )
 
     await runner.run(direct_error_parent, cast(ActionContext, direct_context))
     unhandled_context = RecordingContext(
@@ -227,7 +232,7 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
 
     assert direct_context.texts == [
         "custom recovery",
-        (f"Sorry, an error occurred. Error log: {direct_context.correlation_id}."),
+        "Sorry, an error occurred. Error log: .runtime/error-logs/test-action.log.",
     ]
     assert direct_context.diagnostics.reason_codes == [
         "action_execution.failed",

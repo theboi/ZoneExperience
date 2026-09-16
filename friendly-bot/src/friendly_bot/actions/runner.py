@@ -20,8 +20,9 @@ from friendly_bot.domain.actions import (
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.triggers import OnActionEventTrigger
+from friendly_bot.error_logs import error_log_reference, write_error_log
 
-DEFAULT_UNHANDLED_ERROR_TEXT = "Sorry, an error occurred. Error log: {correlation_id}."
+DEFAULT_UNHANDLED_ERROR_TEXT = "Sorry, an error occurred. Error log: {error_log_path}."
 LOGGER = logging.getLogger(__name__)
 
 
@@ -87,7 +88,9 @@ class ActionRunner:
                 continue
             await context.flush_presentation()
             if is_error_recovery and event.key == "error":
-                await send_unhandled_action_error(context)
+                await send_unhandled_action_error(
+                    context, error_log_path=_event_error_log_path(event)
+                )
                 return True
             return await self._run_direct_event_child(
                 flow,
@@ -106,16 +109,21 @@ class ActionRunner:
     ) -> ActionEvent | None:
         executor = self._registry.resolve(action)
         for attempt in range(self._max_safe_attempts):
+            failure: Exception | None = None
             try:
                 await executor(action, context)
                 return None
-            except RetryableActionExecutionError:
+            except RetryableActionExecutionError as error:
+                failure = error
                 if attempt + 1 < self._max_safe_attempts:
                     continue
             except Exception as error:  # noqa: BLE001 - diagnostics must close failures
-                del error
-            await self._record_action_failure(context, flow, action)
-            return ActionEvent(key="error")
+                failure = error
+            assert failure is not None
+            error_log_path = await self._record_action_failure(
+                context, flow, action, failure
+            )
+            return ActionEvent(key="error", payload={"error_log_path": error_log_path})
         raise AssertionError("action retry loop must return or raise")
 
     async def _run_direct_event_child(
@@ -128,7 +136,9 @@ class ActionRunner:
         child = _direct_event_child(parent, event.key)
         if child is None:
             if event.key == "error":
-                await send_unhandled_action_error(context)
+                await send_unhandled_action_error(
+                    context, error_log_path=_event_error_log_path(event)
+                )
             else:
                 await self._record_unhandled_event(context, parent, event.key)
             return True
@@ -144,16 +154,24 @@ class ActionRunner:
         context: ActionContext,
         flow: DiscussionFlow,
         action: DiscussionAction,
-    ) -> None:
+        error: Exception,
+    ) -> str:
+        safe_context: dict[str, JsonValue] = {
+            "reason_code": "action_execution.failed",
+            "flow_key": str(flow.key),
+            "action_type": action.type,
+        }
+        error_log_path = write_error_log(
+            error,
+            summary="action execution failed",
+            context=safe_context,
+        )
         await self._record_diagnostic(
             context,
             safe_summary="action execution failed",
-            safe_context={
-                "reason_code": "action_execution.failed",
-                "flow_key": str(flow.key),
-                "action_type": action.type,
-            },
+            safe_context=safe_context,
         )
+        return error_log_reference(error_log_path)
 
     async def _record_unhandled_event(
         self, context: ActionContext, flow: DiscussionFlow, event_key: str
@@ -201,11 +219,22 @@ def _direct_event_child(
     return matches[0] if matches else None
 
 
-async def send_unhandled_action_error(context: ActionContext) -> None:
+def _event_error_log_path(event: ActionEvent) -> str:
+    """Read the local-only path written for a failed action, if present."""
+
+    if event.payload is None:
+        return "unavailable"
+    path = event.payload.get("error_log_path")
+    return path if isinstance(path, str) else "unavailable"
+
+
+async def send_unhandled_action_error(
+    context: ActionContext, *, error_log_path: str = "unavailable"
+) -> None:
     """Queue the exact code-owned fallback, never a configurable flow action."""
 
     await context.enqueue_text(
-        DEFAULT_UNHANDLED_ERROR_TEXT.format(correlation_id=context.correlation_id)
+        DEFAULT_UNHANDLED_ERROR_TEXT.format(error_log_path=error_log_path)
     )
 
 

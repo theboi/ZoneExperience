@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 
 from friendly_bot.app import run_application
+from friendly_bot.error_logs import error_log_reference, write_error_log
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,8 +37,14 @@ def main(argv: Sequence[str] = ()) -> None:
         asyncio.run(runtime)
     except KeyboardInterrupt:
         LOGGER.info("friendly bot runtime stopped")
-    except Exception:
-        LOGGER.exception("friendly bot runtime stopped unexpectedly")
+    except Exception as error:
+        error_log_path = write_error_log(
+            error, summary="friendly bot runtime stopped unexpectedly"
+        )
+        LOGGER.exception(
+            "friendly bot runtime stopped unexpectedly; error log: %s",
+            error_log_reference(error_log_path),
+        )
         raise
 
 
