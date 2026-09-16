@@ -82,7 +82,10 @@
               },
               {
                 "type": "message",
-                "llm_gist": "The person asks how to get to Star Performing Arts Centre or where Zone X is being held."
+                "possible_qns": [
+                  "how do i get to Zone X?",
+                  "where is Zone X?"
+                ]
               }
             ]
           },
@@ -92,36 +95,13 @@
               "text": "Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange Green! Take the MRT to Buona Vista and follow the signs to The Star Vista. You'll meet our friendly welcome team in blue near the venue entrance to guide you."
             },
             {
-              "type": "send_buttons",
-              "service_bound": true,
-              "buttons": [
-                {
-                  "button_id": "zone_x.directions.open_map",
-                  "text": "Open map"
-                }
-              ]
+              "type": "send_message_fixed",
+              "text": "Map: {{ service.map_url }}"
             }
           ],
           "next_flow_mode": "ALLOW_MANY",
           "return_actions": [],
-          "next_flows": [
-            {
-              "key": "service.zone_x.directions.open_map",
-              "trigger": {
-                "type": "button",
-                "button_id": "zone_x.directions.open_map"
-              },
-              "actions": [
-                {
-                  "type": "send_message_fixed",
-                  "text": "Map: {{ service.map_url }}"
-                }
-              ],
-              "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [],
-              "next_flows": []
-            }
-          ]
+          "next_flows": []
         },
         {
           "key": "service.zone_x.what_to_expect",
@@ -135,7 +115,10 @@
               },
               {
                 "type": "message",
-                "llm_gist": "The person asks what Zone X or the service will be like, what will happen, what to wear, or whether they may come alone."
+                "possible_qns": [
+                  "what should i expect at Zone X?",
+                  "can i come alone?"
+                ]
               }
             ]
           },
@@ -143,16 +126,6 @@
             {
               "type": "send_message",
               "text": "Come as you are. You can expect music, a message about Jesus, and time to meet other youths. It’s okay to come alone, sit quietly, or ask for someone to meet you before you enter."
-            },
-            {
-              "type": "send_buttons",
-              "service_bound": true,
-              "buttons": [
-                {
-                  "button_id": "zone_x.menu.connect",
-                  "text": "Meet a friendly human"
-                }
-              ]
             }
           ],
           "next_flow_mode": "ALLOW_MANY",
@@ -170,7 +143,10 @@
               },
               {
                 "type": "message",
-                "llm_gist": "The person wants to meet, talk to, or be connected with a friendly human at this service."
+                "possible_qns": [
+                  "can i meet someone?",
+                  "can i talk to a friendly human?"
+                ]
               }
             ]
           },
@@ -263,14 +239,8 @@
                           "text": "{{ matched_server.name }} is expecting you. Message them here: {{ matched_server.telegram_url }}"
                         },
                         {
-                          "type": "send_buttons",
-                          "service_bound": true,
-                          "buttons": [
-                            {
-                              "button_id": "zone_x.connect.not_responding",
-                              "text": "{{ matched_server.name }} is not responding"
-                            }
-                          ]
+                          "type": "send_message",
+                          "text": "if {{ matched_server.name }} is not responding, tell me and i will find someone else."
                         }
                       ],
                       "next_flow_mode": "ALLOW_MANY",
@@ -279,8 +249,13 @@
                         {
                           "key": "service.zone_x.connect.join_group.not_responding",
                           "trigger": {
-                            "type": "button",
-                            "button_id": "zone_x.connect.not_responding"
+                            "type": "message",
+                            "llm_gist": "The matched person is not responding or cannot be reached.",
+                            "possible_qns": [
+                              "they are not responding",
+                              "i cannot reach them",
+                              "they have not replied"
+                            ]
                           },
                           "actions": [
                             {
@@ -368,14 +343,8 @@
                           "text": "{{ matched_server.name }} will come and meet you. Message them here so you can find each other: {{ matched_server.telegram_url }}"
                         },
                         {
-                          "type": "send_buttons",
-                          "service_bound": true,
-                          "buttons": [
-                            {
-                              "button_id": "zone_x.connect.not_responding",
-                              "text": "{{ matched_server.name }} is not responding"
-                            }
-                          ]
+                          "type": "send_message",
+                          "text": "if {{ matched_server.name }} is not responding, tell me and i will find someone else."
                         }
                       ],
                       "next_flow_mode": "ALLOW_MANY",
@@ -384,8 +353,13 @@
                         {
                           "key": "service.zone_x.connect.join_me.not_responding",
                           "trigger": {
-                            "type": "button",
-                            "button_id": "zone_x.connect.not_responding"
+                            "type": "message",
+                            "llm_gist": "The matched person is not responding or cannot be reached.",
+                            "possible_qns": [
+                              "they are not responding",
+                              "i cannot reach them",
+                              "they have not replied"
+                            ]
                           },
                           "actions": [
                             {
@@ -486,7 +460,10 @@
               },
               {
                 "type": "message",
-                "llm_gist": "The person says they are actually attending another service or timing."
+                "possible_qns": [
+                  "can i switch service?",
+                  "i am going to a different service"
+                ]
               }
             ]
           },
@@ -615,20 +592,6 @@
         {
           "type": "send_message",
           "text": "Yes, you can still join Zone X. Service has started, so head to the venue entrance and ask a Zone team member to help you find a seat."
-        },
-        {
-          "type": "send_buttons",
-          "service_bound": true,
-          "buttons": [
-            {
-              "button_id": "zone_x.menu.directions",
-              "text": "Get directions"
-            },
-            {
-              "button_id": "zone_x.menu.connect",
-              "text": "Meet a friendly human"
-            }
-          ]
         }
       ],
       "next_flow_mode": "ALLOW_MANY",
@@ -720,14 +683,8 @@
               "text": "Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing Arts Centre."
             },
             {
-              "type": "send_buttons",
-              "service_bound": true,
-              "buttons": [
-                {
-                  "button_id": "zone_x.one_day.directions",
-                  "text": "Get directions"
-                }
-              ]
+              "type": "send_message_fixed",
+              "text": "Map: {{ service.map_url }}"
             }
           ],
           "next_flow_mode": "CHECKPOINT",
@@ -737,24 +694,7 @@
               "text": "Anything else you’d like to know before Zone X?"
             }
           ],
-          "next_flows": [
-            {
-              "key": "service.zone_x.timestamp.one_day_before.directions",
-              "trigger": {
-                "type": "button",
-                "button_id": "zone_x.one_day.directions"
-              },
-              "actions": [
-                {
-                  "type": "send_message_fixed",
-                  "text": "Map: {{ service.map_url }}"
-                }
-              ],
-              "next_flow_mode": "ONE_AND_ONCE_ONLY",
-              "return_actions": [],
-              "next_flows": []
-            }
-          ]
+          "next_flows": []
         }
       },
       {
@@ -767,20 +707,7 @@
           "actions": [
             {
               "type": "send_message",
-              "text": "Doors are open for Zone X. Are you here with us?"
-            },
-            {
-              "type": "send_buttons",
-              "service_bound": true,
-              "buttons": [
-                {
-                  "button_id": "zone_x.attendance.here",
-                  "text": "Check in to Zone X",
-                  "payload": {
-                    "service_key": "zone_x_2026_10_18"
-                  }
-                }
-              ]
+              "text": "Doors are open for Zone X. Are you here with us? Reply 'i am here' to check in."
             }
           ],
           "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -789,8 +716,12 @@
             {
               "key": "service.zone_x.timestamp.doors_open.check_in",
               "trigger": {
-                "type": "button",
-                "button_id": "zone_x.attendance.here"
+                "type": "message",
+                "possible_qns": [
+                  "i am here",
+                  "i'm here",
+                  "yes, i am at Zone X"
+                ]
               },
               "actions": [
                 {
@@ -912,7 +843,10 @@
                   },
                   {
                     "type": "message",
-                    "llm_gist": "The person asks where the toilet or restroom is."
+                    "possible_qns": [
+                      "where is the toilet?",
+                      "where is the restroom?"
+                    ]
                   }
                 ]
               },
@@ -938,7 +872,10 @@
                   },
                   {
                     "type": "message",
-                    "llm_gist": "The person asks who Jesus is or what Christians believe about Jesus."
+                    "possible_qns": [
+                      "who is Jesus?",
+                      "what do Christians believe about Jesus?"
+                    ]
                   }
                 ]
               },
@@ -946,16 +883,6 @@
                 {
                   "type": "send_message",
                   "text": "At NCC, we believe Jesus is the Son of God who came to reveal God’s love and give us new life through His death and resurrection. I can connect you with someone if you’d like to talk about this personally."
-                },
-                {
-                  "type": "send_buttons",
-                  "service_bound": true,
-                  "buttons": [
-                    {
-                      "button_id": "zone_x.menu.connect",
-                      "text": "Talk to someone"
-                    }
-                  ]
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
@@ -973,16 +900,6 @@
                 {
                   "type": "send_message",
                   "text": "I don’t have an approved answer for that question, but I can connect you with someone who can talk with you."
-                },
-                {
-                  "type": "send_buttons",
-                  "service_bound": true,
-                  "buttons": [
-                    {
-                      "button_id": "zone_x.menu.connect",
-                      "text": "Talk to someone"
-                    }
-                  ]
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
@@ -1035,15 +952,8 @@
               },
               "actions": [
                 {
-                  "type": "send_buttons",
-                  "service_bound": true,
-                  "text": "I can introduce you to someone friendly.",
-                  "buttons": [
-                    {
-                      "button_id": "zone_x.menu.connect",
-                      "text": "Meet a friendly human"
-                    }
-                  ]
+                  "type": "send_message",
+                  "text": "I can introduce you to someone friendly. Tell me if you would like me to do that."
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",
@@ -1058,15 +968,8 @@
               },
               "actions": [
                 {
-                  "type": "send_buttons",
-                  "service_bound": true,
-                  "text": "A friendly human can help with your question.",
-                  "buttons": [
-                    {
-                      "button_id": "zone_x.menu.connect",
-                      "text": "Ask a friendly human"
-                    }
-                  ]
+                  "type": "send_message",
+                  "text": "A friendly human can help with your question. Tell me if you would like an introduction."
                 }
               ],
               "next_flow_mode": "ALLOW_MANY",

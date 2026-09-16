@@ -211,7 +211,11 @@ def test_candidate_assembly_includes_one_any_of_message_candidate() -> None:
                             type="button", button_id="menu.directions"
                         ),
                         OnMessageTrigger(
-                            type="message", llm_gist="asks for directions"
+                            type="message",
+                            possible_qns=[
+                                "how do i get there?",
+                                "where is the venue?",
+                            ],
                         ),
                     ],
                 ),
@@ -231,8 +235,15 @@ def test_candidate_assembly_includes_one_any_of_message_candidate() -> None:
         now=NOW,
     )
 
-    assert [(candidate.key, candidate.gists) for candidate in candidates] == [
-        ("system.home.directions", ("asks for directions",))
+    assert [
+        (candidate.key, candidate.gists, candidate.possible_qns)
+        for candidate in candidates
+    ] == [
+        (
+            "system.home.directions",
+            (),
+            ("how do i get there?", "where is the venue?"),
+        )
     ]
 
 

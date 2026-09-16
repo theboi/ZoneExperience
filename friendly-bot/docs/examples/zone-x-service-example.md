@@ -22,12 +22,14 @@ The configuration uses these rules:
 
 - A `DiscussionFlow` is `trigger → actions → next_flows`.
 - `trigger: null` means the harness starts that root automatically.
+- A `message` trigger needs `llm_gist`, `possible_qns`, or both. Use `possible_qns` for concrete user wording and `llm_gist` for broad or context-dependent conditions.
 - A flow's `next_flow_mode` controls reuse of that flow's children.
 - `ONE_AND_ONCE_ONLY` removes that choice group after one child succeeds.
 - `ALLOW_MANY` keeps that choice group reusable in past selections.
 - `CHECKPOINT` is reusable and is also a branch return destination.
 - A child with `next_flows: []` returns to the nearest checkpoint after its actions finish.
 - Buttons do not contain navigation. A button sends a stable `button_id`; an open `ButtonDiscussionFlowTrigger` with that ID makes the matching flow eligible.
+- Present buttons only when the available choices have not already been made clear in the preceding message.
 - An action may emit one terminal `ActionEvent`. The matching direct child runs immediately without consulting the LLM.
 - An unexpected failure emits `error`. A direct `error` child handles it; otherwise the harness invokes its hardcoded error sender. The hardcoded path is not a `DiscussionFlow` and is not part of published configuration. Action events never bubble.
 - All bot prose comes from actions. The LLM may return only one of the open flow keys or a reserved harness key.
@@ -48,32 +50,32 @@ system_global_root:
     service_bound: false
     buttons:
     - button_id: system.global.menu.timings
-      text: When do we gather?
+      text: when do we gather?
     - button_id: system.global.menu.directions
-      text: How to get to service?
+      text: how to get to service?
     - button_id: system.global.menu.expect
-      text: What to expect?
+      text: what to expect?
     - button_id: system.global.menu.zone
-      text: What is The Zone?
+      text: what is The Zone?
     - button_id: system.global.menu.connect
-      text: Get connected
+      text: get connected!
   next_flow_mode: CHECKPOINT
   return_actions:
   - type: send_message
-    text: Is there anything else I can help you with?
+    text: Is there anything else I can help you with? (you can ask me any question!)
   - type: send_buttons
     service_bound: false
     buttons:
     - button_id: system.global.menu.timings
-      text: When do we gather?
+      text: when do we gather?
     - button_id: system.global.menu.directions
-      text: How to get to service?
+      text: how to get to service?
     - button_id: system.global.menu.expect
-      text: What to expect?
+      text: what to expect?
     - button_id: system.global.menu.zone
-      text: What is The Zone?
+      text: what is The Zone?
     - button_id: system.global.menu.connect
-      text: Get connected
+      text: get connected!
   next_flows:
   - key: system.global.never_mind
     trigger:
@@ -140,8 +142,10 @@ system_global_root:
   - key: system.global.options
     trigger:
       type: message
-      llm_gist: The person asks what options are available, what the bot can do, how
-        the bot can help, or asks for a menu.
+      possible_qns:
+      - what can you help with?
+      - what are my options?
+      - show me the menu
     actions:
     - type: return_to_nearest_checkpoint
     next_flow_mode: ALLOW_MANY
@@ -155,30 +159,46 @@ system_global_root:
       - type: button
         button_id: system.global.menu.timings
       - type: message
-        llm_gist: The person asks when youth services or gatherings happen but does
-          not name a specific service or group.
+        possible_qns:
+        - when are services?
+        - when do you all gather?
+        - what time is youth service?
     actions:
     - type: send_message
-      text: which service are you asking about? you can choose Arrow below or reply
-        with a service name.
-    - type: send_buttons
-      service_bound: false
-      buttons:
-      - button_id: system.global.menu.timings.arrow
-        text: Arrow
+      text: we have different youth groups for different ages! which are you referring
+        to?
+    - type: send_message_fixed
+      text: |-
+        DARE: for secondary school students aged 13-17yo
+         Arrow: for post-secondary school students and NSFs aged 17-23yo
+         Varsity: for university students
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows:
+    - key: system.global.menu.timings.dare
+      multi_intent_mode: answer
+      trigger:
+        type: message
+        possible_qns:
+        - Dare
+        - when is Dare?
+        - what time is Dare?
+      actions:
+      - type: send_message
+        text: Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
+          service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME
+          at DARE_SERVICE_VENUE.
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
     - key: system.global.menu.timings.arrow
       multi_intent_mode: answer
       trigger:
-        type: any_of
-        triggers:
-        - type: button
-          button_id: system.global.menu.timings.arrow
-        - type: message
-          llm_gist: The person answers the current service-timing question by naming
-            Arrow or asks for Arrow service timings.
+        type: message
+        possible_qns:
+        - Arrow
+        - when is Arrow?
+        - what time is Arrow?
       actions:
       - type: send_message
         text: Arrow services are held on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME,
@@ -187,16 +207,32 @@ system_global_root:
       next_flow_mode: ALLOW_MANY
       return_actions: []
       next_flows: []
+    - key: system.global.menu.timings.varsity
+      multi_intent_mode: answer
+      trigger:
+        type: message
+        possible_qns:
+        - Varsity
+        - when is Varsity?
+        - what time is Varsity?
+      actions:
+      - type: send_message
+        text: Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME,
+          service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME
+          at VARSITY_SERVICE_VENUE.
+      next_flow_mode: ALLOW_MANY
+      return_actions: []
+      next_flows: []
     - key: system.global.menu.timings.other_service
       multi_intent_mode: answer
       trigger:
         type: message
-        llm_gist: The person answers the current service-timing question with a service
-          or group other than Arrow.
+        llm_gist: The person answers the current youth-group timing question with
+          a group other than Dare, Arrow, or Varsity.
       actions:
       - type: send_message
-        text: I only have Arrow timing details set up right now. Please add OTHER_SERVICE_NAME,
-          OTHER_SERVICE_DAY, OTHER_SERVICE_START_TIME, and OTHER_SERVICE_VENUE here.
+        text: I have timing details for Dare, Arrow, and Varsity. Which of these groups
+          did you mean?
       next_flow_mode: ALLOW_MANY
       return_actions: []
       next_flows: []
@@ -208,8 +244,10 @@ system_global_root:
       - type: button
         button_id: system.global.menu.directions
       - type: message
-        llm_gist: The person asks for directions to the Star Performing Arts Centre,
-          Star Vista, The Zone or church.
+        possible_qns:
+        - how do i get to The Zone?
+        - where is The Zone?
+        - how do i get to Star Vista?
     actions:
     - type: send_message
       text: Our services are held at Star Vista! Take the MRT to Buona Vista and follow
@@ -229,8 +267,10 @@ system_global_root:
       - type: button
         button_id: system.global.menu.expect
       - type: message
-        llm_gist: The person asks what to expect at The Zone, what will happen, what
-          to wear, or whether they may come alone.
+        possible_qns:
+        - what should i expect?
+        - what happens at The Zone?
+        - can i come alone?
     actions:
     - type: send_message
       text: Come as you are. You can expect music, a message about Jesus, and time
@@ -247,8 +287,9 @@ system_global_root:
       - type: button
         button_id: system.global.menu.zone
       - type: message
-        llm_gist: The person asks what The Zone is, what this youth community is,
-          or wants to learn about The Zone.
+        possible_qns:
+        - what is The Zone?
+        - what do you mean by The Zone?
     actions:
     - type: send_message
       text: The Zone is a youth community where you can come as you are, meet other
@@ -264,8 +305,9 @@ system_global_root:
       - type: button
         button_id: system.global.menu.connect
       - type: message
-        llm_gist: The person wants to get connected with The Zone or asks for a connection
-          link.
+        possible_qns:
+        - how do i get connected?
+        - can i get the connect link?
     actions:
     - type: send_message_fixed
       text: Get connected at https://bit.ly//thezonenew! We would love to hear from
@@ -273,11 +315,28 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
+  - key: system.global.schedule.dare
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      possible_qns:
+      - when is Dare?
+      - what time is Dare service?
+    actions:
+    - type: send_message
+      text: Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
+        service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME
+        at DARE_SERVICE_VENUE.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
   - key: system.global.schedule.arrow
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person explicitly asks when Arrow services or gatherings happen.
+      possible_qns:
+      - when is Arrow?
+      - what time is Arrow service?
     actions:
     - type: send_message
       text: Arrow services are held on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME,
@@ -286,12 +345,29 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
+  - key: system.global.schedule.varsity
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      possible_qns:
+      - when is Varsity?
+      - what time is Varsity service?
+    actions:
+    - type: send_message
+      text: Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME,
+        service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME
+        at VARSITY_SERVICE_VENUE.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
   - key: system.global.schedule.next_gathering
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether there is a youth service today, tomorrow,
-        this week, or asks for the next gathering date.
+      possible_qns:
+      - is there youth service today?
+      - when is the next gathering?
+      - is there service this week?
     actions:
     - type: send_message
       text: 'The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Please
@@ -303,7 +379,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks how long a youth service, gathering, or event lasts.
+      possible_qns:
+      - how long is service?
+      - what time does youth service end?
     actions:
     - type: send_message
       text: A typical service lasts SERVICE_DURATION. Please update this if it differs
@@ -315,8 +393,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether a service or event is cancelled, moved, postponed,
-        or still happening.
+      possible_qns:
+      - is service still happening?
+      - has service been cancelled?
     actions:
     - type: send_message
       text: Please check OFFICIAL_UPDATES_LINK for the latest service updates, or
@@ -328,8 +407,10 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks what NCC is, what NCC stands for, or whether The Zone
-        is part of a church.
+      possible_qns:
+      - what is NCC?
+      - what does NCC stand for?
+      - is The Zone part of a church?
     actions:
     - type: send_message
       text: 'NCC is New Creation Church. Please add a short approved description here:
@@ -341,8 +422,10 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks who The Zone is for, the age range, whether it is
-        for students, or whether they are allowed to come.
+      possible_qns:
+      - who is The Zone for?
+      - am i too old for The Zone?
+      - can secondary school students come?
     actions:
     - type: send_message
       text: 'The Zone is for YOUTH_AGE_RANGE. Please add the school stages or ages
@@ -354,8 +437,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they may come if they are not Christian, unsure
-        about faith, or only want to check The Zone out.
+      possible_qns:
+      - can i come if i am not Christian?
+      - can i come even if i am not sure about faith?
     actions:
     - type: send_message
       text: You are welcome at The Zone whether or not you are Christian. You can
@@ -367,8 +451,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks why they should come, what the point of The Zone is,
-        or what makes it different.
+      possible_qns:
+      - why should i come to The Zone?
+      - what is the point of The Zone?
     actions:
     - type: send_message
       text: 'The Zone is a place to meet people, explore faith, and grow in community.
@@ -380,7 +465,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether The Zone, a service, or an event costs money.
+      possible_qns:
+      - does The Zone cost money?
+      - do i need to pay for service?
     actions:
     - type: send_message
       text: The Zone costs COST_OR_FREE_DETAILS. Please add any event-specific price,
@@ -392,8 +479,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks what to do on their first visit, where to go when
-        they arrive, or how check-in works.
+      possible_qns:
+      - what do i do when i arrive for the first time?
+      - where do i go for check-in?
     actions:
     - type: send_message
       text: When you arrive, go to FIRST_TIME_WELCOME_POINT and look for FIRST_TIME_TEAM_DESCRIPTION.
@@ -405,8 +493,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they need to register, buy a ticket, book
-        a place, or check in before coming.
+      possible_qns:
+      - do i need to register?
+      - do i need to buy a ticket?
     actions:
     - type: send_message
       text: 'REGISTRATION_REQUIREMENT. Please add the registration link or instructions
@@ -418,8 +507,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they may bring a friend, sibling, parent,
-        or guardian.
+      possible_qns:
+      - can i bring a friend?
+      - can my sibling come?
     actions:
     - type: send_message
       text: 'You are welcome to bring a friend. Please add any guest, sibling, parent,
@@ -431,8 +521,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they can still come if they are late, the
-        service has started, or they missed the beginning.
+      possible_qns:
+      - can i still come if i am late?
+      - what if service has already started?
     actions:
     - type: send_message
       text: 'You can still come. Please add the late-arrival instructions, entrance,
@@ -444,7 +535,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks how to get to The Zone or Star Vista by bus.
+      possible_qns:
+      - how do i get to The Zone by bus?
+      - which bus goes to Star Vista?
     actions:
     - type: send_message
       text: 'Please add the recommended bus services and stop here: BUS_DIRECTIONS.'
@@ -455,8 +548,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about driving, parking, a drop-off point, or ride-hailing
-        to The Zone or Star Vista.
+      possible_qns:
+      - where can i park?
+      - where should my Grab drop me off?
     actions:
     - type: send_message
       text: 'Please add the parking, drop-off, cost, and ride-hailing details here:
@@ -468,8 +562,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks which entrance, level, room, or meeting point to use
-        at the venue.
+      possible_qns:
+      - which entrance should i use?
+      - what level is The Zone on?
     actions:
     - type: send_message
       text: 'Please add the entrance, level, room, and meeting-point details here:
@@ -481,8 +576,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about wheelchair access, lifts, mobility access, or
-        accessibility support.
+      possible_qns:
+      - is the venue wheelchair accessible?
+      - is there a lift?
     actions:
     - type: send_message
       text: 'Please add the venue accessibility arrangements and contact here: ACCESSIBILITY_DETAILS.'
@@ -493,8 +589,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks what happens during a service, the programme order,
-        or what a typical gathering is like beyond the general expectation answer.
+      possible_qns:
+      - what happens during service?
+      - what is the programme like?
     actions:
     - type: send_message
       text: 'A typical gathering includes music, a message about Jesus, and time to
@@ -507,8 +604,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks what language a service is in or whether interpretation
-        is available.
+      possible_qns:
+      - what language is service in?
+      - is there translation?
     actions:
     - type: send_message
       text: 'Services are in SERVICE_LANGUAGE. Please add interpretation or translation
@@ -520,8 +618,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether it will be loud, whether there is a quiet
-        space, or about sensory needs.
+      possible_qns:
+      - will it be loud?
+      - is there a quiet space?
     actions:
     - type: send_message
       text: 'Please add the sound, lighting, quiet-space, and sensory-support details
@@ -533,8 +632,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they will be forced to speak, join in, share
-        personal details, or do anything uncomfortable.
+      possible_qns:
+      - will i have to speak?
+      - do i have to join in?
     actions:
     - type: send_message
       text: 'You can take things at your own pace. Please add the approved participation
@@ -546,8 +646,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks to talk to a real person, meet someone, get help from
-        a leader, or be introduced to people outside a current live service.
+      possible_qns:
+      - can i talk to a real person?
+      - can i meet someone from The Zone?
     actions:
     - type: send_message
       text: 'Please add the approved contact path for meeting someone outside a live
@@ -559,8 +660,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks for The Zone social media, Instagram, Telegram channel,
-        website, or online updates.
+      possible_qns:
+      - what is The Zone instagram?
+      - do you have a Telegram channel?
     actions:
     - type: send_message
       text: 'Please add the official social links here: INSTAGRAM_LINK, TELEGRAM_CHANNEL_LINK,
@@ -572,7 +674,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks how to volunteer, serve, help out, or join a team.
+      possible_qns:
+      - how can i volunteer?
+      - can i join a team?
     actions:
     - type: send_message
       text: 'Please add the serving process, age requirements, and contact here: SERVING_DETAILS.'
@@ -583,8 +687,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks who they can contact after a service, after an event,
-        or later in the week.
+      possible_qns:
+      - who can i contact after service?
+      - can i talk to someone later this week?
     actions:
     - type: send_message
       text: 'Please add the approved follow-up contact here: FOLLOW_UP_CONTACT.'
@@ -595,7 +700,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks who Jesus is or what Christians believe about Jesus.
+      possible_qns:
+      - who is Jesus?
+      - what do Christians believe about Jesus?
     actions:
     - type: send_message
       text: At NCC, we believe Jesus is the Son of God who came to reveal God’s love
@@ -607,8 +714,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks what Christians believe, what Christianity is, or
-        what the church teaches.
+      possible_qns:
+      - what is Christianity?
+      - what do Christians believe?
     actions:
     - type: send_message
       text: 'Please add a short approved explanation of Christian belief here: CHRISTIANITY_EXPLANATION.'
@@ -619,8 +727,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks how to become a Christian, follow Jesus, or begin
-        faith.
+      possible_qns:
+      - how do i become a Christian?
+      - how do i follow Jesus?
     actions:
     - type: send_message
       text: 'Please add the approved next-steps explanation and contact here: FOLLOW_JESUS_NEXT_STEPS.'
@@ -631,8 +740,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about reading the Bible, baptism, discipleship, or
-        growing in faith.
+      possible_qns:
+      - how do i start reading the Bible?
+      - what is baptism?
     actions:
     - type: send_message
       text: 'Please add the approved Bible, baptism, and discipleship next steps here:
@@ -644,8 +754,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks for prayer, asks someone to pray with them, or asks
-        how they can pray.
+      possible_qns:
+      - can you pray for me?
+      - how do i pray?
     actions:
     - type: send_message
       text: 'Please add the approved prayer response and contact path here: PRAYER_SUPPORT_DETAILS.'
@@ -656,8 +767,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person has a personal faith question or asks to speak privately
-        with someone about faith.
+      possible_qns:
+      - can i ask someone a private faith question?
+      - can i talk to someone about faith?
     actions:
     - type: send_message
       text: 'Please add the approved private faith-conversation contact path here:
@@ -669,8 +781,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person says they are struggling, anxious, lonely, grieving, or
-        need someone to talk to, without describing immediate danger or self-harm.
+      possible_qns:
+      - i feel really lonely
+      - can i talk to someone about something personal?
     actions:
     - type: send_message
       text: 'Thank you for sharing that. Please add the approved non-emergency support
@@ -682,8 +795,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks where the toilet or restroom is at Star Vista or The
-        Zone venue.
+      possible_qns:
+      - where is the toilet?
+      - where is the restroom?
     actions:
     - type: send_message
       text: The nearest toilets are on Level 4 beside the lifts. Ask a Zone team member
@@ -695,8 +809,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks where to get food, drinks, water, refreshments, or
-        whether food is provided.
+      possible_qns:
+      - is there food?
+      - where can i get water?
     actions:
     - type: send_message
       text: 'Please add food, drink, water, refreshment, and cost details here: FOOD_AND_WATER_DETAILS.'
@@ -707,8 +822,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about Wi-Fi, charging a phone, plugs, or power banks
-        at the venue.
+      possible_qns:
+      - is there wifi?
+      - can i charge my phone?
     actions:
     - type: send_message
       text: 'Please add the Wi-Fi and charging policy here: WIFI_AND_CHARGING_DETAILS.'
@@ -719,8 +835,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about something they lost, found property, or the
-        lost-and-found process.
+      possible_qns:
+      - i lost something
+      - where is lost and found?
     actions:
     - type: send_message
       text: 'Please add the lost-and-found location and contact here: LOST_PROPERTY_DETAILS.'
@@ -731,8 +848,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person needs first aid, feels unwell, asks for medical help, or
-        needs a Zone team member at the venue.
+      possible_qns:
+      - i do not feel well
+      - where can i get first aid?
     actions:
     - type: send_message
       text: 'Please add the on-site medical-help and team-member instructions here:
@@ -744,8 +862,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks how their information is used, whether their details
-        are private, or asks about data privacy.
+      possible_qns:
+      - is my information private?
+      - what do you do with my details?
     actions:
     - type: send_message
       text: 'Please add the approved privacy explanation and policy link here: PRIVACY_POLICY_DETAILS.'
@@ -756,8 +875,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether photos or videos are taken, posted, or whether
-        they can opt out.
+      possible_qns:
+      - are photos taken?
+      - can i opt out of photos?
     actions:
     - type: send_message
       text: 'Please add the approved photo, video, and opt-out policy here: MEDIA_POLICY_DETAILS.'
@@ -768,8 +888,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks whether they need parental consent, whether a parent
-        can come, or about guardian requirements.
+      possible_qns:
+      - do i need parental consent?
+      - can my parent come with me?
     actions:
     - type: send_message
       text: 'Please add the parental-consent and guardian policy here: PARENTAL_CONSENT_DETAILS.'
@@ -780,8 +901,9 @@ system_global_root:
     multi_intent_mode: answer
     trigger:
       type: message
-      llm_gist: The person asks about behaviour rules, safeguarding, reporting a concern,
-        or how The Zone keeps people safe.
+      possible_qns:
+      - what are the behaviour rules?
+      - how do you keep people safe?
     actions:
     - type: send_message
       text: 'Please add the approved safeguarding, reporting, and behaviour-policy
@@ -805,8 +927,9 @@ system_global_root:
   - key: system.global.community.small_group
     trigger:
       type: message
-      llm_gist: The person asks about joining a small group, cell group, connect group,
-        or regular community group.
+      possible_qns:
+      - how do i join a small group?
+      - do you have cell groups?
     actions:
     - type: send_message
       text: We would love to help you find a group. What is your age or school stage,
@@ -878,32 +1001,20 @@ service:
         - type: button
           button_id: zone_x.menu.directions
         - type: message
-          llm_gist: The person asks how to get to Star Performing Arts Centre or where
-            Zone X is being held.
+          possible_qns:
+          - how do i get to Zone X?
+          - where is Zone X?
       actions:
       - type: send_message
         text: Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange
           Green! Take the MRT to Buona Vista and follow the signs to The Star Vista.
           You'll meet our friendly welcome team in blue near the venue entrance to
           guide you.
-      - type: send_buttons
-        service_bound: true
-        buttons:
-        - button_id: zone_x.directions.open_map
-          text: Open map
+      - type: send_message_fixed
+        text: 'Map: {{ service.map_url }}'
       next_flow_mode: ALLOW_MANY
       return_actions: []
-      next_flows:
-      - key: service.zone_x.directions.open_map
-        trigger:
-          type: button
-          button_id: zone_x.directions.open_map
-        actions:
-        - type: send_message_fixed
-          text: 'Map: {{ service.map_url }}'
-        next_flow_mode: ONE_AND_ONCE_ONLY
-        return_actions: []
-        next_flows: []
+      next_flows: []
     - key: service.zone_x.what_to_expect
       multi_intent_mode: answer
       trigger:
@@ -912,18 +1023,14 @@ service:
         - type: button
           button_id: zone_x.menu.expect
         - type: message
-          llm_gist: The person asks what Zone X or the service will be like, what
-            will happen, what to wear, or whether they may come alone.
+          possible_qns:
+          - what should i expect at Zone X?
+          - can i come alone?
       actions:
       - type: send_message
         text: Come as you are. You can expect music, a message about Jesus, and time
           to meet other youths. It’s okay to come alone, sit quietly, or ask for someone
           to meet you before you enter.
-      - type: send_buttons
-        service_bound: true
-        buttons:
-        - button_id: zone_x.menu.connect
-          text: Meet a friendly human
       next_flow_mode: ALLOW_MANY
       return_actions: []
       next_flows: []
@@ -934,8 +1041,9 @@ service:
         - type: button
           button_id: zone_x.menu.connect
         - type: message
-          llm_gist: The person wants to meet, talk to, or be connected with a friendly
-            human at this service.
+          possible_qns:
+          - can i meet someone?
+          - can i talk to a friendly human?
       actions:
       - type: send_message
         text: What is one thing that interests you? Nothing is a valid answer too!
@@ -996,18 +1104,20 @@ service:
             - type: share_human_contact
               text: "{{ matched_server.name }} is expecting you. Message them here:
                 {{ matched_server.telegram_url }}"
-            - type: send_buttons
-              service_bound: true
-              buttons:
-              - button_id: zone_x.connect.not_responding
-                text: "{{ matched_server.name }} is not responding"
+            - type: send_message
+              text: if {{ matched_server.name }} is not responding, tell me and i
+                will find someone else.
             next_flow_mode: ALLOW_MANY
             return_actions: []
             next_flows:
             - key: service.zone_x.connect.join_group.not_responding
               trigger:
-                type: button
-                button_id: zone_x.connect.not_responding
+                type: message
+                llm_gist: The matched person is not responding or cannot be reached.
+                possible_qns:
+                - they are not responding
+                - i cannot reach them
+                - they have not replied
               actions:
               - type: release_human_match
               - type: notify_previous_human
@@ -1064,18 +1174,20 @@ service:
             - type: share_human_contact
               text: "{{ matched_server.name }} will come and meet you. Message them
                 here so you can find each other: {{ matched_server.telegram_url }}"
-            - type: send_buttons
-              service_bound: true
-              buttons:
-              - button_id: zone_x.connect.not_responding
-                text: "{{ matched_server.name }} is not responding"
+            - type: send_message
+              text: if {{ matched_server.name }} is not responding, tell me and i
+                will find someone else.
             next_flow_mode: ALLOW_MANY
             return_actions: []
             next_flows:
             - key: service.zone_x.connect.join_me.not_responding
               trigger:
-                type: button
-                button_id: zone_x.connect.not_responding
+                type: message
+                llm_gist: The matched person is not responding or cannot be reached.
+                possible_qns:
+                - they are not responding
+                - i cannot reach them
+                - they have not replied
               actions:
               - type: release_human_match
               - type: notify_previous_human
@@ -1136,8 +1248,9 @@ service:
         - type: button
           button_id: zone_x.menu.change_service
         - type: message
-          llm_gist: The person says they are actually attending another service or
-            timing.
+          possible_qns:
+          - can i switch service?
+          - i am going to a different service
       actions:
       - type: resolve_service_switch_options
         preserve_historical_attendance: true
@@ -1214,13 +1327,6 @@ service:
     - type: send_message
       text: Yes, you can still join Zone X. Service has started, so head to the venue
         entrance and ask a Zone team member to help you find a seat.
-    - type: send_buttons
-      service_bound: true
-      buttons:
-      - button_id: zone_x.menu.directions
-        text: Get directions
-      - button_id: zone_x.menu.connect
-        text: Meet a friendly human
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
@@ -1280,26 +1386,13 @@ service:
       - type: send_message
         text: Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing
           Arts Centre.
-      - type: send_buttons
-        service_bound: true
-        buttons:
-        - button_id: zone_x.one_day.directions
-          text: Get directions
+      - type: send_message_fixed
+        text: 'Map: {{ service.map_url }}'
       next_flow_mode: CHECKPOINT
       return_actions:
       - type: send_message
         text: Anything else you’d like to know before Zone X?
-      next_flows:
-      - key: service.zone_x.timestamp.one_day_before.directions
-        trigger:
-          type: button
-          button_id: zone_x.one_day.directions
-        actions:
-        - type: send_message_fixed
-          text: 'Map: {{ service.map_url }}'
-        next_flow_mode: ONE_AND_ONCE_ONLY
-        return_actions: []
-        next_flows: []
+      next_flows: []
   - key: zone_x.doors_open
     occurs_at: '2026-10-18T13:30:00+08:00'
     audience: ALL_NBNCS
@@ -1308,21 +1401,18 @@ service:
       trigger: null
       actions:
       - type: send_message
-        text: Doors are open for Zone X. Are you here with us?
-      - type: send_buttons
-        service_bound: true
-        buttons:
-        - button_id: zone_x.attendance.here
-          text: Check in to Zone X
-          payload:
-            service_key: zone_x_2026_10_18
+        text: Doors are open for Zone X. Are you here with us? Reply 'i am here' to
+          check in.
       next_flow_mode: ONE_AND_ONCE_ONLY
       return_actions: []
       next_flows:
       - key: service.zone_x.timestamp.doors_open.check_in
         trigger:
-          type: button
-          button_id: zone_x.attendance.here
+          type: message
+          possible_qns:
+          - i am here
+          - i'm here
+          - yes, i am at Zone X
         actions:
         - type: select_service_attendance
         next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1392,7 +1482,9 @@ service:
           - type: button
             button_id: zone_x.service.toilet
           - type: message
-            llm_gist: The person asks where the toilet or restroom is.
+            possible_qns:
+            - where is the toilet?
+            - where is the restroom?
         actions:
         - type: send_message
           text: The nearest toilets are on Level 4 beside the lifts. Ask a Zone team
@@ -1408,18 +1500,14 @@ service:
           - type: button
             button_id: zone_x.service.who_is_jesus
           - type: message
-            llm_gist: The person asks who Jesus is or what Christians believe about
-              Jesus.
+            possible_qns:
+            - who is Jesus?
+            - what do Christians believe about Jesus?
         actions:
         - type: send_message
           text: At NCC, we believe Jesus is the Son of God who came to reveal God’s
             love and give us new life through His death and resurrection. I can connect
             you with someone if you’d like to talk about this personally.
-        - type: send_buttons
-          service_bound: true
-          buttons:
-          - button_id: zone_x.menu.connect
-            text: Talk to someone
         next_flow_mode: ALLOW_MANY
         return_actions: []
         next_flows: []
@@ -1433,11 +1521,6 @@ service:
         - type: send_message
           text: I don’t have an approved answer for that question, but I can connect
             you with someone who can talk with you.
-        - type: send_buttons
-          service_bound: true
-          buttons:
-          - button_id: zone_x.menu.connect
-            text: Talk to someone
         next_flow_mode: ALLOW_MANY
         return_actions: []
         next_flows: []
@@ -1467,12 +1550,9 @@ service:
           type: button
           button_id: zone_x.after.connect
         actions:
-        - type: send_buttons
-          service_bound: true
-          text: I can introduce you to someone friendly.
-          buttons:
-          - button_id: zone_x.menu.connect
-            text: Meet a friendly human
+        - type: send_message
+          text: I can introduce you to someone friendly. Tell me if you would like
+            me to do that.
         next_flow_mode: ALLOW_MANY
         return_actions: []
         next_flows: []
@@ -1481,12 +1561,9 @@ service:
           type: button
           button_id: zone_x.after.ask
         actions:
-        - type: send_buttons
-          service_bound: true
-          text: A friendly human can help with your question.
-          buttons:
-          - button_id: zone_x.menu.connect
-            text: Ask a friendly human
+        - type: send_message
+          text: A friendly human can help with your question. Tell me if you would
+            like an introduction.
         next_flow_mode: ALLOW_MANY
         return_actions: []
         next_flows: []

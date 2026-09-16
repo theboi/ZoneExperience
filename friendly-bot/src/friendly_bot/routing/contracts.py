@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class PromptDTO(BaseModel):
@@ -27,8 +34,9 @@ class RoutingPromptCandidate(PromptDTO):
 
     flow_id: str = Field(min_length=1, validation_alias=AliasChoices("flow_id", "key"))
     gists: tuple[str, ...] = Field(
-        min_length=1, validation_alias=AliasChoices("gists", "gist")
+        default=(), validation_alias=AliasChoices("gists", "gist")
     )
+    possible_qns: tuple[str, ...] = ()
     context_label: str = Field(min_length=1)
     multi_intent_mode: Literal["answer", "interactive"] = "interactive"
     reply_slots: tuple[ReplyTemplateSlot, ...] = ()
@@ -40,6 +48,14 @@ class RoutingPromptCandidate(PromptDTO):
 
         return (value,) if isinstance(value, str) else value
 
+    @model_validator(mode="after")
+    def has_routing_hint(self) -> RoutingPromptCandidate:
+        """Require a semantic gist, concrete possible question, or both."""
+
+        if not self.gists and not self.possible_qns:
+            raise ValueError("routing candidate requires gists or possible_qns")
+        return self
+
     @property
     def key(self) -> str:
         """Expose the legacy key-selection name during the staged migration."""
@@ -48,9 +64,9 @@ class RoutingPromptCandidate(PromptDTO):
 
     @property
     def gist(self) -> str:
-        """Expose the first typed-routing gist for the legacy key selector."""
+        """Expose the first routing hint for the legacy key selector."""
 
-        return self.gists[0]
+        return (self.gists or self.possible_qns)[0]
 
 
 class KeySelectionRequest(PromptDTO):

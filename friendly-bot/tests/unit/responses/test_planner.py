@@ -15,38 +15,40 @@ from friendly_bot.domain.triggers import (
 from friendly_bot.responses.planner import (
     PlannedActionText,
     ReplyPlan,
-    message_gists,
+    message_routing_hints,
     plan_candidate_responses,
 )
 
 
-def test_message_gists_extracts_ordered_message_alternatives_only() -> None:
+def test_message_routing_hints_extract_semantic_and_question_alternatives() -> None:
     trigger = OnAnyOfTrigger(
         type="any_of",
         triggers=[
             OnButtonPressTrigger(type="button", button_id="menu.directions"),
             OnMessageTrigger(
-                type="message", llm_gist="asks for directions"
+                type="message",
+                llm_gist="asks for directions",
+                possible_qns=["How do I get there?"],
             ),
-            OnMessageTrigger(type="message", llm_gist="asks for a map"),
+            OnMessageTrigger(
+                type="message", possible_qns=["Can I get a map?", "Map please"]
+            ),
         ],
     )
 
-    assert message_gists(trigger) == ("asks for directions", "asks for a map")
-    assert (
-        message_gists(
-            OnAnyOfTrigger(
-                type="any_of",
-                triggers=[
-                    OnButtonPressTrigger(
-                        type="button", button_id="menu.directions"
-                    ),
-                    OnButtonPressTrigger(type="button", button_id="menu.expect"),
-                ],
-            )
-        )
-        == ()
+    assert message_routing_hints(trigger) == (
+        ("asks for directions",),
+        ("How do I get there?", "Can I get a map?", "Map please"),
     )
+    assert message_routing_hints(
+        OnAnyOfTrigger(
+            type="any_of",
+            triggers=[
+                OnButtonPressTrigger(type="button", button_id="menu.directions"),
+                OnButtonPressTrigger(type="button", button_id="menu.expect"),
+            ],
+        )
+    ) == ((), ())
 
 
 def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> None:

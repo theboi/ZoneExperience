@@ -11,6 +11,7 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
     field_validator,
+    model_validator,
 )
 
 from friendly_bot.domain.events import StableKey
@@ -27,7 +28,16 @@ class DiscussionTriggerBase(BaseModel):
 
 class OnMessageTrigger(DiscussionTriggerBase):
     type: Literal["message"]
-    llm_gist: NonEmptyText
+    llm_gist: NonEmptyText | None = None
+    possible_qns: list[NonEmptyText] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def has_routing_description(self) -> OnMessageTrigger:
+        """Require a semantic description, concrete examples, or both."""
+
+        if self.llm_gist is None and not self.possible_qns:
+            raise ValueError("message trigger requires llm_gist or possible_qns")
+        return self
 
 
 class OnButtonPressTrigger(DiscussionTriggerBase):
@@ -86,9 +96,7 @@ DiscussionTrigger = Annotated[
     Field(discriminator="type"),
 ]
 
-_trigger_adapter: TypeAdapter[DiscussionTrigger] = TypeAdapter(
-    DiscussionTrigger
-)
+_trigger_adapter: TypeAdapter[DiscussionTrigger] = TypeAdapter(DiscussionTrigger)
 
 
 def parse_trigger(data: dict[str, object]) -> DiscussionTrigger:

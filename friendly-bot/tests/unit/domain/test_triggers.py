@@ -5,10 +5,15 @@ from friendly_bot.domain.triggers import parse_trigger
 
 
 def test_registered_trigger_forms_parse_their_canonical_fields() -> None:
-    assert (
-        parse_trigger({"type": "message", "llm_gist": "Answers the question."}).type
-        == "message"
+    message = parse_trigger(
+        {
+            "type": "message",
+            "possible_qns": ["What time is Arrow?", "When does Arrow start?"],
+        }
     )
+    assert message.type == "message"
+    assert message.llm_gist is None
+    assert message.possible_qns == ["What time is Arrow?", "When does Arrow start?"]
     assert (
         parse_trigger({"type": "button", "button_id": "zone_x.menu.help"}).type
         == "button"
@@ -25,6 +30,8 @@ def test_registered_trigger_forms_parse_their_canonical_fields() -> None:
     "data",
     [
         {"type": "message", "llm_gist": ""},
+        {"type": "message", "possible_qns": []},
+        {"type": "message"},
         {"type": "button", "button_id": "Bad Button"},
         {"type": "command", "command": "start"},
         {"type": "command", "command": "/start@friendly_bot"},

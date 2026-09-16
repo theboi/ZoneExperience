@@ -9,9 +9,9 @@ from friendly_bot.domain.actions import SendMessageAction
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.templates import template_tokens, urls
 from friendly_bot.domain.triggers import (
+    DiscussionTrigger,
     OnActionEventTrigger,
     OnAnyOfTrigger,
-    DiscussionTrigger,
     OnMessageTrigger,
 )
 from friendly_bot.routing.contracts import ReplyTemplateSlot
@@ -91,17 +91,31 @@ class ReplyPlan:
         return (flow_key, action_index) in self.fallback_addresses
 
 
-def message_gists(trigger: DiscussionTrigger | None) -> tuple[str, ...]:
-    """Return ordered typed-message gists from a direct or `any_of` trigger."""
+def message_routing_hints(
+    trigger: DiscussionTrigger | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return semantic gists and concrete questions from a message-capable trigger."""
 
-    if isinstance(trigger, OnMessageTrigger):
-        return (trigger.llm_gist,)
-    if not isinstance(trigger, OnAnyOfTrigger):
-        return ()
-    return tuple(
-        child.llm_gist
-        for child in trigger.triggers
-        if isinstance(child, OnMessageTrigger)
+    message_triggers = (
+        (trigger,)
+        if isinstance(trigger, OnMessageTrigger)
+        else (
+            tuple(
+                child
+                for child in trigger.triggers
+                if isinstance(child, OnMessageTrigger)
+            )
+            if isinstance(trigger, OnAnyOfTrigger)
+            else ()
+        )
+    )
+    return (
+        tuple(
+            child.llm_gist for child in message_triggers if child.llm_gist is not None
+        ),
+        tuple(
+            question for child in message_triggers for question in child.possible_qns
+        ),
     )
 
 

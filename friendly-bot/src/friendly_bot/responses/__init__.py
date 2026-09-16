@@ -5,7 +5,7 @@ from friendly_bot.responses.planner import (
     PlannedActionText,
     ReplyPlan,
     ReplySlotBinding,
-    message_gists,
+    message_routing_hints,
     plan_candidate_responses,
 )
 
@@ -14,6 +14,6 @@ __all__ = [
     "PlannedActionText",
     "ReplyPlan",
     "ReplySlotBinding",
-    "message_gists",
+    "message_routing_hints",
     "plan_candidate_responses",
 ]

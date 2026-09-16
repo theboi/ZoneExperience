@@ -158,7 +158,11 @@
         "key": "system.global.options",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what options are available, what the bot can do, how the bot can help, or asks for a menu."
+          "possible_qns": [
+            "what can you help with?",
+            "what are my options?",
+            "show me the menu"
+          ]
         },
         "actions": [
           {
@@ -181,7 +185,11 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person asks when youth services or gatherings happen but does not name a specific service or group."
+              "possible_qns": [
+                "when are services?",
+                "when do you all gather?",
+                "what time is youth service?"
+              ]
             }
           ]
         },
@@ -199,15 +207,35 @@
         "return_actions": [],
         "next_flows": [
           {
+            "key": "system.global.menu.timings.dare",
+            "multi_intent_mode": "answer",
+            "trigger": {
+              "type": "message",
+              "possible_qns": [
+                "Dare",
+                "when is Dare?",
+                "what time is Dare?"
+              ]
+            },
+            "actions": [
+              {
+                "type": "send_message",
+                "text": "Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE."
+              }
+            ],
+            "next_flow_mode": "ALLOW_MANY",
+            "return_actions": [],
+            "next_flows": []
+          },
+          {
             "key": "system.global.menu.timings.arrow",
             "multi_intent_mode": "answer",
             "trigger": {
-              "type": "any_of",
-              "triggers": [
-                {
-                  "type": "message",
-                  "llm_gist": "The person asks for Arrow service timings."
-                }
+              "type": "message",
+              "possible_qns": [
+                "Arrow",
+                "when is Arrow?",
+                "what time is Arrow?"
               ]
             },
             "actions": [
@@ -221,16 +249,37 @@
             "next_flows": []
           },
           {
-            "key": "system.global.menu.timings.other_service",
+            "key": "system.global.menu.timings.varsity",
             "multi_intent_mode": "answer",
             "trigger": {
               "type": "message",
-              "llm_gist": "The person answers the current service-timing question with a service or group other than Arrow."
+              "possible_qns": [
+                "Varsity",
+                "when is Varsity?",
+                "what time is Varsity?"
+              ]
             },
             "actions": [
               {
                 "type": "send_message",
-                "text": "I only have Arrow timing details set up right now. Please add OTHER_SERVICE_NAME, OTHER_SERVICE_DAY, OTHER_SERVICE_START_TIME, and OTHER_SERVICE_VENUE here."
+                "text": "Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE."
+              }
+            ],
+            "next_flow_mode": "ALLOW_MANY",
+            "return_actions": [],
+            "next_flows": []
+          },
+          {
+            "key": "system.global.menu.timings.other_service",
+            "multi_intent_mode": "answer",
+            "trigger": {
+              "type": "message",
+              "llm_gist": "The person answers the current youth-group timing question with a group other than Dare, Arrow, or Varsity."
+            },
+            "actions": [
+              {
+                "type": "send_message",
+                "text": "I have timing details for Dare, Arrow, and Varsity. Which of these groups did you mean?"
               }
             ],
             "next_flow_mode": "ALLOW_MANY",
@@ -251,7 +300,11 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person asks for directions to the Star Performing Arts Centre, Star Vista, The Zone or church."
+              "possible_qns": [
+                "how do i get to The Zone?",
+                "where is The Zone?",
+                "how do i get to Star Vista?"
+              ]
             }
           ]
         },
@@ -281,7 +334,11 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person asks what to expect at The Zone, what will happen, what to wear, or whether they may come alone."
+              "possible_qns": [
+                "what should i expect?",
+                "what happens at The Zone?",
+                "can i come alone?"
+              ]
             }
           ]
         },
@@ -307,7 +364,10 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person asks what The Zone is, what this youth community is, or wants to learn about The Zone."
+              "possible_qns": [
+                "what is The Zone?",
+                "what do you mean by The Zone?"
+              ]
             }
           ]
         },
@@ -333,7 +393,10 @@
             },
             {
               "type": "message",
-              "llm_gist": "The person wants to get connected with The Zone or asks for a connection link."
+              "possible_qns": [
+                "how do i get connected?",
+                "can i get the connect link?"
+              ]
             }
           ]
         },
@@ -348,11 +411,34 @@
         "next_flows": []
       },
       {
+        "key": "system.global.schedule.dare",
+        "multi_intent_mode": "answer",
+        "trigger": {
+          "type": "message",
+          "possible_qns": [
+            "when is Dare?",
+            "what time is Dare service?"
+          ]
+        },
+        "actions": [
+          {
+            "type": "send_message",
+            "text": "Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE."
+          }
+        ],
+        "next_flow_mode": "ALLOW_MANY",
+        "return_actions": [],
+        "next_flows": []
+      },
+      {
         "key": "system.global.schedule.arrow",
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person explicitly asks when Arrow services or gatherings happen."
+          "possible_qns": [
+            "when is Arrow?",
+            "what time is Arrow service?"
+          ]
         },
         "actions": [
           {
@@ -365,11 +451,35 @@
         "next_flows": []
       },
       {
+        "key": "system.global.schedule.varsity",
+        "multi_intent_mode": "answer",
+        "trigger": {
+          "type": "message",
+          "possible_qns": [
+            "when is Varsity?",
+            "what time is Varsity service?"
+          ]
+        },
+        "actions": [
+          {
+            "type": "send_message",
+            "text": "Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE."
+          }
+        ],
+        "next_flow_mode": "ALLOW_MANY",
+        "return_actions": [],
+        "next_flows": []
+      },
+      {
         "key": "system.global.schedule.next_gathering",
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether there is a youth service today, tomorrow, this week, or asks for the next gathering date."
+          "possible_qns": [
+            "is there youth service today?",
+            "when is the next gathering?",
+            "is there service this week?"
+          ]
         },
         "actions": [
           {
@@ -386,7 +496,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks how long a youth service, gathering, or event lasts."
+          "possible_qns": [
+            "how long is service?",
+            "what time does youth service end?"
+          ]
         },
         "actions": [
           {
@@ -403,7 +516,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether a service or event is cancelled, moved, postponed, or still happening."
+          "possible_qns": [
+            "is service still happening?",
+            "has service been cancelled?"
+          ]
         },
         "actions": [
           {
@@ -420,7 +536,11 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what NCC is, what NCC stands for, or whether The Zone is part of a church."
+          "possible_qns": [
+            "what is NCC?",
+            "what does NCC stand for?",
+            "is The Zone part of a church?"
+          ]
         },
         "actions": [
           {
@@ -437,7 +557,11 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks who The Zone is for, the age range, whether it is for students, or whether they are allowed to come."
+          "possible_qns": [
+            "who is The Zone for?",
+            "am i too old for The Zone?",
+            "can secondary school students come?"
+          ]
         },
         "actions": [
           {
@@ -454,7 +578,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they may come if they are not Christian, unsure about faith, or only want to check The Zone out."
+          "possible_qns": [
+            "can i come if i am not Christian?",
+            "can i come even if i am not sure about faith?"
+          ]
         },
         "actions": [
           {
@@ -471,7 +598,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks why they should come, what the point of The Zone is, or what makes it different."
+          "possible_qns": [
+            "why should i come to The Zone?",
+            "what is the point of The Zone?"
+          ]
         },
         "actions": [
           {
@@ -488,7 +618,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether The Zone, a service, or an event costs money."
+          "possible_qns": [
+            "does The Zone cost money?",
+            "do i need to pay for service?"
+          ]
         },
         "actions": [
           {
@@ -505,7 +638,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what to do on their first visit, where to go when they arrive, or how check-in works."
+          "possible_qns": [
+            "what do i do when i arrive for the first time?",
+            "where do i go for check-in?"
+          ]
         },
         "actions": [
           {
@@ -522,7 +658,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they need to register, buy a ticket, book a place, or check in before coming."
+          "possible_qns": [
+            "do i need to register?",
+            "do i need to buy a ticket?"
+          ]
         },
         "actions": [
           {
@@ -539,7 +678,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they may bring a friend, sibling, parent, or guardian."
+          "possible_qns": [
+            "can i bring a friend?",
+            "can my sibling come?"
+          ]
         },
         "actions": [
           {
@@ -556,7 +698,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they can still come if they are late, the service has started, or they missed the beginning."
+          "possible_qns": [
+            "can i still come if i am late?",
+            "what if service has already started?"
+          ]
         },
         "actions": [
           {
@@ -573,7 +718,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks how to get to The Zone or Star Vista by bus."
+          "possible_qns": [
+            "how do i get to The Zone by bus?",
+            "which bus goes to Star Vista?"
+          ]
         },
         "actions": [
           {
@@ -590,7 +738,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about driving, parking, a drop-off point, or ride-hailing to The Zone or Star Vista."
+          "possible_qns": [
+            "where can i park?",
+            "where should my Grab drop me off?"
+          ]
         },
         "actions": [
           {
@@ -607,7 +758,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks which entrance, level, room, or meeting point to use at the venue."
+          "possible_qns": [
+            "which entrance should i use?",
+            "what level is The Zone on?"
+          ]
         },
         "actions": [
           {
@@ -624,7 +778,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about wheelchair access, lifts, mobility access, or accessibility support."
+          "possible_qns": [
+            "is the venue wheelchair accessible?",
+            "is there a lift?"
+          ]
         },
         "actions": [
           {
@@ -641,7 +798,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what happens during a service, the programme order, or what a typical gathering is like beyond the general expectation answer."
+          "possible_qns": [
+            "what happens during service?",
+            "what is the programme like?"
+          ]
         },
         "actions": [
           {
@@ -658,7 +818,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what language a service is in or whether interpretation is available."
+          "possible_qns": [
+            "what language is service in?",
+            "is there translation?"
+          ]
         },
         "actions": [
           {
@@ -675,7 +838,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether it will be loud, whether there is a quiet space, or about sensory needs."
+          "possible_qns": [
+            "will it be loud?",
+            "is there a quiet space?"
+          ]
         },
         "actions": [
           {
@@ -692,7 +858,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they will be forced to speak, join in, share personal details, or do anything uncomfortable."
+          "possible_qns": [
+            "will i have to speak?",
+            "do i have to join in?"
+          ]
         },
         "actions": [
           {
@@ -709,7 +878,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks to talk to a real person, meet someone, get help from a leader, or be introduced to people outside a current live service."
+          "possible_qns": [
+            "can i talk to a real person?",
+            "can i meet someone from The Zone?"
+          ]
         },
         "actions": [
           {
@@ -726,7 +898,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks for The Zone social media, Instagram, Telegram channel, website, or online updates."
+          "possible_qns": [
+            "what is The Zone instagram?",
+            "do you have a Telegram channel?"
+          ]
         },
         "actions": [
           {
@@ -743,7 +918,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks how to volunteer, serve, help out, or join a team."
+          "possible_qns": [
+            "how can i volunteer?",
+            "can i join a team?"
+          ]
         },
         "actions": [
           {
@@ -760,7 +938,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks who they can contact after a service, after an event, or later in the week."
+          "possible_qns": [
+            "who can i contact after service?",
+            "can i talk to someone later this week?"
+          ]
         },
         "actions": [
           {
@@ -777,7 +958,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks who Jesus is or what Christians believe about Jesus."
+          "possible_qns": [
+            "who is Jesus?",
+            "what do Christians believe about Jesus?"
+          ]
         },
         "actions": [
           {
@@ -794,7 +978,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks what Christians believe, what Christianity is, or what the church teaches."
+          "possible_qns": [
+            "what is Christianity?",
+            "what do Christians believe?"
+          ]
         },
         "actions": [
           {
@@ -811,7 +998,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks how to become a Christian, follow Jesus, or begin faith."
+          "possible_qns": [
+            "how do i become a Christian?",
+            "how do i follow Jesus?"
+          ]
         },
         "actions": [
           {
@@ -828,7 +1018,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about reading the Bible, baptism, discipleship, or growing in faith."
+          "possible_qns": [
+            "how do i start reading the Bible?",
+            "what is baptism?"
+          ]
         },
         "actions": [
           {
@@ -845,7 +1038,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks for prayer, asks someone to pray with them, or asks how they can pray."
+          "possible_qns": [
+            "can you pray for me?",
+            "how do i pray?"
+          ]
         },
         "actions": [
           {
@@ -862,7 +1058,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person has a personal faith question or asks to speak privately with someone about faith."
+          "possible_qns": [
+            "can i ask someone a private faith question?",
+            "can i talk to someone about faith?"
+          ]
         },
         "actions": [
           {
@@ -879,7 +1078,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person says they are struggling, anxious, lonely, grieving, or need someone to talk to, without describing immediate danger or self-harm."
+          "possible_qns": [
+            "i feel really lonely",
+            "can i talk to someone about something personal?"
+          ]
         },
         "actions": [
           {
@@ -896,7 +1098,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks where the toilet or restroom is at Star Vista or The Zone venue."
+          "possible_qns": [
+            "where is the toilet?",
+            "where is the restroom?"
+          ]
         },
         "actions": [
           {
@@ -913,7 +1118,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks where to get food, drinks, water, refreshments, or whether food is provided."
+          "possible_qns": [
+            "is there food?",
+            "where can i get water?"
+          ]
         },
         "actions": [
           {
@@ -930,7 +1138,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about Wi-Fi, charging a phone, plugs, or power banks at the venue."
+          "possible_qns": [
+            "is there wifi?",
+            "can i charge my phone?"
+          ]
         },
         "actions": [
           {
@@ -947,7 +1158,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about something they lost, found property, or the lost-and-found process."
+          "possible_qns": [
+            "i lost something",
+            "where is lost and found?"
+          ]
         },
         "actions": [
           {
@@ -964,7 +1178,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person needs first aid, feels unwell, asks for medical help, or needs a Zone team member at the venue."
+          "possible_qns": [
+            "i do not feel well",
+            "where can i get first aid?"
+          ]
         },
         "actions": [
           {
@@ -981,7 +1198,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks how their information is used, whether their details are private, or asks about data privacy."
+          "possible_qns": [
+            "is my information private?",
+            "what do you do with my details?"
+          ]
         },
         "actions": [
           {
@@ -998,7 +1218,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether photos or videos are taken, posted, or whether they can opt out."
+          "possible_qns": [
+            "are photos taken?",
+            "can i opt out of photos?"
+          ]
         },
         "actions": [
           {
@@ -1015,7 +1238,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks whether they need parental consent, whether a parent can come, or about guardian requirements."
+          "possible_qns": [
+            "do i need parental consent?",
+            "can my parent come with me?"
+          ]
         },
         "actions": [
           {
@@ -1032,7 +1258,10 @@
         "multi_intent_mode": "answer",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about behaviour rules, safeguarding, reporting a concern, or how The Zone keeps people safe."
+          "possible_qns": [
+            "what are the behaviour rules?",
+            "how do you keep people safe?"
+          ]
         },
         "actions": [
           {
@@ -1065,7 +1294,10 @@
         "key": "system.global.community.small_group",
         "trigger": {
           "type": "message",
-          "llm_gist": "The person asks about joining a small group, cell group, connect group, or regular community group."
+          "possible_qns": [
+            "how do i join a small group?",
+            "do you have cell groups?"
+          ]
         },
         "actions": [
           {

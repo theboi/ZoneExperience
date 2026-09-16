@@ -17,7 +17,7 @@ from friendly_bot.responses.planner import (
     CandidateResponsePlan,
     PlannedActionText,
     ReplyPlan,
-    message_gists,
+    message_routing_hints,
     plan_candidate_responses,
 )
 from friendly_bot.routing.contracts import (
@@ -66,12 +66,13 @@ class RoutingCandidate:
     multi_intent_mode: Literal["answer", "interactive"]
     response_plan: CandidateResponsePlan
     flow_version_id: UUID | None = None
+    possible_qns: tuple[str, ...] = ()
 
     @property
     def gist(self) -> str:
-        """Keep the staged key-selection transport on the first typed gist."""
+        """Keep the staged key-selection transport on the first routing hint."""
 
-        return self.gists[0]
+        return (self.gists or self.possible_qns)[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +143,8 @@ class CandidateAssembler:
                     "open selection parent is absent from its definition"
                 )
             for child in parent.next_flows:
-                gists = message_gists(child.trigger)
-                if not gists:
+                gists, possible_qns = message_routing_hints(child.trigger)
+                if not gists and not possible_qns:
                     continue
                 key = str(child.key)
                 if key in seen_keys:
@@ -153,6 +154,7 @@ class CandidateAssembler:
                     RoutingCandidate(
                         key=key,
                         gists=gists,
+                        possible_qns=possible_qns,
                         source=_source_label(selection),
                         is_current=selection.is_current,
                         service_id=selection.service_id,
@@ -246,6 +248,7 @@ class ConstrainedRouter:
                     RoutingPromptCandidate(
                         flow_id=candidate.key,
                         gists=candidate.gists,
+                        possible_qns=candidate.possible_qns,
                         context_label=candidate.source,
                         multi_intent_mode=candidate.multi_intent_mode,
                         reply_slots=candidate.response_plan.reply_slots,
