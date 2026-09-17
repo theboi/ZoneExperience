@@ -182,7 +182,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "actions": [
                     {
                         "type": "send_message_llm",
-                        "source": "The Zone is New Creation Church's energy-packed youth ministry. It reaches out to all secondary and tertiary students as well as NSFs in community and in motion for the grace revolution. Centred on the foundation of the Word of God, the ministry's call is the message of God's unmerited, undeserved favour. The Zone is a place for building godly relationships and growing in revelation of God's grace. The Zone is also a place to meet people, explore faith, and grow in community. Its additional approved purpose statement is THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs aged 13-25: DARE is for secondary school students aged 13-17; Arrow is for post-secondary school students and NSFs aged 17-23; Varsity, also called V, is for university students. If someone asks for service times without naming a group, tell them that there are DARE, Arrow, and Varsity services with distinct schedules and ask which group they mean. If a message only names DARE, Arrow, Varsity, or V, give that group's schedule. DARE is a place to discover purpose and meet authentic friends who will never let people walk alone. #DAREishome. DARE's Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in a new season; people can come as they are and discover Jesus' perfect love. #ArrowIsFamily. Arrow's Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE. Varsity, or V, is a community for university students that values relationships with Jesus and each other. Its Instagram is @nccvarsity. Varsity services are on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE. The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Its event calendar or link is UPCOMING_EVENTS_LINK. A typical service lasts SERVICE_DURATION; this may differ for the service someone means. For the latest cancellation or service-status updates, use OFFICIAL_UPDATES_LINK or contact OFFICIAL_UPDATES_CONTACT. People are welcome at The Zone whether or not they are Christian; they can ask questions and take things at their own pace. The Zone costs COST_OR_FREE_DETAILS. Event-specific price, payment, or financial-help details still need to be added.",
+                        "source": """The Zone is New Creation Church's energy-packed youth ministry. It reaches out to all secondary and tertiary students as well as NSFs in community and in motion for the grace revolution. Centred on the foundation of the Word of God, the ministry's call is the message of God's unmerited, undeserved favour. The Zone is a place for building godly relationships and growing in revelation of God's grace. The Zone is also a place to meet people, explore faith, and grow in community. Its additional approved purpose statement is THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs aged 13-25: DARE is for secondary school students aged 13-17; Arrow is for post-secondary school students and NSFs aged 17-23; Varsity, also called V, is for university students. If someone asks for service times without naming a group, tell them that there are DARE, Arrow, and Varsity services with distinct schedules and ask which group they mean. If a message only names DARE, Arrow, Varsity, or V, give that group's schedule. DARE is a place to discover purpose and meet authentic friends who will never let people walk alone. #DAREishome. DARE's Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in a new season; people can come as they are and discover Jesus' perfect love. #ArrowIsFamily. Arrow's Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE. Varsity, or V, is a community for university students that values relationships with Jesus and each other. Its Instagram is @nccvarsity. Varsity services are on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE. The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Its event calendar or link is UPCOMING_EVENTS_LINK. A typical service lasts SERVICE_DURATION; this may differ for the service someone means. For the latest cancellation or service-status updates, use OFFICIAL_UPDATES_LINK or contact OFFICIAL_UPDATES_CONTACT. People are welcome at The Zone whether or not they are Christian; they can ask questions and take things at their own pace. The Zone costs COST_OR_FREE_DETAILS. Event-specific price, payment, or financial-help details still need to be added.""",
                     }
                 ],
                 "next_flow_mode": "ALLOW_MANY",
@@ -190,7 +190,30 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "next_flows": [],
             },
             {
-                "key": "system.global.menu.directions",
+                "key": "system.global.information.zone.timings",
+                "multi_intent_mode": "answer",
+                "trigger": {
+                    "type": "any_of",
+                    "triggers": [
+                        {"type": "button", "button_id": "system.global.menu.timings"},
+                        {
+                            "type": "message",
+                            "llm_gist": "The person asks about anything related to The Zone, or one of its youth groups DARE, Arrow or Varsity/V.",
+                        },
+                    ],
+                },
+                "actions": [
+                    {
+                        "type": "send_message_fixed",
+                        "text": "DARE: for secondary school students aged 13-17yo\nArrow: for post-secondary school students and NSFs aged 17-23yo\nVarsity: for university students",
+                    }
+                ],
+                "next_flow_mode": "ALLOW_MANY",
+                "return_actions": [],
+                "next_flows": [],
+            },
+            {
+                "key": "system.global.information.directions.to_star",
                 "multi_intent_mode": "answer",
                 "trigger": {
                     "type": "any_of",
@@ -201,11 +224,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                         },
                         {
                             "type": "message",
-                            "possible_qns": [
-                                "how do i get to The Zone?",
-                                "where is The Zone?",
-                                "how do i get to Star Vista?",
-                            ],
+                            "llm_gist": "The person is lost or asks for directions to Star Vista/church"
                         },
                     ],
                 },
@@ -222,6 +241,44 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "next_flow_mode": "ALLOW_MANY",
                 "return_actions": [],
                 "next_flows": [],
+            },
+            {
+                "key": "system.global.information.directions.within_star",
+                "multi_intent_mode": "answer",
+                "trigger": {
+                    "type": "message",
+                    "llm_gist": "The person asks for directions within Star Vista/church"
+                },
+                "actions": [
+                    {
+                        "type": "send_message_paraphrased",
+                        "text": "Once you've reached Star Vista, head to Level 5! (the lift only brings you to Level 3, then you need to take the escalators). Wheelchair assistance is available upon request.",
+                    },
+                ],
+                "next_flow_mode": "ALLOW_MANY",
+                "return_actions": [],
+                "next_flows": [],
+            },
+            {
+                "key": "system.global.information.handicap_assistance",
+                "multi_intent_mode": "answer",
+                "trigger": {
+                    "type": "message",
+                    "llm_gist": "The person asks about/for accessibility/handicap assistance."
+                },
+                "actions": [
+                    {
+                        "type": "send_message_paraphrased",
+                        "text": "If you need help getting to service, let me know again to confirm and I will get you in contact with someone who can help!",
+                    },
+                ],
+                "next_flow_mode": "ALLOW_MANY",
+                "return_actions": [],
+                "next_flows": [
+                    # {
+                    #     "key": "system.global.information.handicap_assistance.confirm",
+                    # }
+                ],
             },
             {
                 "key": "system.global.menu.expect",
