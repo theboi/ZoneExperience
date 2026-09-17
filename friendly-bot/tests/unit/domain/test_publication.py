@@ -129,18 +129,31 @@ def test_timestamp_root_is_automatic_and_may_use_a_noncheckpoint_mode() -> None:
         validate_for_publication(root, SCHEMA, RootKind.TIMESTAMP)
 
 
-def test_checkpoint_requires_a_child_and_other_modes_reject_return_actions() -> None:
-    """Breaks if checkpoint return semantics become structurally invalid."""
+def test_checkpoint_may_return_without_local_children() -> None:
+    """A checkpoint may resume at its owning event or global options."""
 
-    no_child = valid_system_checkpoint()
-    no_child.next_flows = []
+    checkpoint = valid_timestamp_root()
+    checkpoint.next_flow_mode = NextFlowMode.CHECKPOINT
+    checkpoint.return_actions = [
+        parse_action({"type": "send_message", "text": "What else can I help with?"})
+    ]
+
+    published = validate_for_publication(checkpoint, SCHEMA, RootKind.TIMESTAMP)
+
+    assert published.document["next_flows"] == []
+    assert published.document["return_actions"] == [
+        {"type": "send_message", "text": "What else can I help with?"}
+    ]
+
+
+def test_non_checkpoint_modes_reject_return_actions() -> None:
+    """Only checkpoints can return to their owning event or global options."""
+
     non_checkpoint = valid_timestamp_root()
     non_checkpoint.return_actions = [
         parse_action({"type": "send_message", "text": "Cannot return here."})
     ]
 
-    with pytest.raises(FlowPublicationError):
-        validate_for_publication(no_child, SCHEMA, RootKind.SYSTEM)
     with pytest.raises(FlowPublicationError):
         validate_for_publication(non_checkpoint, SCHEMA, RootKind.TIMESTAMP)
 
@@ -433,9 +446,7 @@ def test_flow_defaults_to_interactive_multi_intent_mode() -> None:
             next_flows=[
                 DiscussionFlow(
                     key="system.answer.with_child.follow_up",
-                    trigger=parse_trigger(
-                        {"type": "message", "llm_gist": "follow up"}
-                    ),
+                    trigger=parse_trigger({"type": "message", "llm_gist": "follow up"}),
                     next_flow_mode=NextFlowMode.ALLOW_MANY,
                 )
             ],

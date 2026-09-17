@@ -28,8 +28,8 @@ from friendly_bot.domain.flows import (
 )
 from friendly_bot.domain.templates import TEMPLATE_TOKEN_PATTERN
 from friendly_bot.domain.triggers import (
-    OnActionEventTrigger,
     DiscussionTrigger,
+    OnActionEventTrigger,
     parse_trigger,
 )
 
@@ -227,8 +227,6 @@ def _validate_node_shape(node: DiscussionFlow, *, is_root: bool) -> None:
     if not is_root and node.trigger is None:
         raise FlowPublicationError(f"non-root flow {node.key} requires a trigger")
     _validate_trigger(node.trigger, flow_key=node.key)
-    if node.next_flow_mode is NextFlowMode.CHECKPOINT and not node.next_flows:
-        raise FlowPublicationError(f"checkpoint flow {node.key} requires a child")
     if node.next_flow_mode is not NextFlowMode.CHECKPOINT and node.return_actions:
         raise FlowPublicationError(
             f"flow {node.key} may only declare return actions at a checkpoint"
@@ -249,7 +247,9 @@ def _validate_answer_flow(node: DiscussionFlow) -> None:
     if node.next_flows:
         raise FlowPublicationError(f"answer flow {node.key} may not have children")
     if node.return_actions:
-        raise FlowPublicationError(f"answer flow {node.key} may not have return actions")
+        raise FlowPublicationError(
+            f"answer flow {node.key} may not have return actions"
+        )
     if not all(isinstance(action, answer_action_types) for action in node.actions):
         raise FlowPublicationError(
             f"answer flow {node.key} contains a non-presentation action"
