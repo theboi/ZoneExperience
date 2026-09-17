@@ -213,7 +213,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "next_flows": [],
             },
             {
-                "key": "system.global.information.directions.to_star",
+                "key": "system.global.information.directions.star",
                 "multi_intent_mode": "answer",
                 "trigger": {
                     "type": "any_of",
@@ -224,14 +224,14 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                         },
                         {
                             "type": "message",
-                            "llm_gist": "The person is lost or asks for directions to Star Vista/church"
+                            "llm_gist": "The person is lost or asks for directions to/within Star Vista/church"
                         },
                     ],
                 },
                 "actions": [
                     {
-                        "type": "send_message_paraphrased",
-                        "text": "Our services are held at Star Vista! Take the MRT to Buona Vista and follow the signs!",
+                        "type": "send_message_llm",
+                        "source": "Our services are held at Star Vista! Take the MRT to Buona Vista and follow the signs! Once you've reached Star Vista, head to Level 5! (the lift only brings you to Level 3, then you need to take the escalators). Wheelchair assistance is available upon request.",
                     },
                     {
                         "type": "send_message_fixed",
@@ -242,23 +242,23 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "return_actions": [],
                 "next_flows": [],
             },
-            {
-                "key": "system.global.information.directions.within_star",
-                "multi_intent_mode": "answer",
-                "trigger": {
-                    "type": "message",
-                    "llm_gist": "The person asks for directions within Star Vista/church"
-                },
-                "actions": [
-                    {
-                        "type": "send_message_paraphrased",
-                        "text": "Once you've reached Star Vista, head to Level 5! (the lift only brings you to Level 3, then you need to take the escalators). Wheelchair assistance is available upon request.",
-                    },
-                ],
-                "next_flow_mode": "ALLOW_MANY",
-                "return_actions": [],
-                "next_flows": [],
-            },
+            # {
+            #     "key": "system.global.information.directions.within_star",
+            #     "multi_intent_mode": "answer",
+            #     "trigger": {
+            #         "type": "message",
+            #         "llm_gist": "The person asks for directions within Star Vista/church"
+            #     },
+            #     "actions": [
+            #         {
+            #             "type": "send_message_paraphrased",
+            #             "text": "",
+            #         },
+            #     ],
+            #     "next_flow_mode": "ALLOW_MANY",
+            #     "return_actions": [],
+            #     "next_flows": [],
+            # },
             {
                 "key": "system.global.information.handicap_assistance",
                 "multi_intent_mode": "answer",
