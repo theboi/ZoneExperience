@@ -62,7 +62,8 @@ system_global_root:
   next_flow_mode: CHECKPOINT
   return_actions:
   - type: send_message_paraphrased
-    text: Is there anything else I can help you with? (you can ask me any question!)
+    text: Is there anything else I can help you with? You can ask me anything and
+      I will try my best to answer you!
   - type: send_buttons
     service_bound: false
     buttons:
@@ -85,6 +86,29 @@ system_global_root:
     actions:
     - type: return_to_nearest_checkpoint
     next_flow_mode: ONE_AND_ONCE_ONLY
+    return_actions: []
+    next_flows: []
+  - key: system.global.thank_you
+    trigger:
+      type: message
+      llm_gist: The person thanks you.
+    actions:
+    - type: send_message_paraphrased
+      text: You're welcome!
+    next_flow_mode: ONE_AND_ONCE_ONLY
+    return_actions: []
+    next_flows: []
+  - key: system.global.possible_options
+    trigger:
+      type: message
+      possible_qns:
+      - what can you do/help with?
+      - what are my options?
+      - show me the menu
+    actions:
+    - type: send_message_paraphrased
+      text: You can ask me anything and I will try my best to answer you!
+    next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
   - key: system.global.safety
@@ -139,19 +163,24 @@ system_global_root:
       next_flow_mode: ONE_AND_ONCE_ONLY
       return_actions: []
       next_flows: []
-  - key: system.global.options
+  - key: system.global.information.ncc
+    multi_intent_mode: answer
     trigger:
       type: message
-      possible_qns:
-      - what can you help with?
-      - what are my options?
-      - show me the menu
+      llm_gist: The person asks about anything related to New Creation Church (NCC)
+        that is not specifically about its youth ministry, The Zone.
     actions:
-    - type: return_to_nearest_checkpoint
+    - type: send_message_llm
+      source: At New Creation Church, we believe we are God's beloved. He demonstrated
+        this by freely giving up heaven's best, His only Son Jesus, for you and me.
+        When we catch a revelation of this truth, we are transformed by His grace
+        from the inside out. That's the beauty of believing and living in our heavenly
+        Father's love and grace! No matter who you are or where you come from, there's
+        always a place for you in our church family!
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
-  - key: system.global.information
+  - key: system.global.information.zone
     multi_intent_mode: answer
     trigger:
       type: any_of
@@ -161,34 +190,30 @@ system_global_root:
       - type: button
         button_id: system.global.menu.zone
       - type: message
-        llm_gist: The person asks about The Zone, New Creation Church or NCC, DARE,
-          Arrow, Varsity or V, which youth group is for them, youth-service times,
-          the next gathering, service duration, service status, cost, attending without
-          being Christian, or The Zone's purpose; this also handles a reply that names
-          DARE, Arrow, Varsity, or V after a youth-group clarification.
+        llm_gist: The person asks about anything related to The Zone, or one of its
+          youth groups DARE, Arrow or Varsity/V.
     actions:
     - type: send_message_llm
-      source: 'NCC means New Creation Church. NCC''s approved description is NCC_DESCRIPTION.
-        The Zone is New Creation Church''s energy-packed youth ministry. It reaches
-        out to all secondary and tertiary students as well as full-time national servicemen
-        in community and in motion for the grace revolution. Centred on the foundation
-        of the Word of God, the ministry''s call is the message of God''s unmerited,
-        undeserved favour. The Zone is a place for building godly relationships and
-        growing in revelation of God''s grace. The Zone is also a place to meet people,
-        explore faith, and grow in community. Its additional approved purpose statement
-        is THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs
-        aged 13-25: DARE is for secondary school students aged 13-17; Arrow is for
-        post-secondary school students and NSFs aged 17-23; Varsity, also called V,
-        is for university students. If someone asks for service times without naming
-        a group, tell them that there are DARE, Arrow, and Varsity services with distinct
-        schedules and ask which group they mean. If a message only names DARE, Arrow,
-        Varsity, or V, give that group''s schedule. DARE is a place to discover purpose
-        and meet authentic friends who will never let people walk alone. #DAREishome.
-        DARE''s Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors
-        open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and
-        ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in
-        a new season; people can come as they are and discover Jesus'' perfect love.
-        #ArrowIsFamily. Arrow''s Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY.
+      source: 'The Zone is New Creation Church''s energy-packed youth ministry. It
+        reaches out to all secondary and tertiary students as well as NSFs in community
+        and in motion for the grace revolution. Centred on the foundation of the Word
+        of God, the ministry''s call is the message of God''s unmerited, undeserved
+        favour. The Zone is a place for building godly relationships and growing in
+        revelation of God''s grace. The Zone is also a place to meet people, explore
+        faith, and grow in community. Its additional approved purpose statement is
+        THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs aged
+        13-25: DARE is for secondary school students aged 13-17; Arrow is for post-secondary
+        school students and NSFs aged 17-23; Varsity, also called V, is for university
+        students. If someone asks for service times without naming a group, tell them
+        that there are DARE, Arrow, and Varsity services with distinct schedules and
+        ask which group they mean. If a message only names DARE, Arrow, Varsity, or
+        V, give that group''s schedule. DARE is a place to discover purpose and meet
+        authentic friends who will never let people walk alone. #DAREishome. DARE''s
+        Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors open at
+        DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends
+        at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in a new
+        season; people can come as they are and discover Jesus'' perfect love. #ArrowIsFamily.
+        Arrow''s Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY.
         Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME,
         and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE. Varsity, or V,
         is a community for university students that values relationships with Jesus

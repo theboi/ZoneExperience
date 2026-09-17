@@ -13,7 +13,11 @@ from friendly_bot.app import (
     load_system_global_seed,
     load_zone_x_seed,
 )
-from friendly_bot.domain.actions import SendButtonsAction, SendMessageLlmAction
+from friendly_bot.domain.actions import (
+    SendButtonsAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
+)
 from friendly_bot.domain.triggers import (
     OnAnyOfTrigger,
     OnButtonPressTrigger,
@@ -39,7 +43,10 @@ def test_system_root_sends_its_prompt_when_opened() -> None:
     }
     assert root["return_actions"][0] == {
         "type": "send_message_paraphrased",
-        "text": "Is there anything else I can help you with? (you can ask me any question!)",
+        "text": (
+            "Is there anything else I can help you with? You can ask me anything "
+            "and I will try my best to answer you!"
+        ),
     }
 
 
@@ -69,14 +76,15 @@ def test_system_root_offers_each_supported_action_as_a_button() -> None:
     ]
 
 
-def test_system_root_has_one_source_grounded_youth_information_flow() -> None:
-    """Common youth-group information is one root answer with one factual source."""
+def test_system_root_has_source_grounded_ncc_and_youth_information_flows() -> None:
+    """NCC and youth information each have a distinct source-grounded root answer."""
 
     root = load_system_global_seed(SYSTEM_SEED_PATH).root
     root_keys = {str(flow.key) for flow in root.next_flows}
 
     assert {
-        "system.global.information",
+        "system.global.information.ncc",
+        "system.global.information.zone",
         "system.global.travel.drive",
         "system.global.community.small_group",
         "system.global.faith.follow_jesus",
@@ -88,50 +96,64 @@ def test_system_root_has_one_source_grounded_youth_information_flow() -> None:
         for key in root_keys
     )
 
-    information = next(
-        flow for flow in root.next_flows if flow.key == "system.global.information"
+    ncc_information = next(
+        flow for flow in root.next_flows if flow.key == "system.global.information.ncc"
     )
-    assert isinstance(information.trigger, OnAnyOfTrigger)
+    assert isinstance(ncc_information.trigger, OnMessageTrigger)
+    assert ncc_information.trigger.llm_gist == (
+        "The person asks about anything related to New Creation Church (NCC) that is "
+        "not specifically about its youth ministry, The Zone."
+    )
+    assert len(ncc_information.actions) == 1
+    assert isinstance(ncc_information.actions[0], SendMessageLlmAction)
+    assert "we are God's beloved" in ncc_information.actions[0].source
+    assert not ncc_information.next_flows
+
+    zone_information = next(
+        flow for flow in root.next_flows if flow.key == "system.global.information.zone"
+    )
+    assert isinstance(zone_information.trigger, OnAnyOfTrigger)
     assert any(
         isinstance(trigger, OnButtonPressTrigger)
         and trigger.button_id == "system.global.menu.zone"
-        for trigger in information.trigger.triggers
+        for trigger in zone_information.trigger.triggers
     )
     assert any(
         isinstance(trigger, OnButtonPressTrigger)
         and trigger.button_id == "system.global.menu.timings"
-        for trigger in information.trigger.triggers
+        for trigger in zone_information.trigger.triggers
     )
     message_trigger = next(
         trigger
-        for trigger in information.trigger.triggers
+        for trigger in zone_information.trigger.triggers
         if isinstance(trigger, OnMessageTrigger)
     )
     assert message_trigger.llm_gist == (
-        "The person asks about The Zone, New Creation Church or NCC, DARE, Arrow, "
-        "Varsity or V, which youth group is for them, youth-service times, the next "
-        "gathering, service duration, service status, cost, attending without being "
-        "Christian, or The Zone's purpose; this also handles a reply that names "
-        "DARE, Arrow, Varsity, or V after a youth-group clarification."
+        "The person asks about anything related to The Zone, or one of its youth groups "
+        "DARE, Arrow or Varsity/V."
     )
-    assert len(information.actions) == 1
-    assert isinstance(information.actions[0], SendMessageLlmAction)
-    assert "NCC means New Creation Church." in information.actions[0].source
-    assert "DARE_SERVICE_DAY" in information.actions[0].source
-    assert "VARSITY_SERVICE_VENUE" in information.actions[0].source
-    assert not information.next_flows
+    assert len(zone_information.actions) == 1
+    assert isinstance(zone_information.actions[0], SendMessageLlmAction)
+    assert "DARE_SERVICE_DAY" in zone_information.actions[0].source
+    assert "VARSITY_SERVICE_VENUE" in zone_information.actions[0].source
+    assert not zone_information.next_flows
 
 
-def test_system_root_options_question_reopens_the_same_button_menu() -> None:
-    """A typed request for options must not depend on an undocumented response."""
+def test_system_root_options_question_has_an_explicit_answer() -> None:
+    """A typed request for options has an explicit configured response."""
 
     root = load_system_global_seed(SYSTEM_SEED_PATH).root
     options_flow = next(
-        flow for flow in root.next_flows if flow.key == "system.global.options"
+        flow for flow in root.next_flows if flow.key == "system.global.possible_options"
     )
 
     assert isinstance(options_flow.trigger, OnMessageTrigger)
     assert "what are my options?" in options_flow.trigger.possible_qns
+    assert len(options_flow.actions) == 1
+    assert isinstance(options_flow.actions[0], SendMessageParaphrasedAction)
+    assert options_flow.actions[0].text == (
+        "You can ask me anything and I will try my best to answer you!"
+    )
     for flow in root.next_flows:
         if not str(flow.key).startswith("system.global.menu."):
             continue
