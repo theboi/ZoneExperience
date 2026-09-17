@@ -49,7 +49,12 @@ _KEY_SELECTION_INSTRUCTION = (
     "Its value must be one of allowed_keys. Return no prose."
 )
 _MULTI_INTENT_RESPONSE_INSTRUCTION = (
-    "Return only a JSON object. First determine the user's intended request from "
+    "Return only one JSON object with exactly one of these shapes: "
+    '{"kind":"matches","matches":[...]} when one or more flows are selected; '
+    'or {"kind":"terminal","terminal":"no_match"} or '
+    '{"kind":"terminal","terminal":"clarify_ambiguous_context"} '
+    "when no flow is selected. Do not omit the required matches or terminal field, "
+    "and do not add any field. First determine the user's intended request from "
     "the current message. Choose a configured flow only when the message "
     "explicitly requests the answer or action in its gist or possible_qns. "
     "possible_qns are concrete examples of that one flow, not permission to "
@@ -74,8 +79,10 @@ _MULTI_INTENT_RESPONSE_INSTRUCTION = (
     "'the zone?' are ambiguous, while 'what is the zone?' requests only a "
     "definition. Use terminal no_match when the message is clear but none of the "
     "configured flows answers it. Otherwise return kind matches with one to five "
-    "matches in relevance order and no duplicate flow_id. For every reply slot on a selected "
-    "flow, provide exactly one reply with the same slot_id. Each reply slot has a mode "
+    "matches in relevance order and no duplicate flow_id. For every selected flow, its "
+    "replies array must contain exactly one reply for every listed reply_slot, with the "
+    "same slot_id, and no other replies. Use an empty replies array only when that flow "
+    "has no reply_slots. Each reply slot has a mode "
     "and source. For mode paraphrased, rewrite the full source while preserving every "
     "fact, qualification, instruction, template variable, URL, and ALL_CAPS placeholder "
     "(including underscores) verbatim. For mode llm, source is the sole factual authority: "
@@ -821,26 +828,34 @@ def _multi_intent_response_format(request: MultiIntentRequest) -> dict[str, obje
     return _json_schema_response_format(
         name="friendly_bot_multi_intent",
         schema={
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": ["matches", "terminal"],
-                    "description": "Use matches for selected configured flows or terminal otherwise.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["matches"]},
+                        "matches": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 5,
+                            "items": _planned_flow_schema(flow_ids),
+                        },
+                    },
+                    "required": ["kind", "matches"],
+                    "additionalProperties": False,
                 },
-                "matches": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 5,
-                    "items": _planned_flow_schema(flow_ids),
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["terminal"]},
+                        "terminal": {
+                            "type": "string",
+                            "enum": ["no_match", "clarify_ambiguous_context"],
+                        },
+                    },
+                    "required": ["kind", "terminal"],
+                    "additionalProperties": False,
                 },
-                "terminal": {
-                    "type": "string",
-                    "enum": ["no_match", "clarify_ambiguous_context"],
-                },
-            },
-            "required": ["kind"],
-            "additionalProperties": False,
+            ]
         },
     )
 

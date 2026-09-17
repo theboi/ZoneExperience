@@ -376,11 +376,19 @@ async def test_route_and_plan_returns_all_valid_matches_in_one_request() -> None
     assert json_schema["name"] == "friendly_bot_multi_intent"
     assert json_schema["strict"] is True
     schema = json_schema["schema"]
-    assert schema["additionalProperties"] is False
-    assert schema["properties"]["matches"]["items"]["properties"]["flow_id"] == {
+    assert set(schema) == {"oneOf"}
+    matches_schema = schema["oneOf"][0]
+    terminal_schema = schema["oneOf"][1]
+    assert matches_schema["additionalProperties"] is False
+    assert matches_schema["required"] == ["kind", "matches"]
+    assert matches_schema["properties"]["matches"]["items"]["properties"][
+        "flow_id"
+    ] == {
         "type": "string",
         "enum": ["system.directions", "system.expect"],
     }
+    assert terminal_schema["additionalProperties"] is False
+    assert terminal_schema["required"] == ["kind", "terminal"]
     assert payload["provider"]["require_parameters"] is True
     assert payload["reasoning"] == {"effort": "none"}
     assert payload["max_tokens"] == 1024
@@ -566,6 +574,10 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     assert first_payload["messages"][1] != second_payload["messages"][1]
     assert "system.directions" not in first_payload["messages"][0]["content"]
     assert (
+        "Do not omit the required matches or terminal field"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
         "Write your own wording in lowercase" in first_payload["messages"][0]["content"]
     )
     assert (
@@ -602,6 +614,10 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert "must produce exactly one match" in first_payload["messages"][0]["content"]
+    assert (
+        "replies array must contain exactly one reply for every listed reply_slot"
+        in (first_payload["messages"][0]["content"])
+    )
     assert "two or more independent requests" in first_payload["messages"][0]["content"]
     assert (
         "'when are services?' is one request and must select only one timing flow"
@@ -632,6 +648,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
 @pytest.mark.parametrize(
     "content",
     [
+        {"kind": "matches"},
         {"kind": "matches", "matches": []},
         {
             "kind": "matches",
@@ -646,6 +663,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
             ],
         },
         {"flows": [{"flow_id": "system.directions", "reply": "ignored"}]},
+        {"kind": "terminal"},
         {"kind": "terminal", "terminal": "no_match", "extra": True},
     ],
 )
