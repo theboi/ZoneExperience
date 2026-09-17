@@ -9,7 +9,7 @@ import signal
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Final, Literal, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -46,6 +46,7 @@ from friendly_bot.domain.state import OpenSelectionState, SelectionTransitionEng
 from friendly_bot.domain.triggers import (
     DiscussionTrigger,
     OnActionEventTrigger,
+    OnAnyMessageTrigger,
     OnAnyOfTrigger,
     OnButtonPressTrigger,
     OnCommandTrigger,
@@ -54,9 +55,17 @@ from friendly_bot.domain.triggers import (
 from friendly_bot.error_logs import error_log_name, write_error_log
 from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
+from friendly_bot.onboarding.accounts import (
+    OperationalAccountService,
+    normalize_operational_name,
+)
 from friendly_bot.onboarding.service import OnboardingService
 from friendly_bot.persistence.connection import DirectPostgresConnectionFactory
-from friendly_bot.persistence.models import FlowScopeKind, ServiceAudience
+from friendly_bot.persistence.models import (
+    FlowScopeKind,
+    OperationalRole,
+    ServiceAudience,
+)
 from friendly_bot.persistence.repositories import (
     FlowVersionRecord,
     MatchRequestRecord,
@@ -179,12 +188,29 @@ class ZoneXSeed(BaseModel):
     service: ZoneXServiceSeed
 
 
+class OperationalProfileSeed(BaseModel):
+    """One pre-authorized server, leader, or staff profile from local seed data."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=256)
+    dob: date
+    role: OperationalRole
+    interests: tuple[str, ...] = ()
+    cg_name: str | None = None
+    telegram_contact_url: str | None = None
+    always_available: bool = False
+    capacity: int = Field(ge=0)
+    is_admin: bool = False
+
+
 class SystemGlobalSeed(BaseModel):
     """The system-wide root that is shared by every service seed."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     root: DiscussionFlow
+    operational_profiles: tuple[OperationalProfileSeed, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +383,26 @@ class FriendlyBotApplication:
                     "selected", executed.executed_flow_keys, presentations
                 )
 
+        deterministic_capture = await self._find_direct_selection(
+            unit_of_work=unit_of_work,
+            user=user,
+            now=now,
+            matcher=lambda child: _matches_any_message(child.trigger),
+            skip_invalid_branches=True,
+        )
+        if deterministic_capture is not None:
+            executed = await self._execute_selection(
+                deterministic_capture,
+                user=user,
+                incoming=incoming,
+                unit_of_work=unit_of_work,
+                correlation_id=correlation_id,
+                now=now,
+                executed_flow_keys=set(),
+                presentations=presentations,
+            )
+            return self._result("selected", executed.executed_flow_keys, presentations)
+
         try:
             routing = await self._router.route_update_in_uow(
                 unit_of_work,
@@ -483,6 +529,12 @@ class FriendlyBotApplication:
         """Handle deterministic onboarding before provider-backed message routing."""
 
         if self._onboarding is None:
+            return None
+        if normalize_command(incoming.text or "") in {
+            "/login",
+            "/manage",
+            "/logout",
+        }:
             return None
         result = await self._onboarding.handle_in_uow(
             unit_of_work,
@@ -708,6 +760,7 @@ class FriendlyBotApplication:
         matcher: Callable[[DiscussionFlow], bool],
         service: ServiceRecord | None = None,
         match_request: MatchRequestRecord | None = None,
+        skip_invalid_branches: bool = False,
     ) -> _DirectSelection | None:
         matches: list[_DirectSelection] = []
         for branch in await self._valid_branches(unit_of_work, user.id, now=now):
@@ -717,10 +770,17 @@ class FriendlyBotApplication:
                 and branch.service_id != match_request.service_id
             ):
                 continue
-            version = await unit_of_work.flow_versions.get(branch.flow_version_id)
+            try:
+                version = await unit_of_work.flow_versions.get(branch.flow_version_id)
+            except LookupError:
+                if skip_invalid_branches:
+                    continue
+                raise
             root = _root_from_version(version)
             parent = _find_flow(root, branch.parent_flow_key)
             if parent is None:
+                if skip_invalid_branches:
+                    continue
                 raise ValueError(
                     "open selection parent is absent from its flow version"
                 )
@@ -1069,6 +1129,7 @@ class FriendlyBotApplication:
             lifecycle=self._dependencies.lifecycle,
             matching=self._dependencies.matching,
             diagnostics=unit_of_work.diagnostics,
+            operational_accounts=self._dependencies.operational_accounts,
             navigation=self._navigation,
             reply_plan=reply_plan or ReplyPlan(()),
             presentation_buffer=presentations or PresentationBuffer(),
@@ -1394,6 +1455,15 @@ def _matches_message(trigger: DiscussionTrigger | None) -> bool:
     )
 
 
+def _matches_any_message(trigger: DiscussionTrigger | None) -> bool:
+    """Identify a local reply capture that deliberately bypasses provider routing."""
+
+    return any(
+        isinstance(candidate, OnAnyMessageTrigger)
+        for candidate in _trigger_options(trigger)
+    )
+
+
 def _message_flow_key_matcher(key: str) -> Callable[[DiscussionFlow], bool]:
     """Bind one router decision to its exact message-trigger child."""
 
@@ -1480,6 +1550,20 @@ async def publish_zone_x_seed(
             interaction_ends_at=seed.service.interaction_ends_at,
         )
     )
+    for profile in system_global_seed.operational_profiles:
+        await unit_of_work.operational_profiles.provision(
+            display_name=profile.name,
+            normalized_name=normalize_operational_name(profile.name),
+            dob=profile.dob,
+            role=profile.role,
+            interests=list(profile.interests),
+            cg_name=profile.cg_name,
+            telegram_contact_url=profile.telegram_contact_url,
+            always_available=profile.always_available,
+            capacity=profile.capacity,
+            is_admin=profile.is_admin,
+            at=datetime.now(UTC),
+        )
     system_root = await _publish_root(
         system_global_seed.root,
         unit_of_work=unit_of_work,
@@ -1602,6 +1686,7 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
         router_gateway = OpenRouterGateway.from_environment(debug=debug)
         services = ServiceAttendanceService(unit_of_work_factory)
         onboarding = OnboardingService(unit_of_work_factory)
+        operational_accounts = OperationalAccountService(unit_of_work_factory)
         lifecycle = ServiceLifecycleService(unit_of_work_factory)
         matching = MatchingService(
             unit_of_work_factory,
@@ -1614,6 +1699,7 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
                 services=services,
                 lifecycle=lifecycle,
                 matching=matching,
+                operational_accounts=operational_accounts,
             )
         )
         system_global_seed = load_system_global_seed(
@@ -1628,6 +1714,7 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
                 services=services,
                 lifecycle=lifecycle,
                 matching=matching,
+                operational_accounts=operational_accounts,
             ),
             registry=registry,
             router=ConstrainedRouter(unit_of_work_factory, router_gateway),

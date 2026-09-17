@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -17,11 +17,15 @@ type LoginResultKind = Literal[
     "manage",
     "detached",
     "not_attached",
+    "not_started",
 ]
 
 _OPERATIONAL_ROLES = frozenset(
     {OperationalRole.SERVER, OperationalRole.LEADER, OperationalRole.STAFF}
 )
+_LOGIN_ATTEMPT_TTL = timedelta(minutes=10)
+_MAX_INTERESTS = 10
+_MAX_INTEREST_LENGTH = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +96,44 @@ class OperationalAccountService:
             ),
         )
 
+    async def begin_login_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        name: str,
+        now: datetime,
+    ) -> None:
+        """Retain only a normalized name until the following DOB reply arrives."""
+
+        await uow.operational_login_attempts.start(
+            user_id,
+            normalized_name=normalize_operational_name(name),
+            expires_at=now + _LOGIN_ATTEMPT_TTL,
+            at=now,
+        )
+
+    async def complete_login_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        dob: date,
+        now: datetime,
+    ) -> LoginResult:
+        """Consume the short-lived name and perform exactly one exclusive attachment."""
+
+        attempt = await uow.operational_login_attempts.consume(user_id, now=now)
+        if attempt is None:
+            return LoginResult("not_started")
+        return await self.login_in_uow(
+            uow,
+            user_id=user_id,
+            normalized_name=attempt.normalized_name,
+            dob=dob,
+            now=now,
+        )
+
     async def manage(self, telegram_user_id: int, *, now: datetime) -> LoginResult:
         """Expose the configured interest editor without updating profile data directly."""
 
@@ -115,6 +157,24 @@ class OperationalAccountService:
             opens_interest_editor=operational_user.role in _OPERATIONAL_ROLES,
         )
 
+    async def update_interests_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        interests: list[str],
+        now: datetime,
+    ) -> bool:
+        """Update only the active operational profile attached to this Telegram user."""
+
+        profile = await uow.operational_profiles.find_active_for_login_user(user_id)
+        if profile is None:
+            return False
+        await uow.operational_profiles.update_interests(
+            profile.id, normalize_operational_interests(interests), at=now
+        )
+        return True
+
     async def logout(self, telegram_user_id: int, *, now: datetime) -> LoginResult:
         """Detach the active attachment while retaining profile and login history."""
 
@@ -128,5 +188,39 @@ class OperationalAccountService:
     ) -> LoginResult:
         """Detach the supplied ingress user without opening or owning a transaction."""
 
+        await uow.operational_login_attempts.clear(user_id)
         detached = await uow.operational_logins.detach_for_user(user_id, at=now)
         return LoginResult("detached" if detached is not None else "not_attached")
+
+
+def normalize_operational_name(value: str) -> str:
+    """Canonicalize a supplied login name without sending it to the model."""
+
+    if type(value) is not str:
+        raise ValueError("login name must be text")
+    normalized = " ".join(value.split()).casefold()
+    if not normalized or len(normalized) > 256:
+        raise ValueError("login name is invalid")
+    return normalized
+
+
+def normalize_operational_interests(values: list[str]) -> list[str]:
+    """Keep a small, usable, de-duplicated interest list for operational matching."""
+
+    if not isinstance(values, list):
+        raise TypeError("interests must be a list")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if type(value) is not str:
+            raise ValueError("interest must be text")
+        interest = " ".join(value.split())
+        if not interest or len(interest) > _MAX_INTEREST_LENGTH:
+            raise ValueError("interest is invalid")
+        key = interest.casefold()
+        if key not in seen:
+            normalized.append(interest)
+            seen.add(key)
+    if not normalized or len(normalized) > _MAX_INTERESTS:
+        raise ValueError("provide between one and ten interests")
+    return normalized

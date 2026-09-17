@@ -106,7 +106,9 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    This prints each LLM prompt and its formatted response JSON to that terminal. It can include user message content and must only be used in a private local terminal.
 
-6. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
+6. Server and leader accounts sign in locally through Telegram with `/login`. The bundled development account is `ryan the` with date of birth `01/01/1990`; after signing in, it will request interests. Use `/manage` to update interests and `/logout` to detach the account. The name and date of birth are handled locally and are never sent to the routing provider.
+
+7. Before inviting real users, send `/start` from a controlled Telegram test account. An unnamed account receives the welcome/name prompt; reply with a name and confirm the appropriate Zone X or system flow opens. A named account opens the system prompt directly. Leave the process running only if this check succeeds.
 
 To reset the database, run
 ```sh

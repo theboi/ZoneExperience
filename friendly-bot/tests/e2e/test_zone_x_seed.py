@@ -50,6 +50,39 @@ def test_system_root_sends_its_prompt_when_opened() -> None:
     }
 
 
+def test_seeded_operational_profile_and_login_captures_are_local_only() -> None:
+    """Operational login has one pre-authorized development profile and no LLM DOB step."""
+
+    document = _system_document()
+    assert document["operational_profiles"] == [
+        {
+        "name": "ryan the",
+            "dob": "1990-01-01",
+            "role": "leader",
+            "interests": [],
+            "cg_name": None,
+            "telegram_contact_url": None,
+            "always_available": False,
+            "capacity": 1,
+            "is_admin": True,
+        }
+    ]
+    login = _flow(document["root"], "system.global.operational.login")
+    captures = [
+        flow
+        for flow in _walk_flows(login)
+        if flow["key"]
+        in {
+            "system.global.operational.login.name",
+            "system.global.operational.login.dob",
+            "system.global.operational.login.interests",
+            "system.global.operational.manage.interests",
+        }
+    ]
+    assert captures
+    assert all(flow["trigger"] == {"type": "any_message"} for flow in captures)
+
+
 def test_safety_routing_requires_an_explicit_current_message_disclosure() -> None:
     """Ordinary or ambiguous help requests must not create a safety escalation."""
 

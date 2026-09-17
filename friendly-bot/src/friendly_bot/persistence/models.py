@@ -209,6 +209,27 @@ class OperationalLogin(Base):
     detached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class OperationalLoginAttempt(Base):
+    """The short-lived name captured before an operational user supplies their DOB."""
+
+    __tablename__ = "operational_login_attempts"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    normalized_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class Service(Base):
     """One real-world gathering and its lifecycle boundaries."""
 

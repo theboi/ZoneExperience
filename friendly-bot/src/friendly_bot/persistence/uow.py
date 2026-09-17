@@ -20,6 +20,7 @@ from friendly_bot.persistence.repositories import (
     FlowVersionRepository,
     MatchRepository,
     OpenSelectionRepository,
+    OperationalLoginAttemptRepository,
     OperationalLoginRepository,
     OperationalProfileRepository,
     PendingIntentRepository,
@@ -32,6 +33,7 @@ from friendly_bot.persistence.repositories import (
     SqlAlchemyFlowVersionRepository,
     SqlAlchemyMatchRepository,
     SqlAlchemyOpenSelectionRepository,
+    SqlAlchemyOperationalLoginAttemptRepository,
     SqlAlchemyOperationalLoginRepository,
     SqlAlchemyOperationalProfileRepository,
     SqlAlchemyPendingIntentRepository,
@@ -58,6 +60,9 @@ class UnitOfWork:
         self._users: UserRepository | None = None
         self._operational_profiles: OperationalProfileRepository | None = None
         self._operational_logins: OperationalLoginRepository | None = None
+        self._operational_login_attempts: OperationalLoginAttemptRepository | None = (
+            None
+        )
         self._services: ServiceRepository | None = None
         self._attendances: AttendanceRepository | None = None
         self._poll_state: PollStateRepository | None = None
@@ -79,6 +84,9 @@ class UnitOfWork:
             self._session
         )
         self._operational_logins = SqlAlchemyOperationalLoginRepository(self._session)
+        self._operational_login_attempts = SqlAlchemyOperationalLoginAttemptRepository(
+            self._session
+        )
         self._services = SqlAlchemyServiceRepository(self._session)
         self._attendances = SqlAlchemyAttendanceRepository(
             self._session, self.lock_user
@@ -145,6 +153,10 @@ class UnitOfWork:
     @property
     def operational_logins(self) -> OperationalLoginRepository:
         return self._required_repository(self._operational_logins)
+
+    @property
+    def operational_login_attempts(self) -> OperationalLoginAttemptRepository:
+        return self._required_repository(self._operational_login_attempts)
 
     @property
     def services(self) -> ServiceRepository:

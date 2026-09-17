@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.domain.actions import (
     AddServiceAttendanceAction,
     ButtonDefinition,
+    CaptureOperationalLoginNameAction,
+    CompleteOperationalLoginAction,
     ConfirmHumanMatchAction,
     EndServiceInteractionsAction,
     EnterSelectedServiceCheckpointAction,
@@ -17,6 +21,8 @@ from friendly_bot.domain.actions import (
     ExcludePreviousHumanFromNextAttemptAction,
     FindAndReserveSafetyResponderAction,
     FindAndReserveServerAction,
+    LogoutOperationalAccountAction,
+    ManageOperationalAccountAction,
     MarkSafetyRequestPendingAction,
     NotifyAllAdminsAction,
     NotifyMatchedHumanAction,
@@ -25,6 +31,7 @@ from friendly_bot.domain.actions import (
     ResolveServiceSwitchOptionsAction,
     ReturnToNearestCheckpointAction,
     SaveIncomingAction,
+    SaveOperationalInterestsAction,
     SelectServiceAttendanceAction,
     SendButtonsAction,
     SendMessageFixedAction,
@@ -50,6 +57,7 @@ from friendly_bot.telegram import (
 )
 
 LOGGER = logging.getLogger(__name__)
+_OPERATIONAL_INTEREST_DELIMITER = re.compile(r"[,;\n]+")
 
 
 async def send_message_paraphrased(
@@ -155,6 +163,134 @@ async def save_incoming(action: SaveIncomingAction, context: ActionContext) -> N
         now=context.now,
     )
     context.set_match_request(updated)
+
+
+async def capture_operational_login_name(
+    action: CaptureOperationalLoginNameAction, context: ActionContext
+) -> None:
+    """Record the requested login name locally before asking for a DOB."""
+
+    del action
+    text = _incoming_text(context)
+    try:
+        await context.require_operational_accounts().begin_login_in_uow(
+            context.unit_of_work,
+            user_id=context.user.id,
+            name=text,
+            now=context.now,
+        )
+    except ValueError:
+        context.emit(ActionEvent(key="operational_login.name_invalid"))
+        return
+    context.emit(ActionEvent(key="operational_login.name_captured"))
+
+
+async def complete_operational_login(
+    action: CompleteOperationalLoginAction, context: ActionContext
+) -> None:
+    """Validate a DOB locally and attach only a matching unoccupied profile."""
+
+    del action
+    try:
+        dob = _parse_operational_dob(_incoming_text(context))
+    except ValueError:
+        context.emit(ActionEvent(key="operational_login.dob_invalid"))
+        return
+    result = await context.require_operational_accounts().complete_login_in_uow(
+        context.unit_of_work,
+        user_id=context.user.id,
+        dob=dob,
+        now=context.now,
+    )
+    event_key = (
+        "operational_login.interests_required"
+        if result.opens_interest_capture
+        else f"operational_login.{result.kind}"
+    )
+    context.emit(ActionEvent(key=event_key))
+
+
+async def save_operational_interests(
+    action: SaveOperationalInterestsAction, context: ActionContext
+) -> None:
+    """Update an attached operational profile from the user's comma-separated reply."""
+
+    del action
+    try:
+        interests = _parse_operational_interests(_incoming_text(context))
+        saved = await context.require_operational_accounts().update_interests_in_uow(
+            context.unit_of_work,
+            user_id=context.user.id,
+            interests=interests,
+            now=context.now,
+        )
+    except ValueError:
+        context.emit(ActionEvent(key="operational_interests.invalid"))
+        return
+    context.emit(
+        ActionEvent(
+            key="operational_interests.saved"
+            if saved
+            else "operational_interests.not_attached"
+        )
+    )
+
+
+async def manage_operational_account(
+    action: ManageOperationalAccountAction, context: ActionContext
+) -> None:
+    """Open the interest editor only for an attached operational user."""
+
+    del action
+    result = await context.require_operational_accounts().manage_in_uow(
+        context.unit_of_work, user_id=context.user.id, now=context.now
+    )
+    context.emit(
+        ActionEvent(
+            key="operational_manage.editor"
+            if result.opens_interest_editor
+            else "operational_manage.not_attached"
+        )
+    )
+
+
+async def logout_operational_account(
+    action: LogoutOperationalAccountAction, context: ActionContext
+) -> None:
+    """Detach an active operational login while leaving its profile intact."""
+
+    del action
+    result = await context.require_operational_accounts().logout_in_uow(
+        context.unit_of_work, user_id=context.user.id, now=context.now
+    )
+    context.emit(ActionEvent(key=f"operational_logout.{result.kind}"))
+
+
+def _incoming_text(context: ActionContext) -> str:
+    """Read one ordinary text reply without ever treating a callback as account input."""
+
+    incoming = context.incoming
+    if incoming is None or incoming.text is None:
+        raise ValueError("operational account action requires a text reply")
+    return incoming.text
+
+
+def _parse_operational_dob(value: str) -> date:
+    """Accept the explicit Singapore-friendly DOB formats shown by the login prompt."""
+
+    cleaned = value.strip()
+    for format_string in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(cleaned, format_string).replace(tzinfo=UTC).date()
+        except ValueError:
+            continue
+    raise ValueError("date of birth is invalid")
+
+
+def _parse_operational_interests(value: str) -> list[str]:
+    """Split a user reply before the account service applies strict normalization."""
+
+    return [part for part in _OPERATIONAL_INTEREST_DELIMITER.split(value) if part]
 
 
 async def add_service_attendance(

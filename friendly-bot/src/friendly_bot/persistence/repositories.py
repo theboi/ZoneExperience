@@ -30,6 +30,7 @@ from friendly_bot.persistence.models import (
     HumanMatchRequest,
     OpenFlowSelection,
     OperationalLogin,
+    OperationalLoginAttempt,
     OperationalProfile,
     OperationalRole,
     PendingFlowIntent,
@@ -91,6 +92,15 @@ class OperationalLoginRecord:
     user_id: UUID
     attached_at: datetime
     detached_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalLoginAttemptRecord:
+    """The only retained value between the name and DOB steps of `/login`."""
+
+    user_id: UUID
+    normalized_name: str
+    expires_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +323,22 @@ class OperationalProfileRepository(Protocol):
         self, profile_id: UUID, interests: list[str], *, at: datetime
     ) -> OperationalProfileRecord: ...
 
+    async def provision(
+        self,
+        *,
+        display_name: str,
+        normalized_name: str,
+        dob: date,
+        role: OperationalRole,
+        interests: list[str],
+        cg_name: str | None,
+        telegram_contact_url: str | None,
+        always_available: bool,
+        capacity: int,
+        is_admin: bool,
+        at: datetime,
+    ) -> OperationalProfileRecord: ...
+
 
 class OperationalLoginRepository(Protocol):
     async def attach(
@@ -322,6 +348,23 @@ class OperationalLoginRepository(Protocol):
     async def detach_for_user(
         self, user_id: UUID, *, at: datetime
     ) -> OperationalLoginRecord | None: ...
+
+
+class OperationalLoginAttemptRepository(Protocol):
+    async def start(
+        self,
+        user_id: UUID,
+        *,
+        normalized_name: str,
+        expires_at: datetime,
+        at: datetime,
+    ) -> OperationalLoginAttemptRecord: ...
+
+    async def consume(
+        self, user_id: UUID, *, now: datetime
+    ) -> OperationalLoginAttemptRecord | None: ...
+
+    async def clear(self, user_id: UUID) -> None: ...
 
 
 class ServiceRepository(Protocol):
@@ -588,6 +631,16 @@ def _login_record(row: OperationalLogin) -> OperationalLoginRecord:
         user_id=row.user_id,
         attached_at=row.attached_at,
         detached_at=row.detached_at,
+    )
+
+
+def _login_attempt_record(
+    row: OperationalLoginAttempt,
+) -> OperationalLoginAttemptRecord:
+    return OperationalLoginAttemptRecord(
+        user_id=row.user_id,
+        normalized_name=row.normalized_name,
+        expires_at=row.expires_at,
     )
 
 
@@ -927,6 +980,73 @@ class SqlAlchemyOperationalProfileRepository:
             raise LookupError("operational profile was not found")
         return _profile_record(row)
 
+    async def provision(
+        self,
+        *,
+        display_name: str,
+        normalized_name: str,
+        dob: date,
+        role: OperationalRole,
+        interests: list[str],
+        cg_name: str | None,
+        telegram_contact_url: str | None,
+        always_available: bool,
+        capacity: int,
+        is_admin: bool,
+        at: datetime,
+    ) -> OperationalProfileRecord:
+        """Create a named operational profile once without resetting live interests."""
+
+        profile = await self._session.scalar(
+            select(OperationalProfile)
+            .where(
+                OperationalProfile.normalized_name == normalized_name,
+                OperationalProfile.dob == dob,
+            )
+            .with_for_update()
+        )
+        if profile is None:
+            owner = User(
+                display_name=display_name,
+                role=role,
+                is_admin=is_admin,
+                created_at=at,
+                updated_at=at,
+            )
+            self._session.add(owner)
+            await self._session.flush()
+            profile = OperationalProfile(
+                user_id=owner.id,
+                normalized_name=normalized_name,
+                dob=dob,
+                interests=list(interests),
+                cg_name=cg_name,
+                telegram_contact_url=telegram_contact_url,
+                always_available=always_available,
+                capacity=capacity,
+                reserved_capacity=0,
+                created_at=at,
+                updated_at=at,
+            )
+            self._session.add(profile)
+            await self._session.flush()
+            return _profile_record(profile)
+
+        existing_owner = await self._session.get(User, profile.user_id)
+        if existing_owner is None:
+            raise LookupError("operational profile owner was not found")
+        existing_owner.display_name = display_name
+        existing_owner.role = role
+        existing_owner.is_admin = is_admin
+        existing_owner.updated_at = at
+        profile.cg_name = cg_name
+        profile.telegram_contact_url = telegram_contact_url
+        profile.always_available = always_available
+        profile.capacity = capacity
+        profile.updated_at = at
+        await self._session.flush()
+        return _profile_record(profile)
+
 
 class SqlAlchemyOperationalLoginRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -980,6 +1100,72 @@ class SqlAlchemyOperationalLoginRepository:
             .returning(OperationalLogin)
         )
         return _login_record(row) if row is not None else None
+
+
+class SqlAlchemyOperationalLoginAttemptRepository:
+    """Persist one short-lived login name under the existing ingress user lock."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def start(
+        self,
+        user_id: UUID,
+        *,
+        normalized_name: str,
+        expires_at: datetime,
+        at: datetime,
+    ) -> OperationalLoginAttemptRecord:
+        row = await self._session.scalar(
+            pg_insert(OperationalLoginAttempt)
+            .values(
+                user_id=user_id,
+                normalized_name=normalized_name,
+                expires_at=expires_at,
+                created_at=at,
+                updated_at=at,
+            )
+            .on_conflict_do_update(
+                index_elements=[OperationalLoginAttempt.user_id],
+                set_={
+                    "normalized_name": normalized_name,
+                    "expires_at": expires_at,
+                    "updated_at": at,
+                },
+            )
+            .returning(OperationalLoginAttempt)
+        )
+        if row is None:
+            raise RuntimeError("operational login attempt could not be saved")
+        return _login_attempt_record(row)
+
+    async def consume(
+        self, user_id: UUID, *, now: datetime
+    ) -> OperationalLoginAttemptRecord | None:
+        row = await self._session.scalar(
+            delete(OperationalLoginAttempt)
+            .where(
+                OperationalLoginAttempt.user_id == user_id,
+                OperationalLoginAttempt.expires_at > now,
+            )
+            .returning(OperationalLoginAttempt)
+        )
+        if row is not None:
+            return _login_attempt_record(row)
+        await self._session.execute(
+            delete(OperationalLoginAttempt).where(
+                OperationalLoginAttempt.user_id == user_id,
+                OperationalLoginAttempt.expires_at <= now,
+            )
+        )
+        return None
+
+    async def clear(self, user_id: UUID) -> None:
+        await self._session.execute(
+            delete(OperationalLoginAttempt).where(
+                OperationalLoginAttempt.user_id == user_id
+            )
+        )
 
 
 class SqlAlchemyServiceRepository:

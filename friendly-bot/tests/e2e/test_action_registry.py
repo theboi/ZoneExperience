@@ -158,7 +158,7 @@ def test_registry_can_be_exactly_complete_for_f01_action_classes() -> None:
         registry.register(action_type, _do_nothing)
 
     registry.assert_complete(action_types)
-    assert len(action_types) == 26
+    assert len(action_types) == 31
 
 
 def test_composed_registry_registers_every_declared_action_exactly_once() -> None:

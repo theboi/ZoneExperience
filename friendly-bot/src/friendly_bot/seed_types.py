@@ -25,6 +25,21 @@ class SystemGlobalSeedDocument(TypedDict):
     """The one system-global flow root."""
 
     root: SeedFlow
+    operational_profiles: NotRequired[list[OperationalProfileSeedDocument]]
+
+
+class OperationalProfileSeedDocument(TypedDict):
+    """One pre-authorized operational profile provisioned at application startup."""
+
+    name: str
+    dob: str
+    role: str
+    interests: list[str]
+    cg_name: str | None
+    telegram_contact_url: str | None
+    always_available: bool
+    capacity: int
+    is_admin: bool
 
 
 class ZoneXTimestampSeedDocument(TypedDict):

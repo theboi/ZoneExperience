@@ -33,6 +33,7 @@ F01_TABLES = {
     "human_match_exclusions",
     "human_match_requests",
     "open_flow_selections",
+    "operational_login_attempts",
     "operational_logins",
     "operational_profiles",
     "pending_flow_intents",

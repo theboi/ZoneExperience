@@ -11,6 +11,7 @@ from friendly_bot.onboarding.accounts import LoginResult, OperationalAccountServ
 from friendly_bot.persistence.models import OperationalRole
 from friendly_bot.persistence.repositories import (
     LoginAttachmentResult,
+    OperationalLoginAttemptRecord,
     OperationalProfileRecord,
     UserRecord,
 )
@@ -182,3 +183,130 @@ async def test_composed_account_methods_use_profile_owner_role_without_another_u
     assert attached == LoginResult("attached", opens_interest_capture=True)
     assert managed == LoginResult("manage", opens_interest_editor=True)
     assert uow.required_user_ids == [PROFILE_OWNER_ID, PROFILE_OWNER_ID]
+
+
+class OperationalLoginFlowUow:
+    """A minimal local account-flow double, including the disposable name attempt."""
+
+    def __init__(self) -> None:
+        self.users = self
+        self.operational_profiles = self
+        self.operational_logins = self
+        self.operational_login_attempts = self
+        self.attempt: OperationalLoginAttemptRecord | None = None
+        self.interests: list[str] | None = None
+        self.cleared = False
+
+    async def start(
+        self,
+        user_id: UUID,
+        *,
+        normalized_name: str,
+        expires_at: datetime,
+        at: datetime,
+    ) -> OperationalLoginAttemptRecord:
+        assert user_id == INGRESS_USER_ID and at == NOW
+        self.attempt = OperationalLoginAttemptRecord(
+            user_id=user_id,
+            normalized_name=normalized_name,
+            expires_at=expires_at,
+        )
+        return self.attempt
+
+    async def consume(
+        self, user_id: UUID, *, now: datetime
+    ) -> OperationalLoginAttemptRecord | None:
+        assert user_id == INGRESS_USER_ID and now == NOW
+        attempt, self.attempt = self.attempt, None
+        return attempt
+
+    async def clear(self, user_id: UUID) -> None:
+        assert user_id == INGRESS_USER_ID
+        self.cleared = True
+
+    async def find_by_login_identity(
+        self, normalized_name: str, dob: date
+    ) -> OperationalProfileRecord | None:
+        if (normalized_name, dob) != ("ryan the", DOB):
+            return None
+        return OperationalProfileRecord(
+            id=PROFILE_ID,
+            user_id=PROFILE_OWNER_ID,
+            normalized_name=normalized_name,
+            interests=(),
+            cg_name=None,
+            telegram_contact_url=None,
+            always_available=False,
+            capacity=1,
+            reserved_capacity=0,
+        )
+
+    async def find_active_for_login_user(
+        self, user_id: UUID
+    ) -> OperationalProfileRecord | None:
+        assert user_id == INGRESS_USER_ID
+        return await self.find_by_login_identity("ryan the", DOB)
+
+    async def attach(
+        self, profile_id: UUID, user_id: UUID, *, at: datetime
+    ) -> LoginAttachmentResult:
+        assert (profile_id, user_id, at) == (PROFILE_ID, INGRESS_USER_ID, NOW)
+        return LoginAttachmentResult("attached", is_first_ever_attachment=True)
+
+    async def detach_for_user(self, user_id: UUID, *, at: datetime) -> object:
+        assert (user_id, at) == (INGRESS_USER_ID, NOW)
+        return object()
+
+    async def require_by_id(self, user_id: UUID) -> UserRecord:
+        if user_id == PROFILE_OWNER_ID:
+            return UserRecord(
+                id=user_id,
+                telegram_user_id=None,
+                display_name="Ryan The",
+                role=OperationalRole.LEADER,
+                is_admin=True,
+            )
+        raise LookupError("user was not found")
+
+    async def update_interests(
+        self, profile_id: UUID, interests: list[str], *, at: datetime
+    ) -> OperationalProfileRecord:
+        assert (profile_id, at) == (PROFILE_ID, NOW)
+        self.interests = interests
+        profile = await self.find_active_for_login_user(INGRESS_USER_ID)
+        assert profile is not None
+        return profile
+
+
+async def test_login_flow_keeps_dob_out_of_durable_attempt_state_and_updates_interests() -> (
+    None
+):
+    """The name expires quickly; the DOB is consumed immediately and never stored."""
+
+    uow = OperationalLoginFlowUow()
+    accounts = OperationalAccountService(lambda: uow)
+
+    await accounts.begin_login_in_uow(
+        uow, user_id=INGRESS_USER_ID, name=" Ryan   The ", now=NOW
+    )
+    assert uow.attempt is not None
+    assert uow.attempt.normalized_name == "ryan the"
+    assert uow.attempt.expires_at > NOW
+    assert not hasattr(uow.attempt, "dob")
+
+    attached = await accounts.complete_login_in_uow(
+        uow, user_id=INGRESS_USER_ID, dob=DOB, now=NOW
+    )
+    saved = await accounts.update_interests_in_uow(
+        uow,
+        user_id=INGRESS_USER_ID,
+        interests=["music", " Music ", "football"],
+        now=NOW,
+    )
+    logged_out = await accounts.logout_in_uow(uow, user_id=INGRESS_USER_ID, now=NOW)
+
+    assert attached == LoginResult("attached", opens_interest_capture=True)
+    assert saved is True
+    assert uow.interests == ["music", "football"]
+    assert logged_out == LoginResult("detached")
+    assert uow.cleared is True

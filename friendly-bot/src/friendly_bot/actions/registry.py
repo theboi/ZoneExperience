@@ -9,6 +9,7 @@ from typing import cast, get_args
 from friendly_bot.actions.context import ActionContext
 from friendly_bot.domain.actions import DiscussionAction, DiscussionActionBase
 from friendly_bot.matching.service import MatchingService
+from friendly_bot.onboarding.accounts import OperationalAccountService
 from friendly_bot.persistence.repositories import DiagnosticRepository
 from friendly_bot.services import ServiceAttendanceService, ServiceLifecycleService
 from friendly_bot.telegram import TelegramGateway
@@ -53,6 +54,7 @@ class ActionDependencies:
     lifecycle: ServiceLifecycleService
     matching: MatchingService
     diagnostics: DiagnosticRepository | None = None
+    operational_accounts: OperationalAccountService | None = None
 
 
 class ActionExecutorRegistry:
@@ -114,6 +116,8 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
     del dependencies
     from friendly_bot.actions.executors import (
         add_service_attendance,
+        capture_operational_login_name,
+        complete_operational_login,
         confirm_human_match,
         end_service_interactions,
         enter_selected_service_checkpoint,
@@ -122,6 +126,8 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         exclude_previous_human_from_next_attempt,
         find_and_reserve_safety_responder,
         find_and_reserve_server,
+        logout_operational_account,
+        manage_operational_account,
         mark_safety_request_pending,
         notify_all_admins,
         notify_matched_human,
@@ -130,6 +136,7 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         resolve_service_switch_options,
         return_to_nearest_checkpoint,
         save_incoming,
+        save_operational_interests,
         select_service_attendance,
         send_buttons,
         send_message_fixed,
@@ -142,6 +149,8 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
     )
     from friendly_bot.domain.actions import (
         AddServiceAttendanceAction,
+        CaptureOperationalLoginNameAction,
+        CompleteOperationalLoginAction,
         ConfirmHumanMatchAction,
         EndServiceInteractionsAction,
         EnterSelectedServiceCheckpointAction,
@@ -150,6 +159,8 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         ExcludePreviousHumanFromNextAttemptAction,
         FindAndReserveSafetyResponderAction,
         FindAndReserveServerAction,
+        LogoutOperationalAccountAction,
+        ManageOperationalAccountAction,
         MarkSafetyRequestPendingAction,
         NotifyAllAdminsAction,
         NotifyMatchedHumanAction,
@@ -158,6 +169,7 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
         ResolveServiceSwitchOptionsAction,
         ReturnToNearestCheckpointAction,
         SaveIncomingAction,
+        SaveOperationalInterestsAction,
         SelectServiceAttendanceAction,
         SendButtonsAction,
         SendMessageFixedAction,
@@ -178,6 +190,11 @@ def build_action_registry(dependencies: ActionDependencies) -> ActionExecutorReg
     registry.register(SendPhotoAction, send_photo)
     registry.register(ShowActivityAction, show_activity)
     registry.register(SaveIncomingAction, save_incoming)
+    registry.register(CaptureOperationalLoginNameAction, capture_operational_login_name)
+    registry.register(CompleteOperationalLoginAction, complete_operational_login)
+    registry.register(SaveOperationalInterestsAction, save_operational_interests)
+    registry.register(ManageOperationalAccountAction, manage_operational_account)
+    registry.register(LogoutOperationalAccountAction, logout_operational_account)
     registry.register(AddServiceAttendanceAction, add_service_attendance)
     registry.register(SelectServiceAttendanceAction, select_service_attendance)
     registry.register(EnterServiceCheckpointAction, enter_service_checkpoint)
