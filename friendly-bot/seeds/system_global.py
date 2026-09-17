@@ -6,6 +6,14 @@ from typing import Final
 
 from friendly_bot.seed_types import SystemGlobalSeedDocument
 
+MAIN_MENU_BUTTONS = [
+    { "button_id": "system.global.menu.timings", "text": "when do we gather?" },
+    { "button_id": "system.global.menu.directions", "text": "how to get to service?" },
+    { "button_id": "system.global.menu.expect", "text": "what to expect?" },
+    { "button_id": "system.global.menu.zone", "text": "what is The Zone?" },
+    { "button_id": "system.global.menu.connect", "text": "get connected!" }
+]
+
 SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
     "root": {
         "key": "system.global",
@@ -20,28 +28,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
             {
                 "type": "send_buttons",
                 "service_bound": False,
-                "buttons": [
-                    {
-                        "button_id": "system.global.menu.timings",
-                        "text": "when do we gather?",
-                    },
-                    {
-                        "button_id": "system.global.menu.directions",
-                        "text": "how to get to service?",
-                    },
-                    {
-                        "button_id": "system.global.menu.expect",
-                        "text": "what to expect?",
-                    },
-                    {
-                        "button_id": "system.global.menu.zone",
-                        "text": "what is The Zone?",
-                    },
-                    {
-                        "button_id": "system.global.menu.connect",
-                        "text": "get connected!",
-                    },
-                ],
+                "buttons": MAIN_MENU_BUTTONS
             },
         ],
         "next_flow_mode": "CHECKPOINT",
@@ -54,28 +41,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
             {
                 "type": "send_buttons",
                 "service_bound": False,
-                "buttons": [
-                    {
-                        "button_id": "system.global.menu.timings",
-                        "text": "when do we gather?",
-                    },
-                    {
-                        "button_id": "system.global.menu.directions",
-                        "text": "how to get to service?",
-                    },
-                    {
-                        "button_id": "system.global.menu.expect",
-                        "text": "what to expect?",
-                    },
-                    {
-                        "button_id": "system.global.menu.zone",
-                        "text": "what is The Zone?",
-                    },
-                    {
-                        "button_id": "system.global.menu.connect",
-                        "text": "get connected!",
-                    },
-                ],
+                "buttons": MAIN_MENU_BUTTONS
             },
         ],
         "next_flows": [
@@ -83,9 +49,7 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "key": "system.global.never_mind",
                 "trigger": {
                     "type": "message",
-                    "llm_gist": "The person wants to stop, cancel, "
-                    "go back, leave the current topic, "
-                    "or says never mind.",
+                    "llm_gist": "The person wants to stop, cancel, go back, leave the current topic, or says never mind.",
                 },
                 "actions": [{"type": "return_to_nearest_checkpoint"}],
                 "next_flow_mode": "ONE_AND_ONCE_ONLY",
