@@ -983,7 +983,7 @@ class FriendlyBotApplication:
         correlation_id: UUID,
         checkpoint: DiscussionFlow | None,
     ) -> ReplyPlan:
-        """Plan a deterministic flow's bounded LLM replies or use its sources."""
+        """Plan a deterministic flow's replies or fall back only to authored copy."""
 
         response_plan = plan_candidate_responses(flow, checkpoint=checkpoint)
         if not response_plan.reply_slots:
@@ -1011,6 +1011,7 @@ class FriendlyBotApplication:
                 frozenset(
                     (binding.flow_key, binding.action_index)
                     for binding in response_plan.bindings
+                    if binding.mode == "paraphrased"
                 ),
             )
 

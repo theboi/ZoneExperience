@@ -53,6 +53,10 @@ class OrphanPresentationButtonsError(ValueError):
     """Raised when a textless button action has no preceding visible presentation."""
 
 
+class MissingPlannedLlmReplyError(RuntimeError):
+    """Raised when a source-grounded action has no validated model answer."""
+
+
 class ActionNavigation(Protocol):
     """Application-owned selection transitions invoked by explicit navigation actions."""
 
@@ -351,13 +355,13 @@ class ActionContext:
         self._active_action_index = action_index
         return self
 
-    async def planned_message_text(self, source: str) -> str:
-        """Return a validated LLM reply or the configured source as its fallback."""
+    async def planned_message_text(self, text: str) -> str:
+        """Return a planned paraphrase or the configured authored-copy fallback."""
 
-        if type(source) is not str:
+        if type(text) is not str:
             raise TypeError("message source must be a string")
         if self._active_flow_key is None or self._active_action_index is None:
-            return source
+            return text
         planned = self.reply_plan.text_for(
             self._active_flow_key, self._active_action_index
         )
@@ -366,7 +370,21 @@ class ActionContext:
         address = (self._active_flow_key, self._active_action_index)
         if self.reply_plan.requires_fallback(*address):
             await self._record_llm_reply_fallback(address)
-        return source
+        return text
+
+    async def planned_llm_message_text(self) -> str:
+        """Return a validated source-grounded answer without exposing its source."""
+
+        if self._active_flow_key is None or self._active_action_index is None:
+            raise MissingPlannedLlmReplyError("source-grounded action has no address")
+        planned = self.reply_plan.text_for(
+            self._active_flow_key, self._active_action_index
+        )
+        if planned is None:
+            raise MissingPlannedLlmReplyError(
+                "source-grounded action has no validated reply"
+            )
+        return planned
 
     @property
     def match_assignment(self) -> MatchAssignmentRecord | None:

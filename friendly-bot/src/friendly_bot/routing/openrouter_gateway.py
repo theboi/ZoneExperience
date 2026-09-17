@@ -85,10 +85,13 @@ _MULTI_INTENT_RESPONSE_INSTRUCTION = (
     "has no reply_slots. Each reply slot has a mode "
     "and source. For mode paraphrased, rewrite the full source while preserving every "
     "fact, qualification, instruction, template variable, URL, and ALL_CAPS placeholder "
-    "(including underscores) verbatim. For mode llm, source is the sole factual authority: "
-    "answer using only information stated in that source. Do not use prior knowledge, likely "
-    "defaults, user assertions, candidate gists, or inferences. If the source does not establish "
-    "a requested detail, say that the source does not provide it rather than guessing. Never add "
+    "(including underscores) verbatim. For mode llm, source is private reference material and "
+    "the sole factual authority. Do not output, reproduce, or summarize the whole source. Answer "
+    "only the part of the user's current request that it supports, using only the directly relevant "
+    "source facts. Do not use any information outside the source as a fact, including prior "
+    "knowledge, likely defaults, user assertions, candidate gists, or inferences. Use the current "
+    "message only to identify what detail is relevant. If the source does not establish a requested "
+    "detail, say that the source does not provide it rather than guessing. Never add "
     "facts, promises, contacts, links, or safety advice not in the source. Write your own wording "
     "in lowercase, including the first word, like a real youth texting. Preserve the source's "
     "capitalization for names, titles, acronyms, hashtags, places, groups, and ALL_CAPS placeholders. "
@@ -102,8 +105,8 @@ _MULTI_INTENT_RESPONSE_INSTRUCTION = (
     "guessing. Do not add exaggerated slang, phonetic "
     "misspellings, emojis, facts, promises, contacts, links, or safety advice. "
     "For mode paraphrased, preserve every fact, qualification, and instruction. "
-    "For mode llm, include the source facts needed to answer the current request, "
-    "but never claim more. If a relevant source value is an ALL_CAPS placeholder, "
+    "For mode llm, include only the source facts needed to answer the current request, "
+    "and omit unrelated source facts. If a relevant source value is an ALL_CAPS placeholder, "
     "copy that placeholder verbatim. Never use an em dash. "
     "A safety flow requires an explicit "
     "disclosure of immediate danger, abuse, self-harm, or an urgent request for "
@@ -796,7 +799,7 @@ def _normalize_matches(
 def _normalize_match(
     proposed: PlannedFlowMatch, candidate: RoutingPromptCandidate
 ) -> PlannedFlowMatch | None:
-    """Require all and only expected slots, falling back only unsafe copy."""
+    """Require all expected slots and fall back only for paraphrased copy."""
 
     slots = {slot.slot_id: slot for slot in candidate.reply_slots}
     replies = {reply.slot_id: reply for reply in proposed.replies}
@@ -806,18 +809,19 @@ def _normalize_match(
         or set(replies) != set(slots)
     ):
         return None
+    normalized_replies: list[PlannedReply] = []
+    for slot_id, slot in slots.items():
+        reply = replies[slot_id]
+        if _reply_is_permitted(slot, reply.text):
+            text = reply.text
+        elif slot.mode == "paraphrased":
+            text = slot.source
+        else:
+            return None
+        normalized_replies.append(PlannedReply(slot_id=slot.slot_id, text=text))
     return PlannedFlowMatch(
         flow_id=proposed.flow_id,
-        replies=tuple(
-            PlannedReply(
-                slot_id=slot.slot_id,
-                text=(
-                    reply.text if _reply_is_permitted(slot, reply.text) else slot.source
-                ),
-            )
-            for slot_id, slot in slots.items()
-            for reply in (replies[slot_id],)
-        ),
+        replies=tuple(normalized_replies),
     )
 
 
@@ -961,6 +965,8 @@ def _reply_is_permitted(slot: ReplySourceSlot, text: str) -> bool:
     """Accept a reply only when it preserves its configured syntax boundary."""
 
     if chr(0x2014) in text:
+        return False
+    if slot.mode == "llm" and text.strip() == slot.source.strip():
         return False
     remaining = TEMPLATE_TOKEN_PATTERN.sub("", text)
     if "{{" in remaining or "}}" in remaining:

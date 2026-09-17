@@ -11,6 +11,7 @@ import pytest
 
 from friendly_bot.actions.context import (
     ActionContext,
+    MissingPlannedLlmReplyError,
     OrphanPresentationButtonsError,
     ReservedActionEventError,
     TerminalActionEventAlreadyEmittedError,
@@ -252,7 +253,7 @@ async def test_ordinary_message_uses_its_planned_reply_and_fixed_copy_does_not(
     )
 
 
-async def test_source_grounded_message_uses_its_planned_reply_or_source_fallback(
+async def test_source_grounded_message_uses_only_its_planned_reply(
     now: datetime,
 ) -> None:
     context, _ = _context(now)
@@ -278,15 +279,12 @@ async def test_source_grounded_message_uses_its_planned_reply_or_source_fallback
     )
 
     fallback_context, _ = _context(now)
-    fallback_context.diagnostics = cast(DiagnosticRepository, RecordingDiagnostics())
     fallback_context.reply_plan = ReplyPlan((), frozenset({("system.information", 0)}))
-    await registry.resolve(action)(
-        action, fallback_context.for_action("system.information", 0)
-    )
-    await fallback_context.flush_presentation()
-    assert fallback_context.presentation_buffer.snapshot() == (
-        TelegramTextPresentation(42, source),
-    )
+    with pytest.raises(MissingPlannedLlmReplyError):
+        await registry.resolve(action)(
+            action, fallback_context.for_action("system.information", 0)
+        )
+    assert fallback_context.presentation_buffer.snapshot() == ()
 
 
 async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(

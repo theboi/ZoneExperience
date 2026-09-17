@@ -519,6 +519,56 @@ async def test_route_and_plan_supplies_source_grounded_reply_without_extra_links
     ]
 
 
+async def test_route_and_plan_rejects_an_invalid_source_grounded_reply() -> None:
+    source = "dare is for secondary school students aged 13-17."
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "kind": "matches",
+                                        "matches": [
+                                            {
+                                                "flow_id": "system.information",
+                                                "replies": [
+                                                    {
+                                                        "slot_id": "r0",
+                                                        "text": source,
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+    request = MultiIntentRequest(
+        messages=("is dare for my 14-year-old?",),
+        candidates=(
+            RoutingPromptCandidate(
+                flow_id="system.information",
+                gists=("the person asks about dare",),
+                context_label="system",
+                multi_intent_mode="answer",
+                reply_slots=(ReplySourceSlot(slot_id="r0", mode="llm", source=source),),
+            ),
+        ),
+    )
+
+    with pytest.raises(GatewayProtocolError):
+        await _gateway(client).route_and_plan(request)
+
+
 async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     first_client = FakeHttpxClient(
         [
@@ -605,10 +655,17 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     )
     assert "gist or possible_qns" in first_payload["messages"][0]["content"]
     assert (
-        "source is the sole factual authority"
+        "source is private reference material and the sole factual authority"
         in first_payload["messages"][0]["content"]
     )
-    assert "Do not use prior knowledge" in first_payload["messages"][0]["content"]
+    assert (
+        "Do not output, reproduce, or summarize the whole source"
+        in (first_payload["messages"][0]["content"])
+    )
+    assert (
+        "Do not use any information outside the source as a fact"
+        in (first_payload["messages"][0]["content"])
+    )
     assert (
         "Select exactly one configured flow for each clause"
         in first_payload["messages"][0]["content"]

@@ -65,10 +65,10 @@ async def send_message_paraphrased(
 async def send_message_llm(
     action: SendMessageLlmAction, context: ActionContext
 ) -> None:
-    """Buffer a source-grounded LLM answer or the configured source fallback."""
+    """Buffer only a validated source-grounded LLM answer."""
 
     await context.queue_text_presentation(
-        context.render(await context.planned_message_text(action.source))
+        context.render(await context.planned_llm_message_text())
     )
 
 
