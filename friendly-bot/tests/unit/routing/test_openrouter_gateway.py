@@ -326,6 +326,7 @@ async def test_route_and_plan_returns_all_valid_matches_in_one_request() -> None
                                 "content": json.dumps(
                                     {
                                         "kind": "matches",
+                                        "terminal": "not_applicable",
                                         "matches": [
                                             {
                                                 "flow_id": "system.directions",
@@ -376,19 +377,24 @@ async def test_route_and_plan_returns_all_valid_matches_in_one_request() -> None
     assert json_schema["name"] == "friendly_bot_multi_intent"
     assert json_schema["strict"] is True
     schema = json_schema["schema"]
-    assert set(schema) == {"oneOf"}
-    matches_schema = schema["oneOf"][0]
-    terminal_schema = schema["oneOf"][1]
-    assert matches_schema["additionalProperties"] is False
-    assert matches_schema["required"] == ["kind", "matches"]
-    assert matches_schema["properties"]["matches"]["items"]["properties"][
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["kind", "matches", "terminal"]
+    assert schema["properties"]["kind"] == {
+        "type": "string",
+        "enum": ["matches", "terminal"],
+    }
+    assert schema["properties"]["matches"]["minItems"] == 0
+    assert schema["properties"]["matches"]["items"]["properties"][
         "flow_id"
     ] == {
         "type": "string",
         "enum": ["system.directions", "system.expect"],
     }
-    assert terminal_schema["additionalProperties"] is False
-    assert terminal_schema["required"] == ["kind", "terminal"]
+    assert schema["properties"]["terminal"] == {
+        "type": "string",
+        "enum": ["not_applicable", "no_match", "clarify_ambiguous_context"],
+    }
     assert payload["provider"]["require_parameters"] is True
     assert payload["reasoning"] == {"effort": "none"}
     assert payload["max_tokens"] == 1024
@@ -406,6 +412,7 @@ async def test_route_and_plan_falls_back_only_an_invalid_paraphrase_slot() -> No
                                 "content": json.dumps(
                                     {
                                         "kind": "matches",
+                                        "terminal": "not_applicable",
                                         "matches": [
                                             {
                                                 "flow_id": "system.directions",
@@ -458,6 +465,7 @@ async def test_route_and_plan_supplies_source_grounded_reply_without_extra_links
                                 "content": json.dumps(
                                     {
                                         "kind": "matches",
+                                        "terminal": "not_applicable",
                                         "matches": [
                                             {
                                                 "flow_id": "system.information",
@@ -532,6 +540,7 @@ async def test_route_and_plan_rejects_an_invalid_source_grounded_reply() -> None
                                 "content": json.dumps(
                                     {
                                         "kind": "matches",
+                                        "terminal": "not_applicable",
                                         "matches": [
                                             {
                                                 "flow_id": "system.information",
@@ -578,7 +587,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
                     "choices": [
                         {
                             "message": {
-                                "content": '{"kind":"terminal","terminal":"no_match"}'
+                                "content": '{"kind":"terminal","matches":[],"terminal":"no_match"}'
                             }
                         }
                     ]
@@ -594,7 +603,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
                     "choices": [
                         {
                             "message": {
-                                "content": '{"kind":"terminal","terminal":"no_match"}'
+                                "content": '{"kind":"terminal","matches":[],"terminal":"no_match"}'
                             }
                         }
                     ]
@@ -624,7 +633,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     assert first_payload["messages"][1] != second_payload["messages"][1]
     assert "system.directions" not in first_payload["messages"][0]["content"]
     assert (
-        "Do not omit the required matches or terminal field"
+        "Do not omit any field or add any field"
         in first_payload["messages"][0]["content"]
     )
     assert (

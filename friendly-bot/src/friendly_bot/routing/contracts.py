@@ -109,6 +109,16 @@ class MultiIntentTerminal(PromptDTO):
     terminal: Literal["no_match", "clarify_ambiguous_context"]
 
 
+class MultiIntentProviderPlan(PromptDTO):
+    """The flat structured-output contract accepted by Gemini through OpenRouter."""
+
+    kind: Literal["matches", "terminal"]
+    matches: tuple[PlannedFlowMatch, ...] = Field(max_length=5)
+    terminal: Literal[
+        "not_applicable", "no_match", "clarify_ambiguous_context"
+    ]
+
+
 type MultiIntentModelResult = MultiIntentMatches | MultiIntentTerminal
 
 

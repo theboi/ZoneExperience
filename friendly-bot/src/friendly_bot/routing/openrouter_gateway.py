@@ -29,6 +29,7 @@ from friendly_bot.routing.contracts import (
     MatchRankingRequest,
     MultiIntentMatches,
     MultiIntentModelResult,
+    MultiIntentProviderPlan,
     MultiIntentRequest,
     MultiIntentTerminal,
     PersonaSummaryRequest,
@@ -49,12 +50,12 @@ _KEY_SELECTION_INSTRUCTION = (
     "Its value must be one of allowed_keys. Return no prose."
 )
 _MULTI_INTENT_RESPONSE_INSTRUCTION = (
-    "Return only one JSON object with exactly one of these shapes: "
-    '{"kind":"matches","matches":[...]} when one or more flows are selected; '
-    'or {"kind":"terminal","terminal":"no_match"} or '
-    '{"kind":"terminal","terminal":"clarify_ambiguous_context"} '
-    "when no flow is selected. Do not omit the required matches or terminal field, "
-    "and do not add any field. First determine the user's intended request from "
+    "Return only one JSON object with exactly these three fields: kind, matches, and "
+    "terminal. When one or more flows are selected, use kind matches, include one to "
+    "five matches, and set terminal to not_applicable. When no flow is selected, use "
+    "kind terminal, set matches to [], and set terminal to no_match or "
+    "clarify_ambiguous_context. Do not omit any field or add any field. First determine "
+    "the user's intended request from "
     "the current message. Choose a configured flow only when the message "
     "explicitly requests the answer or action in its gist or possible_qns. "
     "possible_qns are concrete examples of that one flow, not permission to "
@@ -112,8 +113,8 @@ _MULTI_INTENT_RESPONSE_INSTRUCTION = (
     "disclosure of immediate danger, abuse, self-harm, or an urgent request for "
     "a trusted adult. Do not infer safety from ambiguous requests for help."
 )
-_MULTI_INTENT_RESULT_ADAPTER: TypeAdapter[MultiIntentModelResult] = TypeAdapter(
-    MultiIntentModelResult
+_MULTI_INTENT_PROVIDER_PLAN_ADAPTER: TypeAdapter[MultiIntentProviderPlan] = TypeAdapter(
+    MultiIntentProviderPlan
 )
 OPENROUTER_INPUT_OUTPUT_LOGGING_ATTESTATION = (
     "disabled-globally-or-friendly-bot-key-excluded"
@@ -691,11 +692,18 @@ class OpenRouterGateway:
             except json.JSONDecodeError:
                 return _ProviderProtocolFailure(capability)
             try:
-                proposed = _MULTI_INTENT_RESULT_ADAPTER.validate_python(parsed)
+                proposed = _MULTI_INTENT_PROVIDER_PLAN_ADAPTER.validate_python(parsed)
             except ValidationError:
                 return _ProviderProtocolFailure(capability)
-            if isinstance(proposed, MultiIntentTerminal):
-                return _DecodedProviderValue(proposed, capability)
+            if proposed.kind == "terminal":
+                if proposed.matches or proposed.terminal == "not_applicable":
+                    return _ProviderProtocolFailure(capability)
+                return _DecodedProviderValue(
+                    MultiIntentTerminal(kind="terminal", terminal=proposed.terminal),
+                    capability,
+                )
+            if proposed.terminal != "not_applicable" or not proposed.matches:
+                return _ProviderProtocolFailure(capability)
             if has_duplicate_candidate_ids:
                 return _ProviderProtocolFailure(capability)
             normalized = _normalize_matches(proposed.matches, candidates)
@@ -832,34 +840,26 @@ def _multi_intent_response_format(request: MultiIntentRequest) -> dict[str, obje
     return _json_schema_response_format(
         name="friendly_bot_multi_intent",
         schema={
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"type": "string", "enum": ["matches"]},
-                        "matches": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 5,
-                            "items": _planned_flow_schema(flow_ids),
-                        },
-                    },
-                    "required": ["kind", "matches"],
-                    "additionalProperties": False,
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["matches", "terminal"]},
+                "matches": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 5,
+                    "items": _planned_flow_schema(flow_ids),
                 },
-                {
-                    "type": "object",
-                    "properties": {
-                        "kind": {"type": "string", "enum": ["terminal"]},
-                        "terminal": {
-                            "type": "string",
-                            "enum": ["no_match", "clarify_ambiguous_context"],
-                        },
-                    },
-                    "required": ["kind", "terminal"],
-                    "additionalProperties": False,
+                "terminal": {
+                    "type": "string",
+                    "enum": [
+                        "not_applicable",
+                        "no_match",
+                        "clarify_ambiguous_context",
+                    ],
                 },
-            ]
+            },
+            "required": ["kind", "matches", "terminal"],
+            "additionalProperties": False,
         },
     )
 
