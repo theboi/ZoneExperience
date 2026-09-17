@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -20,12 +20,30 @@ type LoginResultKind = Literal[
     "not_started",
 ]
 
+type OperationalCommandInputKind = Literal[
+    "not_active",
+    "login_name_captured",
+    "login_name_invalid",
+    "login_dob_invalid",
+    "login_attached",
+    "login_interests_required",
+    "login_occupied",
+    "login_not_found",
+    "login_not_started",
+    "interests_saved",
+    "interests_invalid",
+    "interests_not_attached",
+]
+
 _OPERATIONAL_ROLES = frozenset(
     {OperationalRole.SERVER, OperationalRole.LEADER, OperationalRole.STAFF}
 )
 _LOGIN_ATTEMPT_TTL = timedelta(minutes=10)
 _MAX_INTERESTS = 10
 _MAX_INTEREST_LENGTH = 120
+_LOGIN_NAME_STEP = "login_name"
+_LOGIN_DOB_STEP = "login_dob"
+_INTERESTS_STEP = "interests"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +53,17 @@ class LoginResult:
     kind: LoginResultKind
     opens_interest_capture: bool = False
     opens_interest_editor: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalCommandInputResult:
+    """A local command-session result that must never reach discussion routing."""
+
+    kind: OperationalCommandInputKind
+
+    @property
+    def handled(self) -> bool:
+        return self.kind != "not_active"
 
 
 class OperationalAccountService:
@@ -96,22 +125,119 @@ class OperationalAccountService:
             ),
         )
 
-    async def begin_login_in_uow(
+    async def start_login_in_uow(
         self,
         uow: UnitOfWork,
         *,
         user_id: UUID,
-        name: str,
         now: datetime,
     ) -> None:
-        """Retain only a normalized name until the following DOB reply arrives."""
+        """Open a local-only command session which waits for the login name."""
 
         await uow.operational_login_attempts.start(
             user_id,
-            normalized_name=normalize_operational_name(name),
+            step=_LOGIN_NAME_STEP,
+            normalized_name=None,
             expires_at=now + _LOGIN_ATTEMPT_TTL,
             at=now,
         )
+
+    async def start_interest_management_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        now: datetime,
+    ) -> bool:
+        """Open a local-only interest editor for the current operational account."""
+
+        managed = await self.manage_in_uow(uow, user_id=user_id, now=now)
+        if not managed.opens_interest_editor:
+            return False
+        await uow.operational_login_attempts.start(
+            user_id,
+            step=_INTERESTS_STEP,
+            normalized_name=None,
+            expires_at=now + _LOGIN_ATTEMPT_TTL,
+            at=now,
+        )
+        return True
+
+    async def process_pending_input_in_uow(
+        self,
+        uow: UnitOfWork,
+        *,
+        user_id: UUID,
+        text: str,
+        now: datetime,
+    ) -> OperationalCommandInputResult:
+        """Consume only an active local command session before discussion routing."""
+
+        attempt = await uow.operational_login_attempts.current(user_id, now=now)
+        if attempt is None:
+            return OperationalCommandInputResult("not_active")
+        if attempt.step == _LOGIN_NAME_STEP:
+            try:
+                normalized_name = normalize_operational_name(text)
+            except ValueError:
+                return OperationalCommandInputResult("login_name_invalid")
+            await uow.operational_login_attempts.start(
+                user_id,
+                step=_LOGIN_DOB_STEP,
+                normalized_name=normalized_name,
+                expires_at=now + _LOGIN_ATTEMPT_TTL,
+                at=now,
+            )
+            return OperationalCommandInputResult("login_name_captured")
+        if attempt.step == _LOGIN_DOB_STEP:
+            try:
+                dob = parse_operational_dob(text)
+            except ValueError:
+                return OperationalCommandInputResult("login_dob_invalid")
+            if attempt.normalized_name is None:
+                await uow.operational_login_attempts.clear(user_id)
+                return OperationalCommandInputResult("login_not_started")
+            await uow.operational_login_attempts.clear(user_id)
+            result = await self.login_in_uow(
+                uow,
+                user_id=user_id,
+                normalized_name=attempt.normalized_name,
+                dob=dob,
+                now=now,
+            )
+            if result.opens_interest_capture:
+                await uow.operational_login_attempts.start(
+                    user_id,
+                    step=_INTERESTS_STEP,
+                    normalized_name=None,
+                    expires_at=now + _LOGIN_ATTEMPT_TTL,
+                    at=now,
+                )
+                return OperationalCommandInputResult("login_interests_required")
+            if result.kind == "attached":
+                return OperationalCommandInputResult("login_attached")
+            if result.kind == "occupied":
+                return OperationalCommandInputResult("login_occupied")
+            if result.kind == "not_found":
+                return OperationalCommandInputResult("login_not_found")
+            raise AssertionError("operational login returned an unsupported outcome")
+        if attempt.step == _INTERESTS_STEP:
+            try:
+                interests = normalize_operational_interests(_split_interests(text))
+            except ValueError:
+                return OperationalCommandInputResult("interests_invalid")
+            await uow.operational_login_attempts.clear(user_id)
+            saved = await self.update_interests_in_uow(
+                uow,
+                user_id=user_id,
+                interests=interests,
+                now=now,
+            )
+            return OperationalCommandInputResult(
+                "interests_saved" if saved else "interests_not_attached"
+            )
+        await uow.operational_login_attempts.clear(user_id)
+        return OperationalCommandInputResult("not_active")
 
     async def complete_login_in_uow(
         self,
@@ -121,11 +247,15 @@ class OperationalAccountService:
         dob: date,
         now: datetime,
     ) -> LoginResult:
-        """Consume the short-lived name and perform exactly one exclusive attachment."""
+        """Compatibility entry point for callers that already hold a parsed DOB."""
 
-        attempt = await uow.operational_login_attempts.consume(user_id, now=now)
-        if attempt is None:
+        attempt = await uow.operational_login_attempts.current(user_id, now=now)
+        if attempt is None or attempt.step != _LOGIN_DOB_STEP:
             return LoginResult("not_started")
+        if attempt.normalized_name is None:
+            await uow.operational_login_attempts.clear(user_id)
+            return LoginResult("not_started")
+        await uow.operational_login_attempts.clear(user_id)
         return await self.login_in_uow(
             uow,
             user_id=user_id,
@@ -224,3 +354,19 @@ def normalize_operational_interests(values: list[str]) -> list[str]:
     if not normalized or len(normalized) > _MAX_INTERESTS:
         raise ValueError("provide between one and ten interests")
     return normalized
+
+
+def parse_operational_dob(value: str) -> date:
+    """Parse the explicit DOB formats accepted by the direct `/login` command."""
+
+    cleaned = value.strip()
+    for format_string in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(cleaned, format_string).replace(tzinfo=UTC).date()
+        except ValueError:
+            continue
+    raise ValueError("date of birth is invalid")
+
+
+def _split_interests(value: str) -> list[str]:
+    return [part for part in value.replace(";", ",").replace("\n", ",").split(",") if part]

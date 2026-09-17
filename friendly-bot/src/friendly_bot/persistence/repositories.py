@@ -96,10 +96,11 @@ class OperationalLoginRecord:
 
 @dataclass(frozen=True, slots=True)
 class OperationalLoginAttemptRecord:
-    """The only retained value between the name and DOB steps of `/login`."""
+    """The bounded local state for one operational-account command."""
 
     user_id: UUID
-    normalized_name: str
+    step: str
+    normalized_name: str | None
     expires_at: datetime
 
 
@@ -355,12 +356,13 @@ class OperationalLoginAttemptRepository(Protocol):
         self,
         user_id: UUID,
         *,
-        normalized_name: str,
+        step: str,
+        normalized_name: str | None,
         expires_at: datetime,
         at: datetime,
     ) -> OperationalLoginAttemptRecord: ...
 
-    async def consume(
+    async def current(
         self, user_id: UUID, *, now: datetime
     ) -> OperationalLoginAttemptRecord | None: ...
 
@@ -639,6 +641,7 @@ def _login_attempt_record(
 ) -> OperationalLoginAttemptRecord:
     return OperationalLoginAttemptRecord(
         user_id=row.user_id,
+        step=row.step,
         normalized_name=row.normalized_name,
         expires_at=row.expires_at,
     )
@@ -1112,7 +1115,8 @@ class SqlAlchemyOperationalLoginAttemptRepository:
         self,
         user_id: UUID,
         *,
-        normalized_name: str,
+        step: str,
+        normalized_name: str | None,
         expires_at: datetime,
         at: datetime,
     ) -> OperationalLoginAttemptRecord:
@@ -1120,6 +1124,7 @@ class SqlAlchemyOperationalLoginAttemptRepository:
             pg_insert(OperationalLoginAttempt)
             .values(
                 user_id=user_id,
+                step=step,
                 normalized_name=normalized_name,
                 expires_at=expires_at,
                 created_at=at,
@@ -1128,6 +1133,7 @@ class SqlAlchemyOperationalLoginAttemptRepository:
             .on_conflict_do_update(
                 index_elements=[OperationalLoginAttempt.user_id],
                 set_={
+                    "step": step,
                     "normalized_name": normalized_name,
                     "expires_at": expires_at,
                     "updated_at": at,
@@ -1139,16 +1145,16 @@ class SqlAlchemyOperationalLoginAttemptRepository:
             raise RuntimeError("operational login attempt could not be saved")
         return _login_attempt_record(row)
 
-    async def consume(
+    async def current(
         self, user_id: UUID, *, now: datetime
     ) -> OperationalLoginAttemptRecord | None:
         row = await self._session.scalar(
-            delete(OperationalLoginAttempt)
+            select(OperationalLoginAttempt)
             .where(
                 OperationalLoginAttempt.user_id == user_id,
                 OperationalLoginAttempt.expires_at > now,
             )
-            .returning(OperationalLoginAttempt)
+            .with_for_update()
         )
         if row is not None:
             return _login_attempt_record(row)

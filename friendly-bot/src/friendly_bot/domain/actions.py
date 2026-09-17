@@ -97,62 +97,6 @@ class SaveIncomingAction(DiscussionActionBase):
     preserve_exact_text: bool
 
 
-class CaptureOperationalLoginNameAction(DiscussionActionBase):
-    """Persist the name supplied after `/login` for the immediately following DOB step."""
-
-    type: Literal["capture_operational_login_name"]
-    declared_event_keys: ClassVar[frozenset[str]] = frozenset(
-        {"operational_login.name_captured", "operational_login.name_invalid"}
-    )
-
-
-class CompleteOperationalLoginAction(DiscussionActionBase):
-    """Attach the active Telegram user to the pre-authorized operational profile."""
-
-    type: Literal["complete_operational_login"]
-    declared_event_keys: ClassVar[frozenset[str]] = frozenset(
-        {
-            "operational_login.attached",
-            "operational_login.interests_required",
-            "operational_login.occupied",
-            "operational_login.not_found",
-            "operational_login.not_started",
-            "operational_login.dob_invalid",
-        }
-    )
-
-
-class SaveOperationalInterestsAction(DiscussionActionBase):
-    """Store the active operational user's comma-separated interests."""
-
-    type: Literal["save_operational_interests"]
-    declared_event_keys: ClassVar[frozenset[str]] = frozenset(
-        {
-            "operational_interests.saved",
-            "operational_interests.invalid",
-            "operational_interests.not_attached",
-        }
-    )
-
-
-class ManageOperationalAccountAction(DiscussionActionBase):
-    """Resolve whether the current Telegram user can edit an attached profile."""
-
-    type: Literal["manage_operational_account"]
-    declared_event_keys: ClassVar[frozenset[str]] = frozenset(
-        {"operational_manage.editor", "operational_manage.not_attached"}
-    )
-
-
-class LogoutOperationalAccountAction(DiscussionActionBase):
-    """Detach the current Telegram user from their attached operational profile."""
-
-    type: Literal["logout_operational_account"]
-    declared_event_keys: ClassVar[frozenset[str]] = frozenset(
-        {"operational_logout.detached", "operational_logout.not_attached"}
-    )
-
-
 class AddServiceAttendanceAction(DiscussionActionBase):
     type: Literal["add_service_attendance"]
     attendance_status: Literal["ordinary", "latecomer"]
@@ -271,11 +215,6 @@ DiscussionAction = Annotated[
     | SendPhotoAction
     | ShowActivityAction
     | SaveIncomingAction
-    | CaptureOperationalLoginNameAction
-    | CompleteOperationalLoginAction
-    | SaveOperationalInterestsAction
-    | ManageOperationalAccountAction
-    | LogoutOperationalAccountAction
     | AddServiceAttendanceAction
     | SelectServiceAttendanceAction
     | EnterServiceCheckpointAction

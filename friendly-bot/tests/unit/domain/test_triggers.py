@@ -18,8 +18,6 @@ def test_registered_trigger_forms_parse_their_canonical_fields() -> None:
         parse_trigger({"type": "button", "button_id": "zone_x.menu.help"}).type
         == "button"
     )
-    assert parse_trigger({"type": "command", "command": "/start"}).type == "command"
-    assert parse_trigger({"type": "any_message"}).type == "any_message"
     assert parse_trigger({"type": "automatic"}).type == "automatic"
     assert (
         parse_trigger({"type": "action_event", "event_key": "human_match.found"}).type
@@ -39,8 +37,8 @@ def test_registered_trigger_forms_parse_their_canonical_fields() -> None:
             "possible_qns": ["when is Arrow?"],
         },
         {"type": "button", "button_id": "Bad Button"},
-        {"type": "command", "command": "start"},
-        {"type": "command", "command": "/start@friendly_bot"},
+        {"type": "command", "command": "/start"},
+        {"type": "any_message"},
         {"type": "action_event", "event_key": "Bad Event"},
     ],
 )

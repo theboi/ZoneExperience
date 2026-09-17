@@ -14,7 +14,6 @@ from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.state import OpenSelectionState
 from friendly_bot.matching.service import MatchingService
-from friendly_bot.onboarding.accounts import OperationalAccountService
 from friendly_bot.persistence.repositories import (
     DiagnosticRepository,
     FlowVersionRecord,
@@ -111,7 +110,6 @@ class ActionContext:
     lifecycle: ServiceLifecycleService
     matching: MatchingService
     diagnostics: DiagnosticRepository
-    operational_accounts: OperationalAccountService | None = None
     navigation: ActionNavigation | None = None
     reply_plan: ReplyPlan = field(default_factory=lambda: ReplyPlan(()))
     presentation_buffer: PresentationBuffer = field(default_factory=PresentationBuffer)
@@ -418,13 +416,6 @@ class ActionContext:
         if self.navigation is None:
             raise RuntimeError("action navigation is not configured")
         return self.navigation
-
-    def require_operational_accounts(self) -> OperationalAccountService:
-        """Return the locally composed operational-account service for account actions."""
-
-        if self.operational_accounts is None:
-            raise RuntimeError("operational account service is not configured")
-        return self.operational_accounts
 
     @property
     def terminal_event(self) -> ActionEvent | None:

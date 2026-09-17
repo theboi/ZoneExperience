@@ -42,27 +42,9 @@ class OnMessageTrigger(DiscussionTriggerBase):
         return self
 
 
-class OnAnyMessageTrigger(DiscussionTriggerBase):
-    """Consume the next text only while a deterministic local capture is current."""
-
-    type: Literal["any_message"]
-
-
 class OnButtonPressTrigger(DiscussionTriggerBase):
     type: Literal["button"]
     button_id: StableButtonId
-
-
-class OnCommandTrigger(DiscussionTriggerBase):
-    type: Literal["command"]
-    command: NonEmptyText
-
-    @field_validator("command")
-    @classmethod
-    def command_is_normalized(cls, value: str) -> str:
-        if not value.startswith("/") or "@" in value:
-            raise ValueError("command must start with '/' and omit any bot suffix")
-        return value
 
 
 class AutomaticTrigger(DiscussionTriggerBase):
@@ -76,9 +58,7 @@ class OnActionEventTrigger(DiscussionTriggerBase):
 
 RegisteredDiscussionTrigger = Annotated[
     OnMessageTrigger
-    | OnAnyMessageTrigger
     | OnButtonPressTrigger
-    | OnCommandTrigger
     | AutomaticTrigger
     | OnActionEventTrigger,
     Field(discriminator="type"),

@@ -27,6 +27,11 @@ from friendly_bot.domain.state import (
     SelectionTransition,
 )
 from friendly_bot.matching.service import MatchingService
+from friendly_bot.onboarding.accounts import (
+    LoginResult,
+    OperationalAccountService,
+    OperationalCommandInputResult,
+)
 from friendly_bot.onboarding.service import OnboardingService
 from friendly_bot.persistence.models import (
     FlowScopeKind,
@@ -334,6 +339,40 @@ class FakeUnitOfWork:
         self.locked_user_ids.append(user_id)
 
 
+@dataclass
+class DirectCommandAccounts:
+    """A command-only double that fails the test if normal routing is reached."""
+
+    input_results: list[OperationalCommandInputResult]
+    started_login_for: list[UUID] = field(default_factory=list)
+    input_values: list[str] = field(default_factory=list)
+
+    async def start_login_in_uow(
+        self, _uow: UnitOfWork, *, user_id: UUID, now: datetime
+    ) -> None:
+        assert now == NOW
+        self.started_login_for.append(user_id)
+
+    async def start_interest_management_in_uow(
+        self, _uow: UnitOfWork, *, user_id: UUID, now: datetime
+    ) -> bool:
+        assert user_id and now == NOW
+        return False
+
+    async def process_pending_input_in_uow(
+        self, _uow: UnitOfWork, *, user_id: UUID, text: str, now: datetime
+    ) -> OperationalCommandInputResult:
+        assert user_id and now == NOW
+        self.input_values.append(text)
+        return self.input_results.pop(0)
+
+    async def logout_in_uow(
+        self, _uow: UnitOfWork, *, user_id: UUID, now: datetime
+    ) -> LoginResult:
+        assert user_id and now == NOW
+        return LoginResult("not_attached")
+
+
 def _root() -> DiscussionFlow:
     return DiscussionFlow.model_validate(
         {
@@ -407,6 +446,7 @@ def _application(
     router: ConstrainedRouter | None = None,
     onboarding: OnboardingService | None = None,
     services: ServiceAttendanceService | None = None,
+    operational_accounts: OperationalAccountService | None = None,
 ) -> FriendlyBotApplication:
     registry = ActionExecutorRegistry()
 
@@ -451,6 +491,7 @@ def _application(
         router=router or cast(ConstrainedRouter, AuthoredKnownFlowRouter()),
         zone_x=zone_x,
         onboarding=onboarding,
+        operational_accounts=operational_accounts,
     )
 
 
@@ -478,6 +519,7 @@ def _fixture(
     display_name: str | None = "Ryan",
     router: ConstrainedRouter | None = None,
     onboarding: OnboardingService | None = None,
+    operational_accounts: OperationalAccountService | None = None,
 ) -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
     root = _root()
     version = _version(root)
@@ -518,6 +560,7 @@ def _fixture(
             service,
             router=router,
             onboarding=onboarding,
+            operational_accounts=operational_accounts,
             services=ServiceAttendanceService(lambda: cast(UnitOfWork, uow)),
         ),
         uow,
@@ -676,6 +719,58 @@ async def test_start_and_name_capture_do_not_invoke_model_routing() -> None:
     assert uow.attendances.started == [
         (uow.users.user.id, next(iter(uow.services_by_id)), "ordinary")
     ]
+
+
+async def test_operational_login_name_is_handled_before_onboarding_or_routing() -> None:
+    """A direct account command must consume its reply without an LLM candidate pass."""
+
+    accounts = DirectCommandAccounts(
+        [OperationalCommandInputResult("login_name_captured")]
+    )
+    application, uow, user = _fixture(
+        display_name=None,
+        router=cast(ConstrainedRouter, RejectingRouter()),
+        operational_accounts=cast(OperationalAccountService, accounts),
+    )
+
+    started = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=31, text="/login"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+    named = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=32, text="ryan the"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert accounts.started_login_for == [user.id]
+    assert accounts.input_values == ["ryan the"]
+    assert [presentation.text for presentation in started.presentations] == [
+        "hey! please reply with the name on your server or leader profile."
+    ]
+    assert [presentation.text for presentation in named.presentations] == [
+        "thanks! now reply with your date of birth in DD/MM/YYYY format."
+    ]
+
+
+async def test_unknown_slash_command_never_enters_discussion_routing() -> None:
+    """Slash commands have one direct command boundary outside discussion flows."""
+
+    application, uow, user = _fixture(router=cast(ConstrainedRouter, RejectingRouter()))
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=33, text="/unrecognised"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result == DispatchResult(
+        "ignored",
+        presentations=(
+            TelegramTextPresentation(77, "sorry, i don't recognize that command."),
+        ),
+    )
 
 
 async def test_existing_start_opens_the_system_path_without_model_routing() -> None:

@@ -46,10 +46,8 @@ from friendly_bot.domain.state import OpenSelectionState, SelectionTransitionEng
 from friendly_bot.domain.triggers import (
     DiscussionTrigger,
     OnActionEventTrigger,
-    OnAnyMessageTrigger,
     OnAnyOfTrigger,
     OnButtonPressTrigger,
-    OnCommandTrigger,
     OnMessageTrigger,
 )
 from friendly_bot.error_logs import error_log_name, write_error_log
@@ -57,6 +55,7 @@ from friendly_bot.intents import PendingIntentService
 from friendly_bot.matching.service import MatchingService
 from friendly_bot.onboarding.accounts import (
     OperationalAccountService,
+    OperationalCommandInputKind,
     normalize_operational_name,
 )
 from friendly_bot.onboarding.service import OnboardingService
@@ -143,6 +142,21 @@ _ZONE_X_TEMPLATE_CONTEXT: Final = TemplateContextSchema(
         "user.name",
     }
 )
+
+_SPECIAL_COMMAND_MESSAGES: Final[dict[OperationalCommandInputKind, str]] = {
+    "login_name_captured": "thanks! now reply with your date of birth in DD/MM/YYYY format.",
+    "login_name_invalid": "please reply with the name on your server or leader profile.",
+    "login_dob_invalid": "please use a real date in DD/MM/YYYY format.",
+    "login_attached": "you are logged in! use /manage whenever you want to update your interests, or /logout when you are done.",
+    "login_interests_required": "you are logged in! tell me one or more interests or conversation topics, separated by commas, so i can help make good connections.",
+    "login_occupied": "i could not log you in because that profile is currently unavailable. please check with a leader if you need help.",
+    "login_not_found": "i could not verify those login details. please check them and start /login again.",
+    "login_not_started": "your login request expired. please start /login again.",
+    "interests_saved": "saved! your interests are ready to use for matching. use /manage to change them or /logout when you are done.",
+    "interests_invalid": "please send between one and ten short interests, separated by commas.",
+    "interests_not_attached": "your login is no longer active, so your interests were not changed. please start /login again.",
+    "not_active": "",
+}
 
 
 class SeedModuleLoadError(RuntimeError):
@@ -294,6 +308,7 @@ class FriendlyBotApplication:
         zone_x: PublishedZoneX,
         routing_policy: RuntimeRoutingPolicy | None = None,
         onboarding: OnboardingService | None = None,
+        operational_accounts: OperationalAccountService | None = None,
     ) -> None:
         self._dependencies = dependencies
         self._runner = ActionRunner(registry)
@@ -301,6 +316,7 @@ class FriendlyBotApplication:
         self._zone_x = zone_x
         self._routing_policy = routing_policy or RuntimeRoutingPolicy()
         self._onboarding = onboarding
+        self._operational_accounts = operational_accounts
         self._navigation = _ApplicationNavigation(self)
 
     async def dispatch(
@@ -330,6 +346,15 @@ class FriendlyBotApplication:
             return self._with_presentations(result, presentations)
 
         assert incoming.text is not None
+        special_command = await self._dispatch_special_command(
+            user=user,
+            incoming=incoming,
+            unit_of_work=unit_of_work,
+            now=now,
+            presentations=presentations,
+        )
+        if special_command is not None:
+            return self._with_presentations(special_command, presentations)
         onboarding = await self._dispatch_onboarding(
             user=user,
             incoming=incoming,
@@ -360,49 +385,6 @@ class FriendlyBotApplication:
                 ),
                 at=now,
             )
-        command = normalize_command(incoming.text)
-        if command.startswith("/"):
-            selection = await self._find_direct_selection(
-                unit_of_work=unit_of_work,
-                user=user,
-                now=now,
-                matcher=lambda child: _matches_command(child.trigger, command),
-            )
-            if selection is not None:
-                executed = await self._execute_selection(
-                    selection,
-                    user=user,
-                    incoming=incoming,
-                    unit_of_work=unit_of_work,
-                    correlation_id=correlation_id,
-                    now=now,
-                    executed_flow_keys=set(),
-                    presentations=presentations,
-                )
-                return self._result(
-                    "selected", executed.executed_flow_keys, presentations
-                )
-
-        deterministic_capture = await self._find_direct_selection(
-            unit_of_work=unit_of_work,
-            user=user,
-            now=now,
-            matcher=lambda child: _matches_any_message(child.trigger),
-            skip_invalid_branches=True,
-        )
-        if deterministic_capture is not None:
-            executed = await self._execute_selection(
-                deterministic_capture,
-                user=user,
-                incoming=incoming,
-                unit_of_work=unit_of_work,
-                correlation_id=correlation_id,
-                now=now,
-                executed_flow_keys=set(),
-                presentations=presentations,
-            )
-            return self._result("selected", executed.executed_flow_keys, presentations)
-
         try:
             routing = await self._router.route_update_in_uow(
                 unit_of_work,
@@ -516,6 +498,76 @@ class FriendlyBotApplication:
             return self._result("no_match", tuple(selected), presentations)
         return self._result("selected", tuple(selected), presentations)
 
+    async def _dispatch_special_command(
+        self,
+        *,
+        user: UserRecord,
+        incoming: TelegramMessage,
+        unit_of_work: UnitOfWork,
+        now: datetime,
+        presentations: PresentationBuffer,
+    ) -> DispatchResult | None:
+        """Handle every slash command and command-session reply before flow routing."""
+
+        text = incoming.text
+        assert text is not None
+        command = normalize_command(text)
+        accounts = self._operational_accounts
+        if command == "/login":
+            if accounts is None:
+                raise RuntimeError("operational account service is not configured")
+            await accounts.start_login_in_uow(unit_of_work, user_id=user.id, now=now)
+            self._append_fixed_text(
+                presentations,
+                user,
+                "hey! please reply with the name on your server or leader profile.",
+            )
+            return DispatchResult("selected")
+        if command == "/manage":
+            if accounts is None:
+                raise RuntimeError("operational account service is not configured")
+            can_manage = await accounts.start_interest_management_in_uow(
+                unit_of_work, user_id=user.id, now=now
+            )
+            self._append_fixed_text(
+                presentations,
+                user,
+                "send your updated interests or conversation topics, separated by commas."
+                if can_manage
+                else "you are not logged in as a server or leader. start /login first.",
+            )
+            return DispatchResult("selected")
+        if command == "/logout":
+            if accounts is None:
+                raise RuntimeError("operational account service is not configured")
+            logout_result = await accounts.logout_in_uow(
+                unit_of_work, user_id=user.id, now=now
+            )
+            self._append_fixed_text(
+                presentations,
+                user,
+                "you are logged out. your profile and interests are still saved for next time."
+                if logout_result.kind == "detached"
+                else "you are not currently logged in as a server or leader.",
+            )
+            return DispatchResult("selected")
+        if command.startswith("/") and command != "/start":
+            self._append_fixed_text(
+                presentations, user, "sorry, i don't recognize that command."
+            )
+            return DispatchResult("ignored")
+        if command.startswith("/") or accounts is None:
+            return None
+        input_result = await accounts.process_pending_input_in_uow(
+            unit_of_work, user_id=user.id, text=text, now=now
+        )
+        if not input_result.handled:
+            return None
+        self._append_fixed_text(
+            presentations, user, _SPECIAL_COMMAND_MESSAGES[input_result.kind]
+        )
+        return DispatchResult("selected")
+
     async def _dispatch_onboarding(
         self,
         *,
@@ -529,12 +581,6 @@ class FriendlyBotApplication:
         """Handle deterministic onboarding before provider-backed message routing."""
 
         if self._onboarding is None:
-            return None
-        if normalize_command(incoming.text or "") in {
-            "/login",
-            "/manage",
-            "/logout",
-        }:
             return None
         result = await self._onboarding.handle_in_uow(
             unit_of_work,
@@ -760,7 +806,6 @@ class FriendlyBotApplication:
         matcher: Callable[[DiscussionFlow], bool],
         service: ServiceRecord | None = None,
         match_request: MatchRequestRecord | None = None,
-        skip_invalid_branches: bool = False,
     ) -> _DirectSelection | None:
         matches: list[_DirectSelection] = []
         for branch in await self._valid_branches(unit_of_work, user.id, now=now):
@@ -770,17 +815,10 @@ class FriendlyBotApplication:
                 and branch.service_id != match_request.service_id
             ):
                 continue
-            try:
-                version = await unit_of_work.flow_versions.get(branch.flow_version_id)
-            except LookupError:
-                if skip_invalid_branches:
-                    continue
-                raise
+            version = await unit_of_work.flow_versions.get(branch.flow_version_id)
             root = _root_from_version(version)
             parent = _find_flow(root, branch.parent_flow_key)
             if parent is None:
-                if skip_invalid_branches:
-                    continue
                 raise ValueError(
                     "open selection parent is absent from its flow version"
                 )
@@ -1129,7 +1167,6 @@ class FriendlyBotApplication:
             lifecycle=self._dependencies.lifecycle,
             matching=self._dependencies.matching,
             diagnostics=unit_of_work.diagnostics,
-            operational_accounts=self._dependencies.operational_accounts,
             navigation=self._navigation,
             reply_plan=reply_plan or ReplyPlan(()),
             presentation_buffer=presentations or PresentationBuffer(),
@@ -1441,25 +1478,9 @@ def _matches_button(trigger: DiscussionTrigger | None, button_id: str) -> bool:
     )
 
 
-def _matches_command(trigger: DiscussionTrigger | None, command: str) -> bool:
-    return any(
-        isinstance(candidate, OnCommandTrigger) and candidate.command == command
-        for candidate in _trigger_options(trigger)
-    )
-
-
 def _matches_message(trigger: DiscussionTrigger | None) -> bool:
     return any(
         isinstance(candidate, OnMessageTrigger)
-        for candidate in _trigger_options(trigger)
-    )
-
-
-def _matches_any_message(trigger: DiscussionTrigger | None) -> bool:
-    """Identify a local reply capture that deliberately bypasses provider routing."""
-
-    return any(
-        isinstance(candidate, OnAnyMessageTrigger)
         for candidate in _trigger_options(trigger)
     )
 
@@ -1699,7 +1720,6 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
                 services=services,
                 lifecycle=lifecycle,
                 matching=matching,
-                operational_accounts=operational_accounts,
             )
         )
         system_global_seed = load_system_global_seed(
@@ -1714,12 +1734,12 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
                 services=services,
                 lifecycle=lifecycle,
                 matching=matching,
-                operational_accounts=operational_accounts,
             ),
             registry=registry,
             router=ConstrainedRouter(unit_of_work_factory, router_gateway),
             zone_x=zone_x,
             onboarding=onboarding,
+            operational_accounts=operational_accounts,
         )
         sender = BestEffortTelegramSender(
             telegram,

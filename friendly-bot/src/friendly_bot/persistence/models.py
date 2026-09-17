@@ -210,12 +210,13 @@ class OperationalLogin(Base):
 
 
 class OperationalLoginAttempt(Base):
-    """The short-lived name captured before an operational user supplies their DOB."""
+    """The short-lived state for one local operational-account command."""
 
     __tablename__ = "operational_login_attempts"
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    normalized_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    step: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_name: Mapped[str | None] = mapped_column(String(256))
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

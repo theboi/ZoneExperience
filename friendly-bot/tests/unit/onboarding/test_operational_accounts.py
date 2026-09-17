@@ -201,24 +201,25 @@ class OperationalLoginFlowUow:
         self,
         user_id: UUID,
         *,
-        normalized_name: str,
+        step: str,
+        normalized_name: str | None,
         expires_at: datetime,
         at: datetime,
     ) -> OperationalLoginAttemptRecord:
         assert user_id == INGRESS_USER_ID and at == NOW
         self.attempt = OperationalLoginAttemptRecord(
             user_id=user_id,
+            step=step,
             normalized_name=normalized_name,
             expires_at=expires_at,
         )
         return self.attempt
 
-    async def consume(
+    async def current(
         self, user_id: UUID, *, now: datetime
     ) -> OperationalLoginAttemptRecord | None:
         assert user_id == INGRESS_USER_ID and now == NOW
-        attempt, self.attempt = self.attempt, None
-        return attempt
+        return self.attempt
 
     async def clear(self, user_id: UUID) -> None:
         assert user_id == INGRESS_USER_ID
@@ -278,7 +279,7 @@ class OperationalLoginFlowUow:
         return profile
 
 
-async def test_login_flow_keeps_dob_out_of_durable_attempt_state_and_updates_interests() -> (
+async def test_direct_login_command_session_keeps_dob_out_of_durable_state() -> (
     None
 ):
     """The name expires quickly; the DOB is consumed immediately and never stored."""
@@ -286,27 +287,36 @@ async def test_login_flow_keeps_dob_out_of_durable_attempt_state_and_updates_int
     uow = OperationalLoginFlowUow()
     accounts = OperationalAccountService(lambda: uow)
 
-    await accounts.begin_login_in_uow(
-        uow, user_id=INGRESS_USER_ID, name=" Ryan   The ", now=NOW
+    await accounts.start_login_in_uow(
+        uow, user_id=INGRESS_USER_ID, now=NOW
     )
     assert uow.attempt is not None
-    assert uow.attempt.normalized_name == "ryan the"
+    assert uow.attempt.step == "login_name"
+    assert uow.attempt.normalized_name is None
     assert uow.attempt.expires_at > NOW
     assert not hasattr(uow.attempt, "dob")
 
-    attached = await accounts.complete_login_in_uow(
-        uow, user_id=INGRESS_USER_ID, dob=DOB, now=NOW
+    captured = await accounts.process_pending_input_in_uow(
+        uow, user_id=INGRESS_USER_ID, text=" Ryan   The ", now=NOW
     )
-    saved = await accounts.update_interests_in_uow(
+    assert uow.attempt is not None
+    assert uow.attempt.step == "login_dob"
+    assert uow.attempt.normalized_name == "ryan the"
+
+    attached = await accounts.process_pending_input_in_uow(
+        uow, user_id=INGRESS_USER_ID, text="02/04/1999", now=NOW
+    )
+    saved = await accounts.process_pending_input_in_uow(
         uow,
         user_id=INGRESS_USER_ID,
-        interests=["music", " Music ", "football"],
+        text="music, Music, football",
         now=NOW,
     )
     logged_out = await accounts.logout_in_uow(uow, user_id=INGRESS_USER_ID, now=NOW)
 
-    assert attached == LoginResult("attached", opens_interest_capture=True)
-    assert saved is True
+    assert captured.kind == "login_name_captured"
+    assert attached.kind == "login_interests_required"
+    assert saved.kind == "interests_saved"
     assert uow.interests == ["music", "football"]
     assert logged_out == LoginResult("detached")
     assert uow.cleared is True
