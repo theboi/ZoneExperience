@@ -166,12 +166,46 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "multi_intent_mode": "answer",
                 "trigger": {
                     "type": "message",
-                    "llm_gist": "The person asks about anything related to New Creation Church (NCC) that is not specifically about its youth ministry, The Zone.",
+                    "llm_gist": "The person asks about anything related to NCC that is not specifically about The Zone.",
                 },
                 "actions": [
                     {
                         "type": "send_message_llm",
-                        "source": "At New Creation Church, we believe we are God's beloved. He demonstrated this by freely giving up heaven's best, His only Son Jesus, for you and me. When we catch a revelation of this truth, we are transformed by His grace from the inside out. That's the beauty of believing and living in our heavenly Father's love and grace! No matter who you are or where you come from, there's always a place for you in our church family!",
+                        "source": """
+                        ### Who We Are
+                        At New Creation Church, we believe we are God's beloved. He demonstrated this by freely giving up heaven's best, His only Son Jesus, for you and me. When we catch a revelation of this truth, we are transformed by His grace from the inside out. That's the beauty of believing and living in our heavenly Father's love and grace! No matter who you are or where you come from, there's always a place for you in our church family!
+                        
+                        ### Our Vision And Mission
+                        - Vision: To see Jesus in all the loveliness of His person and the perfection of His work, and to make Him known through the preaching of the gospel.
+                        - Mission: Loving, equipping, and growing people through grace to be a blessing.
+                        
+                        ### What We Believe
+                        New Creation Church is a local church based in Singapore. Our vision is to see Jesus in all of the loveliness of His person and the perfection of His work, and to make Him known through the preaching of the gospel.
+                        
+                        Learn more at https://newcreation.org.sg/about-us.
+                        """,
+                    }
+                ],
+                "next_flow_mode": "ALLOW_MANY",
+                "return_actions": [],
+                "next_flows": [],
+            },
+            {
+                "key": "system.global.information.beliefs",
+                "multi_intent_mode": "answer",
+                "trigger": {
+                    "type": "message",
+                    "llm_gist": "The person asks deeper about NCC's or The Zone's core beliefs.",
+                },
+                "actions": [
+                    {
+                        "type": "send_message_llm",
+                        "source": """
+                        ### What We Believe
+                        New Creation Church is a local church based in Singapore. Our vision is to see Jesus in all the loveliness of His person and the perfection of His work, and to make Him known through the preaching of the gospel.
+                        
+                        Learn more about the foundations of our faith and what we believe about overcoming sin, the power of grace, repentance, God's provision, the holy Communion, and the unity of the church to which God has called us in our statements of belief at https://www.newcreation.org.sg/whatwebelieve.
+                        """,
                     }
                 ],
                 "next_flow_mode": "ALLOW_MANY",
@@ -195,7 +229,46 @@ SYSTEM_GLOBAL_SEED: Final[SystemGlobalSeedDocument] = {
                 "actions": [
                     {
                         "type": "send_message_llm",
-                        "source": "The Zone is New Creation Church's energy-packed youth ministry. It reaches out to all secondary and tertiary students as well as NSFs in community and in motion for the grace revolution. Centred on the foundation of the Word of God, the ministry's call is the message of God's unmerited, undeserved favour. The Zone is a place for building godly relationships and growing in revelation of God's grace. The Zone is also a place to meet people, explore faith, and grow in community. Its additional approved purpose statement is THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs aged 13-25: DARE is for secondary school students aged 13-17; Arrow is for post-secondary school students and NSFs aged 17-23; Varsity, also called V, is for university students. If someone asks for service times without naming a group, tell them that there are DARE, Arrow, and Varsity services with distinct schedules and ask which group they mean. If a message only names DARE, Arrow, Varsity, or V, give that group's schedule. DARE is a place to discover purpose and meet authentic friends who will never let people walk alone. #DAREishome. DARE's Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in a new season; people can come as they are and discover Jesus' perfect love. #ArrowIsFamily. Arrow's Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE. Varsity, or V, is a community for university students that values relationships with Jesus and each other. Its Instagram is @nccvarsity. Varsity services are on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE. The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Its event calendar or link is UPCOMING_EVENTS_LINK. A typical service lasts SERVICE_DURATION; this may differ for the service someone means. For the latest cancellation or service-status updates, use OFFICIAL_UPDATES_LINK or contact OFFICIAL_UPDATES_CONTACT. People are welcome at The Zone whether or not they are Christian; they can ask questions and take things at their own pace. The Zone costs COST_OR_FREE_DETAILS. Event-specific price, payment, or financial-help details still need to be added.",
+                        "source": """
+                        ### What is The Zone
+                        The Zone is NCC's energy-packed youth ministry, and reaches out to all secondary and tertiary students as well as NSFs in community and in motion for the grace revolution. Centred on the foundation of the Word of God, the ministry’s call is wrapped up in the message of God’s unmerited, undeserved favour! The Zone is the place for building godly relationships and growing in revelation of God’s grace.
+                        
+                        The Zone has three dynamic youth groups for students and NSFs aged 13-25 years old, and we welcome you to join our family!
+                        - DARE is for secondary school students aged 13-17 years old
+                        - Arrow is for post-secondary school students and NSFs aged 17-23 years old
+                        - Varsity, also called V, is for university students aged 19-25 years old
+                        
+                        *If you are a working adult, you can join our English care groups and find support for the season you are in!
+                        
+                        ### DARE
+                        Growing up and trying to stay afloat amidst endless homework and responsibilities? Come face to face with the One who wants to calm the storms in your life and be the anchor of your soul. DARE is a place where you will discover your purpose and meet authentic friends who will never let you walk alone. #DAREishome
+                        
+                        DARE services are held every other Saturday. Doors open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE.
+                        
+                        Follow us at @nccdare on Instagram for latest updates.
+                        
+                        ### Arrow
+                        Ok, you’re in a new season and the world’s your oyster. Wondering what the future holds? We know that God will use this season to prepare and set you up for all the plans and the purposes He has for you. Because #ArrowIsFamily—you don’t have to act, dress or talk in a certain way to belong. You can come as you are. We believe that the message of Jesus will radically transform your life. Come and discover His perfect love for you. 
+                        
+                        Arrow services are held every other Saturday. Arrow services are on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE.
+                        
+                        Follow us at @nccarrow on Instagram for latest updates.
+                        
+                        ### Varsity
+                        Whether you’ve got a packed semester, an intense elective, or a chill internship—your university experience is shaped by the people you’re surrounded with. At Varsity, or V, we are committed to taking this journey together with unstoppable faith and irresistible wisdom. We crave intimate and real relationships with Jesus and with each other. We are a fam that will never let you walk through life alone. 
+                        
+                        If the person asks for service times without naming a group, tell them that there are DARE, Arrow, and Varsity services with distinct schedules and ask which group they mean. If a message only names DARE, Arrow, Varsity, or V, give that group's schedule. 
+                        
+                        Varsity services are held once/twice a month on Fridays. Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE. The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME.
+                        
+                        Its event calendar or link is UPCOMING_EVENTS_LINK. A typical service lasts around SERVICE_DURATION.
+                        
+                        You are welcome at The Zone whether or not they are Christian; they can ask questions and take things at their own pace. The Zone is completely free-of-charge.
+                        
+                        ### FAQ
+                        - Are non-christians/believers welcomed? Of course! Come as you are!
+                        - Are services free? Yes! Come as you are and hear about the One who paid it all on the cross!
+                        """,
                     }
                 ],
                 "next_flow_mode": "ALLOW_MANY",
