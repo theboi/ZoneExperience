@@ -39,7 +39,7 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-001 | Run the MVP as one local Python process using Telegram long polling | Runtime | Ryan The | 2026-09-11 | Hosted/serverless proposals |
 | ARCH-002 | Run PostgreSQL locally through Docker Compose | Persistence | Ryan The | 2026-09-11 | SQLite and hosted-database proposals |
 | ARCH-003 | Store immutable recursive flow definitions as validated versioned JSON and runtime state relationally | Flow engine | Ryan The | 2026-09-11 | Python-only and fully normalized configuration proposals |
-| ARCH-004 | Constrain the LLM to valid flow keys; only the harness sends user-facing content | Model boundary | Ryan The | 2026-09-11 | Free-form response proposal |
+| ARCH-004 | Constrain the LLM to valid flow identifiers and locally validated configured-template paraphrases; only the harness sends user-facing content | Model boundary | Ryan The | 2026-09-17 | Free-form response proposal |
 | ARCH-005 | Represent branch reuse with `ONE_AND_ONCE_ONLY`, `ALLOW_MANY`, and `CHECKPOINT` | Conversation control | Ryan The | 2026-09-11 | Boolean and separate `FlowSelection` proposals |
 | ARCH-006 | Assemble current, reusable-past, system-global, and service-global candidates in one open-selection input | Routing state | Ryan The | 2026-09-11 | Stack and armed-trigger-registry proposals |
 | ARCH-007 | Use branch checkpoint ancestry for leaf and never-mind returns | Conversation recovery | Ryan The | 2026-09-11 | Single global checkpoint stack proposal |
@@ -48,21 +48,21 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-010 | Model real-world Zone gatherings as services; reserve event terminology for typed action outcomes | Domain language | Ryan The | 2026-09-12 | Real-world `Event` naming |
 | ARCH-011 | Let actions emit one terminal `ActionEvent` handled only by a direct child event trigger; invoke a non-configurable hardcoded sender for an unhandled `error` | Flow execution | Ryan The | 2026-09-12 | Per-action fallback flows, configured default-error flows, and error bubbling |
 | ARCH-012 | Use distinct hardcoded actions for server-only normal matching and leader-or-staff-only safety matching | Matching eligibility | Ryan The | 2026-09-12 | Role-inherited normal matching |
-| ARCH-013 | Use Zone X as the first canonical JSON seed and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-12 | Illustrative-only Zone X example |
+| ARCH-013 | Use Zone X as the first canonical TypeScript seed modules and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-17 | Illustrative-only Zone X example |
 | ARCH-014 | Store each person's role once on the shared user identity; operational profiles reference that identity and do not duplicate role | Identity data | Ryan The | 2026-09-12 | Duplicate user/profile role columns |
 
 ## 4. Architecture contract
 
 ### 4.1 System context
 
-The local Python runtime integrates with Telegram Bot API, local PostgreSQL, and OpenRouter. Telegram and OpenRouter are the only required remote services. The process is started through `python -m friendly_bot`.
+The local Python runtime integrates with Telegram Bot API, local PostgreSQL, and OpenRouter. Telegram and OpenRouter are the only required remote services. Node.js 22.6 or newer renders trusted local TypeScript seed modules before Python validates and publishes them. The process is started through `python -m friendly_bot`.
 
 ### 4.2 Component boundaries
 
 - **Telegram transport:** typed Bot API requests, long polling, webhook clearing, update cursor, update parsing, outbound sends, cadence, and secret redaction.
 - **Conversation application:** command dispatch, onboarding, role-aware behavior, service resolution, checkpoint traversal, and action orchestration.
 - **Flow domain:** Pydantic definitions for recursive flows, triggers, actions, publication validation, and immutable versions.
-- **Routing gateway:** prompt construction, provider privacy controls, key-only response validation, ambiguity/no-match handling, and repeated same-update selection.
+- **Routing gateway:** prompt construction, provider privacy controls, constrained flow-selection and reply-template validation, ambiguity/no-match handling, and repeated same-update selection.
 - **Service scheduler:** due-timestamp claims, audience expansion, service lifecycle checks, catch-up, and idempotent delivery creation.
 - **Matching domain:** explicit normal and safety role pools, attendance, availability, capacity, ranking, assignment, rematch exclusion, and safety pending state.
 - **Persona service:** inactivity and token-threshold detection, summary generation, durable cursor advancement, and full-history preservation.
@@ -81,9 +81,9 @@ An action may synchronously emit one terminal `ActionEvent`. Emission stops the 
 
 Action classes declare their possible non-error event keys. Publication requires exactly one direct handler for each declared outcome and at most one direct `error` handler. Event-driven cycles without a Telegram-input boundary are invalid.
 
-Flow definitions are authored as JSON, validated into typed Pydantic objects, and published as immutable PostgreSQL `JSONB`. Active open selections remain pinned to their version when a later version is published. Human-readable YAML may be used only in explanatory documentation.
+Flow definitions are authored as TypeScript modules that default-export objects, rendered locally to JSON-safe data, validated into typed Pydantic objects, and published as immutable PostgreSQL `JSONB`. Active open selections remain pinned to their version when a later version is published. Human-readable YAML may be used only in explanatory documentation.
 
-The first shipped service definition is the Zone X JSON seed. It must be behaviorally equivalent to the canonical human-readable Zone X document and drives the end-to-end service acceptance suite.
+The first shipped service definition is the Zone X TypeScript seed modules. They must be behaviorally equivalent to the canonical human-readable Zone X document and drive the end-to-end service acceptance suite.
 
 ### 4.4 Runtime state boundary
 
@@ -119,7 +119,7 @@ The local scheduler claims due service-recipient deliveries from PostgreSQL. Tim
 
 `hyperparameters.py` owns model identity, persona thresholds, routing attempt limits, timeouts, and non-secret tuning values. Secrets are environment-provided.
 
-The routing gateway strips structured Telegram IDs and DOBs from prompt objects. User-authored content may be transmitted. Requests specify ZDR and denied data collection; absence of a compatible endpoint emits the reserved `error` action event rather than weakening policy. The model output is parsed as one allowed key or rejected.
+The routing gateway strips structured Telegram IDs and DOBs from prompt objects. User-authored content may be transmitted. Requests specify ZDR and denied data collection; absence of a compatible endpoint emits the reserved `error` action event rather than weakening policy. The model output is parsed as configured flow identifiers and addressed `send_message` paraphrases, then rejected unless the local validator confirms their allowed structure and protected template content. A question paraphrase must directly answer the user before retaining each authored fact, qualification, and instruction.
 
 ### 4.10 Failure and diagnostics boundary
 
@@ -133,7 +133,7 @@ Every emitted error and debug diagnostic creates a sanitized diagnostic record a
 | --- | --- | --- |
 | [`product-specification.md`](product-specification.md) | Architecture implements and is constrained by approved product behavior | Update when product behavior changes technical boundaries |
 | [`../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md`](../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md) | Historical approved design source | Promote approved changes into both living authorities when changed |
-| [`../examples/zone-x-service-example.md`](../examples/zone-x-service-example.md) | Canonical human-readable source for the first service JSON seed and acceptance fixture | Keep behaviorally equivalent to the JSON seed and service tests |
+| [`../examples/zone-x-service-example.md`](../examples/zone-x-service-example.md) | Canonical human-readable source for the first service TypeScript seed modules and acceptance fixture | Keep behaviorally equivalent to the TypeScript modules and service tests |
 
 ## 6. Unresolved decisions
 

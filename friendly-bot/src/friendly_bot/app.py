@@ -11,7 +11,8 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal
+from subprocess import CalledProcessError, TimeoutExpired, run
+from typing import Final, Literal, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -134,10 +135,16 @@ _ZONE_X_TEMPLATE_CONTEXT: Final = TemplateContextSchema(
         "user.name",
     }
 )
+_SEED_MODULE_RENDERER: Final = PROJECT_ROOT / "scripts" / "render_seed_module.mjs"
+_SEED_MODULE_TIMEOUT_SECONDS: Final = 5
+
+
+class SeedModuleLoadError(RuntimeError):
+    """Raised when a local TypeScript seed module cannot be rendered safely."""
 
 
 class ZoneXTimestampSeed(BaseModel):
-    """One canonical timestamp root decoded from the JSON source of truth."""
+    """One canonical timestamp root decoded from the TypeScript source of truth."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -168,7 +175,7 @@ class ZoneXServiceSeed(BaseModel):
 
 
 class ZoneXSeed(BaseModel):
-    """One service-specific Zone X JSON document."""
+    """One service-specific Zone X TypeScript seed module."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -1421,21 +1428,52 @@ def _direct_action_event_child(
 
 
 def load_zone_x_seed(path: Path) -> ZoneXSeed:
-    """Decode one Zone X service JSON document; YAML is never a runtime input."""
+    """Decode one Zone X TypeScript module; YAML is never a runtime input."""
 
-    if not isinstance(path, Path):
-        raise TypeError("Zone X seed path must be a pathlib path")
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = load_seed_module(path)
     return ZoneXSeed.model_validate(_normalize_seed_document(raw))
 
 
 def load_system_global_seed(path: Path) -> SystemGlobalSeed:
-    """Decode the one system-global JSON document shared by every service."""
+    """Decode the one system-global TypeScript module shared by every service."""
+
+    raw = load_seed_module(path)
+    return SystemGlobalSeed.model_validate(_normalize_seed_document(raw))
+
+
+def load_seed_module(path: Path) -> dict[str, object]:
+    """Render a default-exported local TypeScript seed object into JSON-safe data."""
 
     if not isinstance(path, Path):
-        raise TypeError("system-global seed path must be a pathlib path")
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    return SystemGlobalSeed.model_validate(_normalize_seed_document(raw))
+        raise TypeError("seed module path must be a pathlib path")
+    if path.suffix != ".ts":
+        raise SeedModuleLoadError("seed modules must use the .ts extension")
+    try:
+        rendered = run(
+            [
+                "node",
+                "--experimental-strip-types",
+                str(_SEED_MODULE_RENDERER),
+                str(path.resolve()),
+            ],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=_SEED_MODULE_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as exc:
+        raise SeedModuleLoadError(
+            "TypeScript seed modules require Node.js 22.6 or later"
+        ) from exc
+    except (CalledProcessError, TimeoutExpired) as exc:
+        raise SeedModuleLoadError("could not load TypeScript seed module") from exc
+    try:
+        raw = json.loads(rendered.stdout)
+    except json.JSONDecodeError as exc:
+        raise SeedModuleLoadError("could not decode TypeScript seed module") from exc
+    if not isinstance(raw, dict):
+        raise SeedModuleLoadError("TypeScript seed module must export an object")
+    return cast(dict[str, object], raw)
 
 
 async def publish_zone_x_seed(
@@ -1597,9 +1635,9 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
             )
         )
         system_global_seed = load_system_global_seed(
-            PROJECT_ROOT / "seeds" / "system-global.json"
+            PROJECT_ROOT / "seeds" / "system-global.ts"
         )
-        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "services" / "zone-x.json")
+        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "services" / "zone-x.ts")
         async with unit_of_work_factory() as unit_of_work:
             zone_x = await publish_zone_x_seed(seed, system_global_seed, unit_of_work)
         application = FriendlyBotApplication(

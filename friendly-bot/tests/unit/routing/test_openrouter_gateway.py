@@ -497,6 +497,21 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert (
+        "answer that exact question directly" in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "lead with the supported answer or conclusion"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "every fact, qualification, and instruction from its authored template"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "Do not turn a direct question into a generic overview"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
         "ALL_CAPS placeholders (including underscores) verbatim"
         in first_payload["messages"][0]["content"]
     )

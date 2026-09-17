@@ -1,4 +1,5 @@
 require "json"
+require "open3"
 require "yaml"
 
 markdown = File.read(ARGV.fetch(0))
@@ -6,8 +7,24 @@ yaml_text = markdown.match(/^```yaml\n(.*?)^```$/m)&.captures&.first
 abort("canonical YAML fence not found") if yaml_text.nil?
 
 canonical = YAML.safe_load(yaml_text, aliases: false)
-system_global = JSON.parse(File.read(ARGV.fetch(1)))
-service = JSON.parse(File.read(ARGV.fetch(2)))
+renderer = File.expand_path("../../scripts/render_seed_module.mjs", __dir__)
+
+def load_seed_module(renderer, path)
+  rendered, error, status = Open3.capture3(
+    "node",
+    "--experimental-strip-types",
+    renderer,
+    path
+  )
+  abort("could not render TypeScript seed module") unless status.success?
+
+  JSON.parse(rendered)
+rescue JSON::ParserError
+  abort("could not decode TypeScript seed module")
+end
+
+system_global = load_seed_module(renderer, ARGV.fetch(1))
+service = load_seed_module(renderer, ARGV.fetch(2))
 seed = {
   "system_global_root" => system_global.fetch("root"),
   "service" => service.fetch("service")
@@ -32,4 +49,4 @@ def first_difference(expected, actual, path = "")
 end
 
 pointer = first_difference(canonical, seed)
-abort("Zone X YAML/JSON semantic mismatch at #{pointer}") unless pointer.nil?
+abort("Zone X YAML/TypeScript semantic mismatch at #{pointer}") unless pointer.nil?

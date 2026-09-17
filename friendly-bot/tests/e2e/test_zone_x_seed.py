@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from subprocess import run
 
-from friendly_bot.app import load_system_global_seed, load_zone_x_seed
+import pytest
+
+from friendly_bot.app import (
+    SeedModuleLoadError,
+    load_seed_module,
+    load_system_global_seed,
+    load_zone_x_seed,
+)
 from friendly_bot.domain.actions import SendButtonsAction
 from friendly_bot.domain.triggers import (
     OnAnyOfTrigger,
@@ -15,8 +21,8 @@ from friendly_bot.domain.triggers import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SYSTEM_SEED_PATH = PROJECT_ROOT / "seeds" / "system-global.json"
-ZONE_X_SEED_PATH = PROJECT_ROOT / "seeds" / "services" / "zone-x.json"
+SYSTEM_SEED_PATH = PROJECT_ROOT / "seeds" / "system-global.ts"
+ZONE_X_SEED_PATH = PROJECT_ROOT / "seeds" / "services" / "zone-x.ts"
 
 
 def test_system_root_sends_its_prompt_when_opened() -> None:
@@ -178,7 +184,7 @@ def test_buttons_only_offer_choices_that_are_not_already_stated() -> None:
     ]
 
 
-def test_split_json_is_semantically_equal_to_canonical_yaml() -> None:
+def test_split_typescript_modules_are_semantically_equal_to_canonical_yaml() -> None:
     """Seed drift must fail before immutable roots can be published."""
 
     completed = run(
@@ -186,8 +192,8 @@ def test_split_json_is_semantically_equal_to_canonical_yaml() -> None:
             "ruby",
             "tests/e2e/verify_zone_x_seed.rb",
             "docs/examples/zone-x-service-example.md",
-            "seeds/system-global.json",
-            "seeds/services/zone-x.json",
+            "seeds/system-global.ts",
+            "seeds/services/zone-x.ts",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -242,12 +248,22 @@ def test_zone_x_service_seed_contains_only_service_configuration() -> None:
     assert parsed.service.key == "zone_x_2026_10_18"
 
 
+def test_seed_modules_must_default_export_an_object(tmp_path: Path) -> None:
+    """Configuration remains a TypeScript module rather than a JSON-shaped text file."""
+
+    invalid_module = tmp_path / "invalid.ts"
+    invalid_module.write_text("export default ['not an object'] as const;\n")
+
+    with pytest.raises(SeedModuleLoadError, match="could not load"):
+        load_seed_module(invalid_module)
+
+
 def _system_document() -> dict[str, object]:
-    return json.loads(SYSTEM_SEED_PATH.read_text(encoding="utf-8"))
+    return load_seed_module(SYSTEM_SEED_PATH)
 
 
 def _service_document() -> dict[str, object]:
-    return json.loads(ZONE_X_SEED_PATH.read_text(encoding="utf-8"))
+    return load_seed_module(ZONE_X_SEED_PATH)
 
 
 def _flow(root: dict[str, object], key: str) -> dict[str, object]:

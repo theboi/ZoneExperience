@@ -794,8 +794,8 @@ async def test_zone_x_seed_publishes_immutable_roots_and_seven_timestamp_binding
     """The canonical seed may be repeated without duplicating any active root binding."""
 
     seed_directory = Path(__file__).resolve().parents[3] / "seeds"
-    system_global_seed = load_system_global_seed(seed_directory / "system-global.json")
-    seed = load_zone_x_seed(seed_directory / "services" / "zone-x.json")
+    system_global_seed = load_system_global_seed(seed_directory / "system-global.ts")
+    seed = load_zone_x_seed(seed_directory / "services" / "zone-x.ts")
     async with uow_factory() as uow:
         first = await publish_zone_x_seed(seed, system_global_seed, uow)
     async with uow_factory() as uow:

@@ -13,7 +13,7 @@
 
 Friendly Bot gives youths a private, low-barrier way to connect with The Zone when they may be uncomfortable approaching a physical connect point, raising their hand, or asking questions publicly. It guides NBNCs through fixed, approved conversations; adapts those conversations to real-world services; and introduces them to eligible friendly humans.
 
-The product term is `NBNC`. The MVP does not distinguish newcomers from new believers. The model selects only configured flow keys and never writes the bot's user-facing answers.
+The product term is `NBNC`. The MVP does not distinguish newcomers from new believers. The model selects only configured flows. It may paraphrase a configured `send_message` template, but it cannot add a new answer, change protected content, or send anything except locally validated configured output.
 
 The MVP runs locally on the decision owner's machine. Human connection shares a matched person's Telegram contact URL; bot-relayed human chat is outside this specification.
 
@@ -59,11 +59,11 @@ A discussion flow contains an optional trigger, ordered typed actions, recursive
 
 - `ONE_AND_ONCE_ONLY` permits one successful choice and is not retained in past.
 - `ALLOW_MANY` remains reusable in past, including repeating the same choice later.
-- `CHECKPOINT` remains reusable and receives control when a descendant branch ends or the user says never mind.
+- `CHECKPOINT` remains reusable and receives control when a descendant branch ends or the user says never mind. A checkpoint may have no local children when its available options belong to an event-level or global selection.
 
 System-global and service-global roots are automatic checkpoints. Every timestamp has one automatic root flow. Empty action lists may be used to expose children without sending or processing anything.
 
-The application persists every open child group. Current groups are a soft routing preference; past reusable and global groups remain eligible. Native reply text is additional context, not a hard routing boundary. One incoming message may select several different configured flows, while each flow key runs at most once for that update.
+The application persists every open child group. Current groups are a soft routing preference; past reusable and global groups remain eligible. Native reply text is additional context, not a hard routing boundary. One incoming message may select several different configured flows only when it contains several independent requests; one request selects only its most specific configured flow.
 
 Actions may emit one terminal `ActionEvent`. The harness deterministically selects a matching event-triggered direct child without consulting the LLM. Action events do not bubble through ancestors. An unexpected failure emits the reserved `error` event; a direct child may handle it, otherwise the harness invokes its non-configurable hardcoded error sender: “Sorry, an error occurred. Error log: {telegram_user_id}.” The default error path is not a discussion flow.
 
@@ -75,7 +75,7 @@ One highkey service before door close enrolls automatically. Multiple services w
 
 Timestamp audiences are all NBNCs, all servers, all leaders, service NBNCs, service servers, service leaders, or all service attendees. Role inheritance applies to operational audiences.
 
-Zone X is the first seeded development service and end-to-end acceptance fixture. It provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service. Its implemented configuration must be an equivalent JSON form of the canonical [Zone X service document](../examples/zone-x-service-example.md).
+Zone X is the first seeded development service and end-to-end acceptance fixture. It provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service. Its implemented configuration must be equivalent to the canonical [Zone X service document](../examples/zone-x-service-example.md) and live in TypeScript modules that default-export the system-global and service objects.
 
 ### 4.3 Records and persistence
 
@@ -87,7 +87,7 @@ Full conversations are retained long term. Personas summarize the user's disclos
 
 Telegram updates arrive through long polling. Processing is idempotent and serialized per user. A local scheduler delivers due timestamp roots and catches up overdue work after restart. A durable delivery worker records Telegram send attempts.
 
-OpenRouter routes messages and ranks human matches. It receives persona, unsummarized conversation context, replied-to text, and all open configured choices. It returns only a valid key or reserved harness key. The harness renders and sends fixed configured content.
+OpenRouter routes messages and ranks human matches. It receives persona, unsummarized conversation context, replied-to text, and all open configured choices. It returns only valid configured flow identifiers, reserved harness outcomes, and paraphrases for addressed `send_message` templates. For a user question, each paraphrase directly answers that question before retaining every fact, qualification, and instruction in the authored template. The harness validates the result locally and renders configured content.
 
 Persona regeneration occurs after 48 hours of inactivity or the model-relative unsummarized-token threshold configured in `hyperparameters.py`.
 
@@ -108,7 +108,7 @@ Every emitted application error and debug diagnostic creates a sanitized notific
 - Current, reusable-past, and global selections route according to their approved importance and reuse semantics.
 - Leaves and never-mind requests return through the nearest checkpoint on the selected branch.
 - Service enrollment, overlaps, latecomers, timestamps, audiences, and expiry behave as specified.
-- The canonical Zone X JSON seed exposes the approved before, during, and after behaviors without free-form model replies and passes the end-to-end service acceptance suite.
+- The canonical Zone X TypeScript seed modules expose the approved before, during, and after behaviors with only locally validated configured model paraphrases and pass the end-to-end service acceptance suite.
 - Normal, rematch, capacity, and safety matching never select ineligible people.
 - Restart recovery does not duplicate logical Telegram updates or timestamp delivery.
 - OpenRouter prompt construction and provider policy enforce the approved privacy boundary.
