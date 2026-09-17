@@ -44,9 +44,18 @@ class ServiceKeyButtonPayload(BaseModel):
     service_key: StableKey
 
 
-class SendMessageAction(DiscussionActionBase):
-    type: Literal["send_message"]
+class SendMessageParaphrasedAction(DiscussionActionBase):
+    """Requester-facing copy the LLM may paraphrase while preserving its content."""
+
+    type: Literal["send_message_paraphrased"]
     text: NonEmptyText
+
+
+class SendMessageLlmAction(DiscussionActionBase):
+    """A source-grounded answer the LLM must derive only from configured prose."""
+
+    type: Literal["send_message_llm"]
+    source: NonEmptyText
 
 
 class SendMessageFixedAction(DiscussionActionBase):
@@ -198,7 +207,8 @@ class ReturnToNearestCheckpointAction(DiscussionActionBase):
 
 
 DiscussionAction = Annotated[
-    SendMessageAction
+    SendMessageParaphrasedAction
+    | SendMessageLlmAction
     | SendMessageFixedAction
     | SendButtonsAction
     | SendServiceChoiceButtonsAction

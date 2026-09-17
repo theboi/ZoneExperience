@@ -27,8 +27,9 @@ from friendly_bot.domain.actions import (
     SaveIncomingAction,
     SelectServiceAttendanceAction,
     SendButtonsAction,
-    SendMessageAction,
     SendMessageFixedAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
     ShareHumanContactAction,
@@ -51,11 +52,23 @@ from friendly_bot.telegram import (
 LOGGER = logging.getLogger(__name__)
 
 
-async def send_message(action: SendMessageAction, context: ActionContext) -> None:
-    """Buffer one configured requester-facing text presentation."""
+async def send_message_paraphrased(
+    action: SendMessageParaphrasedAction, context: ActionContext
+) -> None:
+    """Buffer a configured message whose full content is paraphrased by the LLM."""
 
     await context.queue_text_presentation(
-        context.render(await context.message_template(action))
+        context.render(await context.planned_message_text(action.text))
+    )
+
+
+async def send_message_llm(
+    action: SendMessageLlmAction, context: ActionContext
+) -> None:
+    """Buffer a source-grounded LLM answer or the configured source fallback."""
+
+    await context.queue_text_presentation(
+        context.render(await context.planned_message_text(action.source))
     )
 
 

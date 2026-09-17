@@ -23,7 +23,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
             "trigger": None,
             "actions": [
                 {
-                    "type": "send_message",
+                    "type": "send_message_paraphrased",
                     "text": "Hey {{ user.name }}! "
                     "Welcome to Zone X! What "
                     "would you like help with?",
@@ -54,7 +54,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
             "next_flow_mode": "CHECKPOINT",
             "return_actions": [
                 {
-                    "type": "send_message",
+                    "type": "send_message_paraphrased",
                     "text": "Is there anything else I can help you with at Zone X?",
                 },
                 {
@@ -98,7 +98,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     },
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Zone X is "
                             "held at The "
                             "Star "
@@ -151,7 +151,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     },
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Come as you "
                             "are. You "
                             "can expect "
@@ -194,7 +194,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     },
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "What is one "
                             "thing that "
                             "interests "
@@ -258,7 +258,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                     },
                                     "actions": [
                                         {
-                                            "type": "send_message",
+                                            "type": "send_message_paraphrased",
                                             "text": "I "
                                             "found "
                                             "{{ "
@@ -357,7 +357,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                     "}}",
                                                 },
                                                 {
-                                                    "type": "send_message",
+                                                    "type": "send_message_paraphrased",
                                                     "text": "if "
                                                     "{{ "
                                                     "matched_server.name "
@@ -493,7 +493,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             },
                                                             "actions": [
                                                                 {
-                                                                    "type": "send_message",
+                                                                    "type": "send_message_paraphrased",
                                                                     "text": "Sorry, "
                                                                     "nobody "
                                                                     "else "
@@ -587,7 +587,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                     "}}",
                                                 },
                                                 {
-                                                    "type": "send_message",
+                                                    "type": "send_message_paraphrased",
                                                     "text": "if "
                                                     "{{ "
                                                     "matched_server.name "
@@ -724,7 +724,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             },
                                                             "actions": [
                                                                 {
-                                                                    "type": "send_message",
+                                                                    "type": "send_message_paraphrased",
                                                                     "text": "Sorry, "
                                                                     "nobody "
                                                                     "else "
@@ -764,7 +764,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                     },
                                     "actions": [
                                         {
-                                            "type": "send_message",
+                                            "type": "send_message_paraphrased",
                                             "text": "Sorry, "
                                             "nobody "
                                             "is "
@@ -889,7 +889,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                             },
                                             "actions": [
                                                 {
-                                                    "type": "send_message",
+                                                    "type": "send_message_paraphrased",
                                                     "text": "Sorry, "
                                                     "the "
                                                     "service "
@@ -913,7 +913,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "There "
                                     "are "
                                     "no "
@@ -940,7 +940,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                 {"type": "add_service_attendance", "attendance_status": "latecomer"},
                 {"type": "enter_service_checkpoint", "flow_key": "service.zone_x.home"},
                 {
-                    "type": "send_message",
+                    "type": "send_message_paraphrased",
                     "text": "Yes, you can still join Zone X. "
                     "Service has started, so head to "
                     "the venue entrance and ask a "
@@ -992,7 +992,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "next_flow_mode": "CHECKPOINT",
                     "return_actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Would you like "
                             "to know "
                             "anything else "
@@ -1009,7 +1009,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "Come "
                                     "as "
                                     "you "
@@ -1080,7 +1080,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Zone X is tomorrow at "
                             "2:30 pm. Doors open "
                             "at 1:30 pm at The "
@@ -1095,7 +1095,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "next_flow_mode": "CHECKPOINT",
                     "return_actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Anything else you’d like to know before Zone X?",
                         }
                     ],
@@ -1111,7 +1111,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Doors are open for "
                             "Zone X. Are you here "
                             "with us? Reply 'i am "
@@ -1171,7 +1171,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                     },
                                     "actions": [
                                         {
-                                            "type": "send_message",
+                                            "type": "send_message_paraphrased",
                                             "text": "Sorry, the service is over!",
                                         }
                                     ],
@@ -1193,7 +1193,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Service has started. "
                             "You can ask a "
                             "question here at any "
@@ -1217,7 +1217,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "next_flow_mode": "CHECKPOINT",
                     "return_actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Is there "
                             "anything else "
                             "you’d like to "
@@ -1261,7 +1261,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "The "
                                     "nearest "
                                     "toilets "
@@ -1310,7 +1310,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "At "
                                     "NCC, "
                                     "we "
@@ -1383,7 +1383,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "I "
                                     "don’t "
                                     "have "
@@ -1422,7 +1422,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Service has ended. "
                             "What would you like "
                             "to do next?",
@@ -1445,7 +1445,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "next_flow_mode": "CHECKPOINT",
                     "return_actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Would you like "
                             "help with "
                             "anything else "
@@ -1462,7 +1462,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "I can "
                                     "introduce "
                                     "you "
@@ -1491,7 +1491,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             },
                             "actions": [
                                 {
-                                    "type": "send_message",
+                                    "type": "send_message_paraphrased",
                                     "text": "A "
                                     "friendly "
                                     "human "
@@ -1525,7 +1525,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Thank you for coming "
                             "to Zone X today. "
                             "We’re glad you were "
@@ -1549,7 +1549,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "trigger": None,
                     "actions": [
                         {
-                            "type": "send_message",
+                            "type": "send_message_paraphrased",
                             "text": "Zone X has ended, but "
                             "you can still ask for "
                             "directions to Star or "

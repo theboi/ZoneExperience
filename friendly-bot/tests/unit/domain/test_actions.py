@@ -10,7 +10,8 @@ from friendly_bot.domain.events import ActionEvent
 @pytest.mark.parametrize(
     "data",
     [
-        {"type": "send_message", "text": "Hello"},
+        {"type": "send_message_paraphrased", "text": "Hello"},
+        {"type": "send_message_llm", "source": "Only this source may answer."},
         {
             "type": "send_buttons",
             "service_bound": True,
@@ -167,7 +168,10 @@ def test_button_payload_is_closed_to_the_canonical_service_key_context() -> None
 @pytest.mark.parametrize(
     "data",
     [
-        {"type": "send_message", "text": ""},
+        {"type": "send_message_paraphrased", "text": ""},
+        {"type": "send_message_llm", "source": ""},
+        {"type": "send_message_llm", "text": "This field is not allowed."},
+        {"type": "send_message", "text": "The old action name is not allowed."},
         {
             "type": "send_buttons",
             "service_bound": True,

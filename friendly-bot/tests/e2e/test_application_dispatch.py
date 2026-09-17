@@ -16,8 +16,8 @@ from friendly_bot.app import DispatchResult, FriendlyBotApplication, PublishedZo
 from friendly_bot.config.settings import PROJECT_ROOT
 from friendly_bot.domain.actions import (
     SelectServiceAttendanceAction,
-    SendMessageAction,
     SendMessageFixedAction,
+    SendMessageParaphrasedAction,
 )
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow
@@ -340,7 +340,7 @@ def _root() -> DiscussionFlow:
             "key": "system.dispatch.root",
             "next_flow_mode": "checkpoint",
             "return_actions": [
-                {"type": "send_message", "text": "Back at the checkpoint"}
+                {"type": "send_message_paraphrased", "text": "Back at the checkpoint"}
             ],
             "next_flows": [
                 {
@@ -356,7 +356,10 @@ def _root() -> DiscussionFlow:
                                 "event_key": "dispatch.found",
                             },
                             "actions": [
-                                {"type": "send_message", "text": "Found a match"}
+                                {
+                                    "type": "send_message_paraphrased",
+                                    "text": "Found a match",
+                                }
                             ],
                             "next_flow_mode": "one_and_once_only",
                             "next_flows": [
@@ -368,7 +371,7 @@ def _root() -> DiscussionFlow:
                                     },
                                     "actions": [
                                         {
-                                            "type": "send_message",
+                                            "type": "send_message_paraphrased",
                                             "text": "Connection confirmed",
                                         }
                                     ],
@@ -413,9 +416,11 @@ def _application(
         del action
         context.emit(ActionEvent(key="dispatch.found"))
 
-    async def send(action: SendMessageAction, context: ActionContext) -> None:
+    async def send(
+        action: SendMessageParaphrasedAction, context: ActionContext
+    ) -> None:
         await context.queue_text_presentation(
-            context.render(await context.message_template(action))
+            context.render(await context.planned_message_text(action.text))
         )
 
     async def send_fixed(
@@ -424,7 +429,7 @@ def _application(
         await context.queue_text_presentation(context.render(action.text))
 
     registry.register(SelectServiceAttendanceAction, emit_found)
-    registry.register(SendMessageAction, send)
+    registry.register(SendMessageParaphrasedAction, send)
     registry.register(SendMessageFixedAction, send_fixed)
     zone_x = PublishedZoneX(
         service=service,
@@ -544,7 +549,7 @@ class AuthoredKnownFlowRouter:
         return PlannedFlowMatch(
             flow_id=request.flow_id,
             replies=tuple(
-                PlannedReply(slot_id=slot.slot_id, text=slot.template)
+                PlannedReply(slot_id=slot.slot_id, text=slot.source)
                 for slot in request.reply_slots
             ),
         )
@@ -566,7 +571,7 @@ class ResultRouter:
         return PlannedFlowMatch(
             flow_id=request.flow_id,
             replies=tuple(
-                PlannedReply(slot_id=slot.slot_id, text=slot.template)
+                PlannedReply(slot_id=slot.slot_id, text=slot.source)
                 for slot in request.reply_slots
             ),
         )
@@ -931,7 +936,9 @@ async def test_timestamp_preparer_opens_the_root_and_returns_presentations() -> 
         {
             "key": "service.zone_x.timestamp.notice",
             "next_flow_mode": "allow_many",
-            "actions": [{"type": "send_message", "text": "Timestamp notice"}],
+            "actions": [
+                {"type": "send_message_paraphrased", "text": "Timestamp notice"}
+            ],
         }
     )
     version = FlowVersionRecord(
@@ -976,14 +983,14 @@ async def test_typed_dispatch_runs_all_answer_fragments_without_transition() -> 
                     "key": "system.multi.answer_one",
                     "trigger": {"type": "message", "llm_gist": "first answer"},
                     "multi_intent_mode": "answer",
-                    "actions": [{"type": "send_message", "text": "first"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "first"}],
                     "next_flow_mode": "one_and_once_only",
                 },
                 {
                     "key": "system.multi.answer_two",
                     "trigger": {"type": "message", "llm_gist": "second answer"},
                     "multi_intent_mode": "answer",
-                    "actions": [{"type": "send_message", "text": "second"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "second"}],
                     "next_flow_mode": "one_and_once_only",
                 },
             ],
@@ -1044,7 +1051,7 @@ async def test_typed_dispatch_defers_extra_interactive_matches_in_order() -> Non
                 {
                     "key": "system.pending.first",
                     "trigger": {"type": "message", "llm_gist": "first"},
-                    "actions": [{"type": "send_message", "text": "first"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "first"}],
                     "next_flow_mode": "one_and_once_only",
                     "next_flows": [
                         {
@@ -1057,13 +1064,13 @@ async def test_typed_dispatch_defers_extra_interactive_matches_in_order() -> Non
                 {
                     "key": "system.pending.second",
                     "trigger": {"type": "message", "llm_gist": "second"},
-                    "actions": [{"type": "send_message", "text": "second"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "second"}],
                     "next_flow_mode": "one_and_once_only",
                 },
                 {
                     "key": "system.pending.third",
                     "trigger": {"type": "message", "llm_gist": "third"},
-                    "actions": [{"type": "send_message", "text": "third"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "third"}],
                     "next_flow_mode": "one_and_once_only",
                 },
             ],
@@ -1119,19 +1126,19 @@ async def test_completed_interactive_flow_resumes_one_pending_intent() -> None:
                 {
                     "key": "system.resume.first",
                     "trigger": {"type": "message", "llm_gist": "first"},
-                    "actions": [{"type": "send_message", "text": "first"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "first"}],
                     "next_flow_mode": "one_and_once_only",
                 },
                 {
                     "key": "system.resume.second",
                     "trigger": {"type": "message", "llm_gist": "second"},
-                    "actions": [{"type": "send_message", "text": "second"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "second"}],
                     "next_flow_mode": "one_and_once_only",
                 },
                 {
                     "key": "system.resume.third",
                     "trigger": {"type": "message", "llm_gist": "third"},
-                    "actions": [{"type": "send_message", "text": "third"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "third"}],
                     "next_flow_mode": "one_and_once_only",
                 },
             ],
@@ -1188,14 +1195,14 @@ async def test_interruptive_safety_result_excludes_other_matches() -> None:
                 {
                     "key": "system.global.safety",
                     "trigger": {"type": "message", "llm_gist": "unsafe"},
-                    "actions": [{"type": "send_message", "text": "safety"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "safety"}],
                     "next_flow_mode": "one_and_once_only",
                 },
                 {
                     "key": "system.safety.answer",
                     "trigger": {"type": "message", "llm_gist": "answer"},
                     "multi_intent_mode": "answer",
-                    "actions": [{"type": "send_message", "text": "answer"}],
+                    "actions": [{"type": "send_message_paraphrased", "text": "answer"}],
                     "next_flow_mode": "one_and_once_only",
                 },
             ],

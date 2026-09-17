@@ -13,7 +13,9 @@ def action_event_flow(key: str, event_key: str) -> DiscussionFlow:
     return DiscussionFlow(
         key=key,
         trigger=parse_trigger({"type": "action_event", "event_key": event_key}),
-        actions=[parse_action({"type": "send_message", "text": "Handled."})],
+        actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "Handled."})
+        ],
         next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
     )
 
@@ -49,7 +51,9 @@ def valid_system_checkpoint() -> DiscussionFlow:
         next_flows=[match, no_op_leaf],
         next_flow_mode=NextFlowMode.CHECKPOINT,
         return_actions=[
-            parse_action({"type": "send_message", "text": "Hello {{ user.name }}."})
+            parse_action(
+                {"type": "send_message_paraphrased", "text": "Hello {{ user.name }}."}
+            )
         ],
     )
 
@@ -59,6 +63,8 @@ def valid_timestamp_root() -> DiscussionFlow:
 
     return DiscussionFlow(
         key="service.timestamp.notice",
-        actions=[parse_action({"type": "send_message", "text": "Reminder."})],
+        actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "Reminder."})
+        ],
         next_flow_mode=NextFlowMode.ALLOW_MANY,
     )

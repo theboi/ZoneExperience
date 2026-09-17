@@ -12,8 +12,9 @@ from friendly_bot.actions.registry import ActionExecutorRegistry
 from friendly_bot.domain.actions import (
     DiscussionAction,
     SendButtonsAction,
-    SendMessageAction,
     SendMessageFixedAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
 )
@@ -244,7 +245,8 @@ def _is_presentation_action(action: DiscussionAction) -> bool:
     return isinstance(
         action,
         (
-            SendMessageAction,
+            SendMessageParaphrasedAction,
+            SendMessageLlmAction,
             SendMessageFixedAction,
             SendButtonsAction,
             SendServiceChoiceButtonsAction,

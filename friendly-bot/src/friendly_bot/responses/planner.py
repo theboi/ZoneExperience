@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Literal
 
-from friendly_bot.domain.actions import SendMessageAction
+from friendly_bot.domain.actions import (
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
+)
 from friendly_bot.domain.flows import DiscussionFlow
 from friendly_bot.domain.templates import template_tokens, urls
 from friendly_bot.domain.triggers import (
@@ -14,24 +18,25 @@ from friendly_bot.domain.triggers import (
     OnAnyOfTrigger,
     OnMessageTrigger,
 )
-from friendly_bot.routing.contracts import ReplyTemplateSlot
+from friendly_bot.routing.contracts import ReplySourceSlot
 
 
 @dataclass(frozen=True, slots=True)
 class ReplySlotBinding:
-    """Keep one model-visible slot bound to a local configured action address."""
+    """Keep one model-visible source bound to a local configured action address."""
 
     slot_id: str
     flow_key: str
     action_index: int
-    authored_template: str
+    mode: Literal["paraphrased", "llm"]
+    source: str
 
 
 @dataclass(frozen=True, slots=True)
 class CandidateResponsePlan:
-    """The local and prompt-safe views of paraphrasable candidate copy."""
+    """The local and prompt-safe views of LLM-generated candidate copy."""
 
-    reply_slots: tuple[ReplyTemplateSlot, ...]
+    reply_slots: tuple[ReplySourceSlot, ...]
     bindings: tuple[ReplySlotBinding, ...]
 
     def __post_init__(self) -> None:
@@ -50,7 +55,7 @@ class CandidateResponsePlan:
 
 @dataclass(frozen=True, slots=True)
 class PlannedActionText:
-    """One validated paraphrase selected for a configured action address."""
+    """One validated LLM reply selected for a configured action address."""
 
     flow_key: str
     action_index: int
@@ -59,7 +64,7 @@ class PlannedActionText:
 
 @dataclass(frozen=True, slots=True)
 class ReplyPlan:
-    """Immutable selected paraphrases addressed only by local flow/action coordinates."""
+    """Immutable selected LLM replies addressed only by local flow/action coordinates."""
 
     messages: tuple[PlannedActionText, ...]
     fallback_addresses: frozenset[tuple[str, int]] = frozenset()
@@ -86,7 +91,7 @@ class ReplyPlan:
         return matches[0] if matches else None
 
     def requires_fallback(self, flow_key: str, action_index: int) -> bool:
-        """Return whether a failed paraphrase must use trusted authored copy."""
+        """Return whether a failed LLM reply must use trusted configured copy."""
 
         return (flow_key, action_index) in self.fallback_addresses
 
@@ -127,40 +132,57 @@ def plan_candidate_responses(
     bindings: list[ReplySlotBinding] = []
     for flow in _immediate_action_event_closure(child):
         for action_index, action in enumerate(flow.actions):
-            if not isinstance(action, SendMessageAction):
-                continue
-            slot_id = f"r{len(bindings)}"
-            bindings.append(
-                ReplySlotBinding(
-                    slot_id=slot_id,
-                    flow_key=str(flow.key),
-                    action_index=action_index,
-                    authored_template=action.text,
-                )
+            binding = _reply_slot_binding(
+                action,
+                flow_key=str(flow.key),
+                action_index=action_index,
+                slot_id=f"r{len(bindings)}",
             )
+            if binding is not None:
+                bindings.append(binding)
     if checkpoint is not None and _can_return_before_next_input(child):
         for action_index, action in enumerate(checkpoint.return_actions):
-            if not isinstance(action, SendMessageAction):
-                continue
-            slot_id = f"r{len(bindings)}"
-            bindings.append(
-                ReplySlotBinding(
-                    slot_id=slot_id,
-                    flow_key=str(checkpoint.key),
-                    action_index=action_index,
-                    authored_template=action.text,
-                )
+            binding = _reply_slot_binding(
+                action,
+                flow_key=str(checkpoint.key),
+                action_index=action_index,
+                slot_id=f"r{len(bindings)}",
             )
+            if binding is not None:
+                bindings.append(binding)
     slots = tuple(
-        ReplyTemplateSlot(
+        ReplySourceSlot(
             slot_id=binding.slot_id,
-            template=binding.authored_template,
-            template_tokens=template_tokens(binding.authored_template),
-            urls=urls(binding.authored_template),
+            mode=binding.mode,
+            source=binding.source,
+            source_template_tokens=template_tokens(binding.source),
+            source_urls=urls(binding.source),
         )
         for binding in bindings
     )
     return CandidateResponsePlan(reply_slots=slots, bindings=tuple(bindings))
+
+
+def _reply_slot_binding(
+    action: object, *, flow_key: str, action_index: int, slot_id: str
+) -> ReplySlotBinding | None:
+    if isinstance(action, SendMessageParaphrasedAction):
+        return ReplySlotBinding(
+            slot_id=slot_id,
+            flow_key=flow_key,
+            action_index=action_index,
+            mode="paraphrased",
+            source=action.text,
+        )
+    if isinstance(action, SendMessageLlmAction):
+        return ReplySlotBinding(
+            slot_id=slot_id,
+            flow_key=flow_key,
+            action_index=action_index,
+            mode="llm",
+            source=action.source,
+        )
+    return None
 
 
 def _immediate_action_event_closure(flow: DiscussionFlow) -> Iterator[DiscussionFlow]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -33,7 +34,7 @@ from friendly_bot.routing.contracts import (
     PersonaSummaryRequest,
     PlannedFlowMatch,
     PlannedReply,
-    ReplyTemplateSlot,
+    ReplySourceSlot,
     RoutingPromptCandidate,
 )
 
@@ -66,27 +67,36 @@ _MULTI_INTENT_RESPONSE_INSTRUCTION = (
     "or could reasonably request more than one flow, return kind terminal with "
     "terminal clarify_ambiguous_context and no matches, unless a current candidate's "
     "possible_qns explicitly shows it is a valid answer to the current context. "
+    "A bare DARE, Arrow, Varsity, or V is an exception only when a candidate's gist "
+    "explicitly says that it handles a reply naming that youth group after a "
+    "clarification. Do not extend that exception to other isolated topics. "
     "For example, 'zone?' and "
     "'the zone?' are ambiguous, while 'what is the zone?' requests only a "
     "definition. Use terminal no_match when the message is clear but none of the "
     "configured flows answers it. Otherwise return kind matches with one to five "
     "matches in relevance order and no duplicate flow_id. For every reply slot on a selected "
-    "flow, provide exactly one reply with the same slot_id. Write every character "
-    "you generate in lowercase, including the first word, names, and titles, like "
-    "a real youth texting. Preserve template variables, URLs, and ALL_CAPS "
-    "placeholders (including underscores) verbatim. Use abbreviations modestly "
-    "and naturally. When the current message asks a question, make each reply "
-    "answer that exact question directly: lead with the supported answer or conclusion, "
-    "then naturally include every fact, qualification, and instruction from its "
-    "authored template. Do not turn a direct question into a generic overview or "
-    "merely restate the template in different words. For example, if someone asks "
-    "'is this event meant for my kids ages 14?' and the template says the group is "
-    "for secondary school students aged 13-17, start by clearly saying that it is "
-    "for them, while retaining the secondary-school and 13-17 details. If the "
-    "template does not support a yes-or-no conclusion, state what applies instead "
-    "without guessing. Do not add exaggerated slang, phonetic "
+    "flow, provide exactly one reply with the same slot_id. Each reply slot has a mode "
+    "and source. For mode paraphrased, rewrite the full source while preserving every "
+    "fact, qualification, instruction, template variable, URL, and ALL_CAPS placeholder "
+    "(including underscores) verbatim. For mode llm, source is the sole factual authority: "
+    "answer using only information stated in that source. Do not use prior knowledge, likely "
+    "defaults, user assertions, candidate gists, or inferences. If the source does not establish "
+    "a requested detail, say that the source does not provide it rather than guessing. Never add "
+    "facts, promises, contacts, links, or safety advice not in the source. Write every character "
+    "you generate in lowercase, including the first word, names, and titles, like a real youth "
+    "texting. Use abbreviations modestly and naturally. When the current message asks a question, "
+    "make each reply answer that exact question directly: lead with the supported answer or "
+    "conclusion. Do not turn a direct question into a generic overview or merely restate the "
+    "source in different words. For example, if someone asks 'is this event meant for my kids "
+    "ages 14?' and the source says the group is for secondary school students aged 13-17, start "
+    "by clearly saying that it is for them, while retaining the secondary-school and 13-17 details. "
+    "If the source does not support a yes-or-no conclusion, state what applies instead without "
+    "guessing. Do not add exaggerated slang, phonetic "
     "misspellings, emojis, facts, promises, contacts, links, or safety advice. "
-    "Preserve every fact, qualification, and instruction. Never use an em dash. "
+    "For mode paraphrased, preserve every fact, qualification, and instruction. "
+    "For mode llm, include the source facts needed to answer the current request, "
+    "but never claim more. If a relevant source value is an ALL_CAPS placeholder, "
+    "copy that placeholder verbatim. Never use an em dash. "
     "A safety flow requires an explicit "
     "disclosure of immediate danger, abuse, self-harm, or an urgent request for "
     "a trusted adult. Do not infer safety from ambiguous requests for help."
@@ -321,7 +331,7 @@ def _decode_stdlib_success_response(
 
 
 class OpenRouterGateway:
-    """Safely route typed updates and paraphrase only locally authored templates."""
+    """Safely route typed updates and produce only locally bounded action replies."""
 
     def __init__(
         self,
@@ -794,9 +804,7 @@ def _normalize_match(
             PlannedReply(
                 slot_id=slot.slot_id,
                 text=(
-                    reply.text
-                    if _reply_preserves_template(slot, reply.text)
-                    else slot.template
+                    reply.text if _reply_is_permitted(slot, reply.text) else slot.source
                 ),
             )
             for slot_id, slot in slots.items()
@@ -933,12 +941,19 @@ def _format_debug_json(content: str) -> str:
         return content
 
 
-def _reply_preserves_template(slot: ReplyTemplateSlot, text: str) -> bool:
-    """Accept only a bounded paraphrase that preserves protected local syntax."""
+def _reply_is_permitted(slot: ReplySourceSlot, text: str) -> bool:
+    """Accept a reply only when it preserves its configured syntax boundary."""
 
     if chr(0x2014) in text:
         return False
-    if template_tokens(text) != slot.template_tokens or urls(text) != slot.urls:
-        return False
     remaining = TEMPLATE_TOKEN_PATTERN.sub("", text)
-    return "{{" not in remaining and "}}" not in remaining
+    if "{{" in remaining or "}}" in remaining:
+        return False
+    if slot.mode == "paraphrased":
+        return (
+            template_tokens(text) == slot.source_template_tokens
+            and urls(text) == slot.source_urls
+        )
+    return Counter(template_tokens(text)) <= Counter(
+        slot.source_template_tokens
+    ) and Counter(urls(text)) <= Counter(slot.source_urls)

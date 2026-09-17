@@ -57,7 +57,7 @@ def two_error_handlers(root: DiscussionFlow) -> None:
 
 def nonterminal_event_action(root: DiscussionFlow) -> None:
     root.next_flows[0].actions.append(
-        parse_action({"type": "send_message", "text": "This must not run."})
+        parse_action({"type": "send_message_paraphrased", "text": "This must not run."})
     )
 
 
@@ -135,14 +135,16 @@ def test_checkpoint_may_return_without_local_children() -> None:
     checkpoint = valid_timestamp_root()
     checkpoint.next_flow_mode = NextFlowMode.CHECKPOINT
     checkpoint.return_actions = [
-        parse_action({"type": "send_message", "text": "What else can I help with?"})
+        parse_action(
+            {"type": "send_message_paraphrased", "text": "What else can I help with?"}
+        )
     ]
 
     published = validate_for_publication(checkpoint, SCHEMA, RootKind.TIMESTAMP)
 
     assert published.document["next_flows"] == []
     assert published.document["return_actions"] == [
-        {"type": "send_message", "text": "What else can I help with?"}
+        {"type": "send_message_paraphrased", "text": "What else can I help with?"}
     ]
 
 
@@ -151,7 +153,9 @@ def test_non_checkpoint_modes_reject_return_actions() -> None:
 
     non_checkpoint = valid_timestamp_root()
     non_checkpoint.return_actions = [
-        parse_action({"type": "send_message", "text": "Cannot return here."})
+        parse_action(
+            {"type": "send_message_paraphrased", "text": "Cannot return here."}
+        )
     ]
 
     with pytest.raises(FlowPublicationError):
@@ -442,7 +446,9 @@ def test_flow_defaults_to_interactive_multi_intent_mode() -> None:
         DiscussionFlow(
             key="system.answer.with_child",
             trigger=parse_trigger({"type": "message", "llm_gist": "child"}),
-            actions=[parse_action({"type": "send_message", "text": "Answer"})],
+            actions=[
+                parse_action({"type": "send_message_paraphrased", "text": "Answer"})
+            ],
             next_flows=[
                 DiscussionFlow(
                     key="system.answer.with_child.follow_up",

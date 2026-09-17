@@ -39,7 +39,7 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-001 | Run the MVP as one local Python process using Telegram long polling | Runtime | Ryan The | 2026-09-11 | Hosted/serverless proposals |
 | ARCH-002 | Run PostgreSQL locally through Docker Compose | Persistence | Ryan The | 2026-09-11 | SQLite and hosted-database proposals |
 | ARCH-003 | Store immutable recursive flow definitions as validated versioned JSON and runtime state relationally | Flow engine | Ryan The | 2026-09-11 | Python-only and fully normalized configuration proposals |
-| ARCH-004 | Constrain the LLM to valid flow identifiers and locally validated configured-template paraphrases; only the harness sends user-facing content | Model boundary | Ryan The | 2026-09-17 | Free-form response proposal |
+| ARCH-004 | Constrain the LLM to valid flow identifiers and locally validated paraphrased or source-grounded action replies; only the harness sends user-facing content | Model boundary | Ryan The | 2026-09-17 | Free-form response proposal |
 | ARCH-005 | Represent branch reuse with `ONE_AND_ONCE_ONLY`, `ALLOW_MANY`, and `CHECKPOINT` | Conversation control | Ryan The | 2026-09-11 | Boolean and separate `FlowSelection` proposals |
 | ARCH-006 | Assemble current, reusable-past, system-global, and service-global candidates in one open-selection input | Routing state | Ryan The | 2026-09-11 | Stack and armed-trigger-registry proposals |
 | ARCH-007 | Use branch checkpoint ancestry for leaf and never-mind returns | Conversation recovery | Ryan The | 2026-09-11 | Single global checkpoint stack proposal |
@@ -62,7 +62,7 @@ The local Python runtime integrates with Telegram Bot API, local PostgreSQL, and
 - **Telegram transport:** typed Bot API requests, long polling, webhook clearing, update cursor, update parsing, outbound sends, cadence, and secret redaction.
 - **Conversation application:** command dispatch, onboarding, role-aware behavior, service resolution, checkpoint traversal, and action orchestration.
 - **Flow domain:** Pydantic definitions for recursive flows, triggers, actions, publication validation, and immutable versions.
-- **Routing gateway:** prompt construction, provider privacy controls, constrained flow-selection and reply-template validation, ambiguity/no-match handling, and repeated same-update selection.
+- **Routing gateway:** prompt construction, provider privacy controls, constrained flow selection and reply-source validation, ambiguity/no-match handling, and repeated same-update selection.
 - **Service scheduler:** due-timestamp claims, audience expansion, service lifecycle checks, catch-up, and idempotent delivery creation.
 - **Matching domain:** explicit normal and safety role pools, attendance, availability, capacity, ranking, assignment, rematch exclusion, and safety pending state.
 - **Persona service:** inactivity and token-threshold detection, summary generation, durable cursor advancement, and full-history preservation.
@@ -119,7 +119,7 @@ The local scheduler claims due service-recipient deliveries from PostgreSQL. Tim
 
 `hyperparameters.py` owns model identity, persona thresholds, routing attempt limits, timeouts, and non-secret tuning values. Secrets are environment-provided.
 
-The routing gateway strips structured Telegram IDs and DOBs from prompt objects. User-authored content may be transmitted. Requests specify ZDR and denied data collection; absence of a compatible endpoint emits the reserved `error` action event rather than weakening policy. The model output is parsed as configured flow identifiers and addressed `send_message` paraphrases, then rejected unless the local validator confirms their allowed structure and protected template content. A question paraphrase must directly answer the user before retaining each authored fact, qualification, and instruction.
+The routing gateway strips structured Telegram IDs and DOBs from prompt objects. User-authored content may be transmitted. Requests specify ZDR and denied data collection; absence of a compatible endpoint emits the reserved `error` action event rather than weakening policy. The model output is parsed as configured flow identifiers and addressed action replies. A `send_message_paraphrased` reply is rejected unless it preserves protected template content and directly answers the user's question. A `send_message_llm` reply is instructed to treat its configured `source` as the sole factual authority: it may not use prior knowledge, candidate gists, user assertions, defaults, or inference to add information. The harness alone renders and sends the locally validated result.
 
 ### 4.10 Failure and diagnostics boundary
 
@@ -145,7 +145,7 @@ No material architecture decisions remain unresolved for MVP planning. Concrete 
 - Telegram Serverless.
 - Admin graphical interface.
 - Bot-relayed human chat.
-- Free-form model responses.
+- Unbounded model responses beyond a selected action's configured text or source.
 - Strong operational-user identity verification.
 - Normal-match escalation when no server qualifies.
 

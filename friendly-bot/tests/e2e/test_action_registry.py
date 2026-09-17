@@ -30,8 +30,9 @@ from friendly_bot.domain.actions import (
     DiscussionActionBase,
     EndServiceInteractionsAction,
     SendButtonsAction,
-    SendMessageAction,
     SendMessageFixedAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
     SendPhotoAction,
     SendServiceChoiceButtonsAction,
     ShowActivityAction,
@@ -156,7 +157,7 @@ def test_registry_can_be_exactly_complete_for_f01_action_classes() -> None:
         registry.register(action_type, _do_nothing)
 
     registry.assert_complete(action_types)
-    assert len(action_types) == 25
+    assert len(action_types) == 26
 
 
 def test_composed_registry_registers_every_declared_action_exactly_once() -> None:
@@ -175,10 +176,10 @@ def test_composed_registry_registers_every_declared_action_exactly_once() -> Non
 
 def test_registry_rejects_duplicate_missing_and_extra_executors() -> None:
     registry = ActionExecutorRegistry()
-    registry.register(SendMessageAction, _do_nothing)
+    registry.register(SendMessageParaphrasedAction, _do_nothing)
 
     with pytest.raises(DuplicateActionExecutorError):
-        registry.register(SendMessageAction, _do_nothing)
+        registry.register(SendMessageParaphrasedAction, _do_nothing)
     with pytest.raises(UnregisteredActionExecutorError):
         registry.resolve(
             EndServiceInteractionsAction(
@@ -236,8 +237,8 @@ async def test_ordinary_message_uses_its_planned_reply_and_fixed_copy_does_not(
             diagnostics=cast(DiagnosticRepository, object()),
         )
     )
-    ordinary = SendMessageAction(
-        type="send_message", text="Hello {{ user.display_name }}"
+    ordinary = SendMessageParaphrasedAction(
+        type="send_message_paraphrased", text="Hello {{ user.display_name }}"
     )
     fixed = SendMessageFixedAction(type="send_message_fixed", text="Call 999 now")
 
@@ -251,6 +252,43 @@ async def test_ordinary_message_uses_its_planned_reply_and_fixed_copy_does_not(
     )
 
 
+async def test_source_grounded_message_uses_its_planned_reply_or_source_fallback(
+    now: datetime,
+) -> None:
+    context, _ = _context(now)
+    source = "arrow is for post-secondary students and nsfs aged 17-23."
+    action = SendMessageLlmAction(type="send_message_llm", source=source)
+    registry = build_action_registry(
+        ActionDependencies(
+            telegram=context.telegram,
+            services=cast(ServiceAttendanceService, object()),
+            lifecycle=cast(ServiceLifecycleService, object()),
+            matching=cast(MatchingService, object()),
+            diagnostics=cast(DiagnosticRepository, object()),
+        )
+    )
+
+    context.reply_plan = ReplyPlan(
+        (PlannedActionText("system.information", 0, "yes, arrow is for you."),)
+    )
+    await registry.resolve(action)(action, context.for_action("system.information", 0))
+    await context.flush_presentation()
+    assert context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, "yes, arrow is for you."),
+    )
+
+    fallback_context, _ = _context(now)
+    fallback_context.diagnostics = cast(DiagnosticRepository, RecordingDiagnostics())
+    fallback_context.reply_plan = ReplyPlan((), frozenset({("system.information", 0)}))
+    await registry.resolve(action)(
+        action, fallback_context.for_action("system.information", 0)
+    )
+    await fallback_context.flush_presentation()
+    assert fallback_context.presentation_buffer.snapshot() == (
+        TelegramTextPresentation(42, source),
+    )
+
+
 async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(
     now: datetime,
 ) -> None:
@@ -258,8 +296,8 @@ async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(
     diagnostics = RecordingDiagnostics()
     context.diagnostics = cast(DiagnosticRepository, diagnostics)
     context.reply_plan = ReplyPlan((), frozenset({("system.greeting", 0)}))
-    action = SendMessageAction(
-        type="send_message", text="Hello {{ user.display_name }}"
+    action = SendMessageParaphrasedAction(
+        type="send_message_paraphrased", text="Hello {{ user.display_name }}"
     )
     registry = build_action_registry(
         ActionDependencies(
@@ -277,7 +315,7 @@ async def test_missing_planned_reply_uses_authored_copy_and_records_fallback(
     assert context.presentation_buffer.snapshot() == (
         TelegramTextPresentation(42, "Hello Ryan"),
     )
-    assert diagnostics.reason_codes == ["paraphrase.validation_fallback"]
+    assert diagnostics.reason_codes == ["llm_reply.validation_fallback"]
 
 
 async def test_context_renders_locally_queues_delivery_and_allows_one_event(

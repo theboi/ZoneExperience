@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from friendly_bot.domain.actions import SendMessageAction, SendMessageFixedAction
+from friendly_bot.domain.actions import (
+    SendMessageFixedAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
+)
 from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
 from friendly_bot.domain.triggers import (
     OnActionEventTrigger,
@@ -54,14 +58,20 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
     parent = DiscussionFlow(
         key="system.home",
         next_flow_mode=NextFlowMode.CHECKPOINT,
-        return_actions=[SendMessageAction(type="send_message", text="anything else?")],
+        return_actions=[
+            SendMessageParaphrasedAction(
+                type="send_message_paraphrased", text="anything else?"
+            )
+        ],
     )
     child = DiscussionFlow(
         key="system.home.ask",
         trigger=OnMessageTrigger(type="message", llm_gist="asks"),
         next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
         actions=[
-            SendMessageAction(type="send_message", text="first {{ user.name }}"),
+            SendMessageParaphrasedAction(
+                type="send_message_paraphrased", text="first {{ user.name }}"
+            ),
             SendMessageFixedAction(type="send_message_fixed", text="exact copy"),
         ],
         next_flows=[
@@ -71,7 +81,11 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
                     type="action_event", event_key="match.found"
                 ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
-                actions=[SendMessageAction(type="send_message", text="second")],
+                actions=[
+                    SendMessageLlmAction(
+                        type="send_message_llm", source="only this source may answer"
+                    )
+                ],
             ),
             DiscussionFlow(
                 key="system.home.ask.none",
@@ -79,7 +93,11 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
                     type="action_event", event_key="match.none"
                 ),
                 next_flow_mode=NextFlowMode.ONE_AND_ONCE_ONLY,
-                actions=[SendMessageAction(type="send_message", text="third")],
+                actions=[
+                    SendMessageParaphrasedAction(
+                        type="send_message_paraphrased", text="third"
+                    )
+                ],
             ),
         ],
     )
@@ -87,12 +105,13 @@ def test_response_slots_cover_immediate_event_paths_and_checkpoint_return() -> N
     plan = plan_candidate_responses(child, checkpoint=parent)
 
     assert [
-        (slot.slot_id, slot.template, slot.template_tokens) for slot in plan.reply_slots
+        (slot.slot_id, slot.mode, slot.source, slot.source_template_tokens)
+        for slot in plan.reply_slots
     ] == [
-        ("r0", "first {{ user.name }}", ("user.name",)),
-        ("r1", "second", ()),
-        ("r2", "third", ()),
-        ("r3", "anything else?", ()),
+        ("r0", "paraphrased", "first {{ user.name }}", ("user.name",)),
+        ("r1", "llm", "only this source may answer", ()),
+        ("r2", "paraphrased", "third", ()),
+        ("r3", "paraphrased", "anything else?", ()),
     ]
     assert [(binding.flow_key, binding.action_index) for binding in plan.bindings] == [
         ("system.home.ask", 0),

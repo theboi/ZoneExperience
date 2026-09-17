@@ -13,7 +13,7 @@
 
 Friendly Bot gives youths a private, low-barrier way to connect with The Zone when they may be uncomfortable approaching a physical connect point, raising their hand, or asking questions publicly. It guides NBNCs through fixed, approved conversations; adapts those conversations to real-world services; and introduces them to eligible friendly humans.
 
-The product term is `NBNC`. The MVP does not distinguish newcomers from new believers. The model selects only configured flows. It may paraphrase a configured `send_message` template, but it cannot add a new answer, change protected content, or send anything except locally validated configured output.
+The product term is `NBNC`. The MVP does not distinguish newcomers from new believers. The model selects only configured flows. It may rewrite a configured `send_message_paraphrased` text while retaining protected content, or answer an addressed `send_message_llm` action using only its configured `source`. It cannot add facts, assumptions, or output outside the locally validated action response.
 
 The MVP runs locally on the decision owner's machine. Human connection shares a matched person's Telegram contact URL; bot-relayed human chat is outside this specification.
 
@@ -87,7 +87,7 @@ Full conversations are retained long term. Personas summarize the user's disclos
 
 Telegram updates arrive through long polling. Processing is idempotent and serialized per user. A local scheduler delivers due timestamp roots and catches up overdue work after restart. A durable delivery worker records Telegram send attempts.
 
-OpenRouter routes messages and ranks human matches. It receives persona, unsummarized conversation context, replied-to text, and all open configured choices. It returns only valid configured flow identifiers, reserved harness outcomes, and paraphrases for addressed `send_message` templates. For a user question, each paraphrase directly answers that question before retaining every fact, qualification, and instruction in the authored template. The harness validates the result locally and renders configured content.
+OpenRouter routes messages and ranks human matches. It receives persona, unsummarized conversation context, replied-to text, and all open configured choices. It returns only valid configured flow identifiers, reserved harness outcomes, and replies for addressed configured actions. A `send_message_paraphrased` reply directly answers the question while retaining every fact, qualification, and instruction in its text. A `send_message_llm` reply uses only the facts in its action `source`; it does not rely on prior knowledge, the candidate gist, user assertions, or inference. The harness validates the result locally and renders configured content.
 
 Persona regeneration occurs after 48 hours of inactivity or the model-relative unsummarized-token threshold configured in `hyperparameters.py`.
 
@@ -108,7 +108,7 @@ Every emitted application error and debug diagnostic creates a sanitized notific
 - Current, reusable-past, and global selections route according to their approved importance and reuse semantics.
 - Leaves and never-mind requests return through the nearest checkpoint on the selected branch.
 - Service enrollment, overlaps, latecomers, timestamps, audiences, and expiry behave as specified.
-- The canonical Zone X Python seed modules expose the approved before, during, and after behaviors with only locally validated configured model paraphrases and pass the end-to-end service acceptance suite.
+- The canonical Zone X Python seed modules expose the approved before, during, and after behaviors with locally validated paraphrased or source-grounded model replies and pass the end-to-end service acceptance suite.
 - Normal, rematch, capacity, and safety matching never select ineligible people.
 - Restart recovery does not duplicate logical Telegram updates or timestamp delivery.
 - OpenRouter prompt construction and provider policy enforce the approved privacy boundary.
@@ -116,4 +116,4 @@ Every emitted application error and debug diagnostic creates a sanitized notific
 
 ## 8. Product boundaries
 
-The product specification excludes hosted deployment, webhook operation, Telegram Serverless, an admin UI, bot-relayed human chat, accept/decline and timeout workflows, stronger server verification, free-form user-facing LLM answers, NBNC subtype distinctions, automated normal-match escalation, and conversation-deletion UI.
+The product specification excludes hosted deployment, webhook operation, Telegram Serverless, an admin UI, bot-relayed human chat, accept/decline and timeout workflows, stronger server verification, unbounded user-facing LLM answers, NBNC subtype distinctions, automated normal-match escalation, and conversation-deletion UI.

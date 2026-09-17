@@ -983,7 +983,7 @@ class FriendlyBotApplication:
         correlation_id: UUID,
         checkpoint: DiscussionFlow | None,
     ) -> ReplyPlan:
-        """Plan safe ordinary copy for a deterministic flow or retain authored fallback."""
+        """Plan a deterministic flow's bounded LLM replies or use its sources."""
 
         response_plan = plan_candidate_responses(flow, checkpoint=checkpoint)
         if not response_plan.reply_slots:
@@ -1002,8 +1002,8 @@ class FriendlyBotApplication:
             await unit_of_work.diagnostics.record(
                 correlation_id=correlation_id,
                 severity="warning",
-                safe_summary="known-flow paraphrase unavailable",
-                safe_context={"reason_code": "paraphrase.known_flow_fallback"},
+                safe_summary="known-flow LLM reply unavailable",
+                safe_context={"reason_code": "llm_reply.known_flow_fallback"},
                 at=(incoming.sent_at if incoming is not None else datetime.now(UTC)),
             )
             return ReplyPlan(

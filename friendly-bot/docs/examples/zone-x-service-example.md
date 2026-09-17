@@ -32,7 +32,7 @@ The configuration uses these rules:
 - Present buttons only when the available choices have not already been made clear in the preceding message.
 - An action may emit one terminal `ActionEvent`. The matching direct child runs immediately without consulting the LLM.
 - An unexpected failure emits `error`. A direct `error` child handles it; otherwise the harness invokes its hardcoded error sender. The hardcoded path is not a `DiscussionFlow` and is not part of published configuration. Action events never bubble.
-- All bot prose originates in actions. The LLM may select only eligible flow keys or reserved harness outcomes and may paraphrase only addressed `send_message` actions; a paraphrase must directly answer a user's question while retaining all authored facts and instructions.
+- All bot prose originates in actions. `send_message_paraphrased` gives the LLM authored copy to rewrite while retaining every fact, instruction, template value, URL, and placeholder. `send_message_llm` gives it a `source` whose stated information is the sole authority for that answer; it must not add assumptions or information from elsewhere. `send_message_fixed` is sent exactly as configured. The LLM may select only eligible flow keys or reserved harness outcomes.
 
 The flow graph, keys, behavior, copy, and outcomes below are the development baseline. The implementation loads equivalent Python seed modules, checks their static types, and validates the resulting data before publication. Any necessary serialization normalization must update this document and the living authorities in the same commit.
 
@@ -41,9 +41,9 @@ The flow graph, keys, behavior, copy, and outcomes below are the development bas
 ```yaml
 system_global_root:
   key: system.global
-  trigger: null
+  trigger:
   actions:
-  - type: send_message
+  - type: send_message_paraphrased
     text: Hey {{ user.name }}! Nice to meet you! Welcome to The Zone! I'm Friendly
       Bot, here to help you get connected to our wonderful community!
   - type: send_buttons
@@ -61,7 +61,7 @@ system_global_root:
       text: get connected!
   next_flow_mode: CHECKPOINT
   return_actions:
-  - type: send_message
+  - type: send_message_paraphrased
     text: Is there anything else I can help you with? (you can ask me any question!)
   - type: send_buttons
     service_bound: false
@@ -96,7 +96,7 @@ system_global_root:
         greetings, ordinary questions, general distress, ambiguous requests for help,
         jokes, or figurative language.
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: Hey, thank you for telling me... you do not have to handle this alone.
         Let me help you find someone to talk to...
     - type: show_activity
@@ -128,7 +128,7 @@ system_global_root:
         type: action_event
         event_key: safety_match.not_found
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: I can't reach a trusted person through the bot right now. If you may
           be in immediate danger, call emergency services or go to a trusted adult
           near you now.
@@ -151,91 +151,60 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
-  - key: system.global.menu.timings
-    multi_intent_mode: interactive
+  - key: system.global.information
+    multi_intent_mode: answer
     trigger:
       type: any_of
       triggers:
       - type: button
         button_id: system.global.menu.timings
+      - type: button
+        button_id: system.global.menu.zone
       - type: message
-        possible_qns:
-        - when are services?
-        - when do you all gather?
-        - what time is youth service?
+        llm_gist: The person asks about The Zone, New Creation Church or NCC, DARE,
+          Arrow, Varsity or V, which youth group is for them, youth-service times,
+          the next gathering, service duration, service status, cost, attending without
+          being Christian, or The Zone's purpose; this also handles a reply that names
+          DARE, Arrow, Varsity, or V after a youth-group clarification.
     actions:
-    - type: send_message
-      text: we have different youth groups for different ages! which are you referring
-        to?
-    - type: send_message_fixed
-      text: |-
-        DARE: for secondary school students aged 13-17yo
-        Arrow: for post-secondary school students and NSFs aged 17-23yo
-        Varsity: for university students
+    - type: send_message_llm
+      source: 'NCC means New Creation Church. NCC''s approved description is NCC_DESCRIPTION.
+        The Zone is New Creation Church''s energy-packed youth ministry. It reaches
+        out to all secondary and tertiary students as well as full-time national servicemen
+        in community and in motion for the grace revolution. Centred on the foundation
+        of the Word of God, the ministry''s call is the message of God''s unmerited,
+        undeserved favour. The Zone is a place for building godly relationships and
+        growing in revelation of God''s grace. The Zone is also a place to meet people,
+        explore faith, and grow in community. Its additional approved purpose statement
+        is THE_ZONE_PURPOSE. The Zone has three youth groups for students and NSFs
+        aged 13-25: DARE is for secondary school students aged 13-17; Arrow is for
+        post-secondary school students and NSFs aged 17-23; Varsity, also called V,
+        is for university students. If someone asks for service times without naming
+        a group, tell them that there are DARE, Arrow, and Varsity services with distinct
+        schedules and ask which group they mean. If a message only names DARE, Arrow,
+        Varsity, or V, give that group''s schedule. DARE is a place to discover purpose
+        and meet authentic friends who will never let people walk alone. #DAREishome.
+        DARE''s Instagram is @nccdare. DARE services are on DARE_SERVICE_DAY. Doors
+        open at DARE_DOORS_OPEN_TIME, service starts at DARE_SERVICE_START_TIME, and
+        ends at DARE_SERVICE_END_TIME at DARE_SERVICE_VENUE. Arrow is for people in
+        a new season; people can come as they are and discover Jesus'' perfect love.
+        #ArrowIsFamily. Arrow''s Instagram is @nccarrow. Arrow services are on ARROW_SERVICE_DAY.
+        Doors open at ARROW_DOORS_OPEN_TIME, service starts at ARROW_SERVICE_START_TIME,
+        and ends at ARROW_SERVICE_END_TIME at ARROW_SERVICE_VENUE. Varsity, or V,
+        is a community for university students that values relationships with Jesus
+        and each other. Its Instagram is @nccvarsity. Varsity services are on VARSITY_SERVICE_DAY.
+        Doors open at VARSITY_DOORS_OPEN_TIME, service starts at VARSITY_SERVICE_START_TIME,
+        and ends at VARSITY_SERVICE_END_TIME at VARSITY_SERVICE_VENUE. The next gathering
+        is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Its event calendar or link
+        is UPCOMING_EVENTS_LINK. A typical service lasts SERVICE_DURATION; this may
+        differ for the service someone means. For the latest cancellation or service-status
+        updates, use OFFICIAL_UPDATES_LINK or contact OFFICIAL_UPDATES_CONTACT. People
+        are welcome at The Zone whether or not they are Christian; they can ask questions
+        and take things at their own pace. The Zone costs COST_OR_FREE_DETAILS. Event-specific
+        price, payment, or financial-help details still need to be added.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
-    next_flows:
-    - key: system.global.menu.timings.dare
-      multi_intent_mode: answer
-      trigger:
-        type: message
-        possible_qns:
-        - Dare
-        - when is Dare?
-        - what time is Dare?
-      actions:
-      - type: send_message
-        text: DARE services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
-          service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME
-          at DARE_SERVICE_VENUE.
-      next_flow_mode: ALLOW_MANY
-      return_actions: []
-      next_flows: []
-    - key: system.global.menu.timings.arrow
-      multi_intent_mode: answer
-      trigger:
-        type: message
-        possible_qns:
-        - Arrow
-        - when is Arrow?
-        - what time is Arrow?
-      actions:
-      - type: send_message
-        text: Arrow services are held on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME,
-          service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME
-          at ARROW_SERVICE_VENUE.
-      next_flow_mode: ALLOW_MANY
-      return_actions: []
-      next_flows: []
-    - key: system.global.menu.timings.varsity
-      multi_intent_mode: answer
-      trigger:
-        type: message
-        possible_qns:
-        - Varsity
-        - when is Varsity?
-        - what time is Varsity?
-      actions:
-      - type: send_message
-        text: Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME,
-          service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME
-          at VARSITY_SERVICE_VENUE.
-      next_flow_mode: ALLOW_MANY
-      return_actions: []
-      next_flows: []
-    - key: system.global.menu.timings.other_service
-      multi_intent_mode: answer
-      trigger:
-        type: message
-        llm_gist: The person answers the current youth-group timing question with
-          a group other than Dare, Arrow, or Varsity.
-      actions:
-      - type: send_message
-        text: I have timing details for Dare, Arrow, and Varsity. Which of these groups
-          did you mean?
-      next_flow_mode: ALLOW_MANY
-      return_actions: []
-      next_flows: []
+    next_flows: []
   - key: system.global.menu.directions
     multi_intent_mode: answer
     trigger:
@@ -249,7 +218,7 @@ system_global_root:
         - where is The Zone?
         - how do i get to Star Vista?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: Our services are held at Star Vista! Take the MRT to Buona Vista and follow
         the signs!
     - type: send_message_fixed
@@ -272,7 +241,7 @@ system_global_root:
         - what happens at The Zone?
         - can i come alone?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: Come as you are. You can expect music, a message about Jesus, and time
         to meet other youths. It's okay to come alone, sit quietly, or ask for someone
         to meet you before you enter.
@@ -297,256 +266,6 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
-  - key: system.global.schedule.dare
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - when is Dare?
-      - what time is Dare service?
-    actions:
-    - type: send_message
-      text: Dare services are held on DARE_SERVICE_DAY. Doors open at DARE_DOORS_OPEN_TIME,
-        service starts at DARE_SERVICE_START_TIME, and ends at DARE_SERVICE_END_TIME
-        at DARE_SERVICE_VENUE.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.schedule.arrow
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - when is Arrow?
-      - what time is Arrow service?
-    actions:
-    - type: send_message
-      text: Arrow services are held on ARROW_SERVICE_DAY. Doors open at ARROW_DOORS_OPEN_TIME,
-        service starts at ARROW_SERVICE_START_TIME, and ends at ARROW_SERVICE_END_TIME
-        at ARROW_SERVICE_VENUE.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.schedule.varsity
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - when is Varsity?
-      - what time is Varsity service?
-    actions:
-    - type: send_message
-      text: Varsity services are held on VARSITY_SERVICE_DAY. Doors open at VARSITY_DOORS_OPEN_TIME,
-        service starts at VARSITY_SERVICE_START_TIME, and ends at VARSITY_SERVICE_END_TIME
-        at VARSITY_SERVICE_VENUE.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.schedule.next_gathering
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - is there youth service today?
-      - when is the next gathering?
-      - is there service this week?
-    actions:
-    - type: send_message
-      text: 'The next gathering is NEXT_GATHERING_DATE at NEXT_GATHERING_TIME. Please
-        add the current event calendar or link: UPCOMING_EVENTS_LINK.'
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.schedule.duration
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - how long is service?
-      - what time does youth service end?
-    actions:
-    - type: send_message
-      text: A typical service lasts SERVICE_DURATION. Please update this if it differs
-        for the service you mean.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.schedule.status
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - is service still happening?
-      - has service been cancelled?
-    actions:
-    - type: send_message
-      text: Please check OFFICIAL_UPDATES_LINK for the latest service updates, or
-        contact OFFICIAL_UPDATES_CONTACT.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.ncc
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - what is NCC?
-      - what does NCC stand for?
-      - is The Zone part of a church?
-    actions:
-    - type: send_message
-      text: 'NCC is New Creation Church. Please add a short approved description here:
-        NCC_DESCRIPTION.'
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.zone
-    multi_intent_mode: answer
-    trigger:
-      type: any_of
-      triggers:
-      - type: button
-        button_id: system.global.menu.zone
-      - type: message
-        possible_qns:
-        - what is The Zone?
-        - what do you mean by The Zone?
-        - is The Zone part of a church?
-    actions:
-    - type: send_message
-      text: The Zone is New Creation Church's energy-packed youth ministry, and reaches
-        out to all secondary and tertiary students as well as full-time national servicemen
-        in community and in motion for the grace revolution. Centred on the foundation
-        of the Word of God, the ministry's call is wrapped up in the message of God's
-        unmerited, undeserved favour! The Zone is the place for building godly relationships
-        and growing in revelation of God's grace.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.dare
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - what is DARE?
-    actions:
-    - type: send_message
-      text: 'Growing up and trying to stay afloat amidst endless homework and responsibilities?
-        Come face to face with the One who wants to calm the storms in your life and
-        be the anchor of your soul. DARE is a place where you will discover your purpose
-        and meet authentic friends who will never let you walk alone. #DAREishome
-        (for secondary school students aged 13-17yo)'
-    - type: send_message
-      text: Follow us at @nccdare on Instagram for latest updates on service dates
-        and timings.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.arrow
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - what is Arrow?
-    actions:
-    - type: send_message
-      text: 'Ok, you''re in a new season and the world''s your oyster. Wondering what
-        the future holds? We know that God will use this season to prepare and set
-        you up for all the plans and the purposes He has for you. Because #ArrowIsFamily—you
-        don''t have to act, dress or talk in a certain way to belong. You can come
-        as you are. We believe that the message of Jesus will radically transform
-        your life. Come and discover His perfect love for you.  (for post-secondary
-        school students and NSFs aged 17-23yo)'
-    - type: send_message
-      text: Follow us at @nccarrow on Instagram for latest updates on service dates
-        and timings.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.varsity
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - what is V / Varsity?
-    actions:
-    - type: send_message
-      text: Whether you've got a packed semester, an intense elective, or a chill
-        internship—your university experience is shaped by the people you're surrounded
-        with. At V, we are committed to taking this journey together with unstoppable
-        faith and irresistible wisdom. We crave intimate and real relationships with
-        Jesus and with each other. We are a fam that will never let you walk through
-        life alone. (for university students)
-    - type: send_message
-      text: Follow us at @nccvarsity on Instagram for latest updates on service dates
-        and timings.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.eligibility
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - who is The Zone for?
-      - am i too old for The Zone?
-      - can primary school/secondary school/junior college/JC/Poly/Polytechnic students
-        come?
-    actions:
-    - type: send_message
-      text: The Zone consists of three youth groups designed for students and NSF
-        aged 13-25yo. If you are a working adult, you can join our English care groups
-        and find support for the season you are in!
-    - type: send_message_fixed
-      text: |-
-        DARE: for secondary school students aged 13-17yo
-        Arrow: for post-secondary school students and NSFs aged 17-23yo
-        Varsity: for university students
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.not_christian
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - can i come if i am not Christian?
-      - can i come even if i am not sure about faith?
-    actions:
-    - type: send_message
-      text: You are welcome at The Zone whether or not you are Christian. You can
-        come, ask questions, and take things at your own pace.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.purpose
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - why should i come to The Zone?
-      - what is the point of The Zone?
-    actions:
-    - type: send_message
-      text: 'The Zone is a place to meet people, explore faith, and grow in community.
-        Please add the approved purpose statement here: THE_ZONE_PURPOSE.'
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
-  - key: system.global.about.cost
-    multi_intent_mode: answer
-    trigger:
-      type: message
-      possible_qns:
-      - does The Zone cost money?
-      - do i need to pay for service?
-    actions:
-    - type: send_message
-      text: The Zone costs COST_OR_FREE_DETAILS. Please add any event-specific price,
-        payment, or financial-help details here.
-    next_flow_mode: ALLOW_MANY
-    return_actions: []
-    next_flows: []
   - key: system.global.arrival.first_visit
     multi_intent_mode: answer
     trigger:
@@ -555,7 +274,7 @@ system_global_root:
       - what do i do when i arrive for the first time?
       - where do i go for check-in?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: When you arrive, go to FIRST_TIME_WELCOME_POINT and look for FIRST_TIME_TEAM_DESCRIPTION.
         Please add the check-in details here.
     next_flow_mode: ALLOW_MANY
@@ -569,7 +288,7 @@ system_global_root:
       - do i need to register?
       - do i need to buy a ticket?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'REGISTRATION_REQUIREMENT. Please add the registration link or instructions
         here: REGISTRATION_LINK.'
     next_flow_mode: ALLOW_MANY
@@ -583,7 +302,7 @@ system_global_root:
       - can i bring a friend?
       - can my sibling come?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'You are welcome to bring a friend. Please add any guest, sibling, parent,
         or guardian requirements here: GUEST_POLICY.'
     next_flow_mode: ALLOW_MANY
@@ -597,7 +316,7 @@ system_global_root:
       - can i still come if i am late?
       - what if service has already started?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'You can still come. Please add the late-arrival instructions, entrance,
         and service-specific limits here: LATE_ARRIVAL_INSTRUCTIONS.'
     next_flow_mode: ALLOW_MANY
@@ -611,7 +330,7 @@ system_global_root:
       - how do i get to The Zone by bus?
       - which bus goes to Star Vista?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the recommended bus services and stop here: BUS_DIRECTIONS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -624,7 +343,7 @@ system_global_root:
       - where can i park?
       - where should my Grab drop me off?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the parking, drop-off, cost, and ride-hailing details here:
         PARKING_AND_DROPOFF_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -638,7 +357,7 @@ system_global_root:
       - which entrance should i use?
       - what level is The Zone on?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the entrance, level, room, and meeting-point details here:
         VENUE_ARRIVAL_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -652,7 +371,7 @@ system_global_root:
       - is the venue wheelchair accessible?
       - is there a lift?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the venue accessibility arrangements and contact here: ACCESSIBILITY_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -665,7 +384,7 @@ system_global_root:
       - what happens during service?
       - what is the programme like?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'A typical gathering includes music, a message about Jesus, and time to
         meet other youths. Please add the approved programme order and duration here:
         TYPICAL_PROGRAMME_DETAILS.'
@@ -680,7 +399,7 @@ system_global_root:
       - what language is service in?
       - is there translation?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Services are in SERVICE_LANGUAGE. Please add interpretation or translation
         support here: INTERPRETATION_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -694,7 +413,7 @@ system_global_root:
       - will it be loud?
       - is there a quiet space?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the sound, lighting, quiet-space, and sensory-support details
         here: SENSORY_SUPPORT_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -708,7 +427,7 @@ system_global_root:
       - will i have to speak?
       - do i have to join in?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'You can take things at your own pace. Please add the approved participation
         and privacy reassurance here: PARTICIPATION_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -722,7 +441,7 @@ system_global_root:
       - can i talk to a real person?
       - can i meet someone from The Zone?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved contact path for meeting someone outside a live
         service here: COMMUNITY_CONTACT_PATH.'
     next_flow_mode: ALLOW_MANY
@@ -736,7 +455,7 @@ system_global_root:
       - what is The Zone instagram?
       - do you have a Telegram channel?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the official social links here: INSTAGRAM_LINK, TELEGRAM_CHANNEL_LINK,
         WEBSITE_LINK.'
     next_flow_mode: ALLOW_MANY
@@ -750,7 +469,7 @@ system_global_root:
       - how can i volunteer?
       - can i join a team?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the serving process, age requirements, and contact here: SERVING_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -763,7 +482,7 @@ system_global_root:
       - who can i contact after service?
       - can i talk to someone later this week?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved follow-up contact here: FOLLOW_UP_CONTACT.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -776,7 +495,7 @@ system_global_root:
       - who is Jesus?
       - what do Christians believe about Jesus?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: At NCC, we believe Jesus is the Son of God who came to reveal God's love
         and give us new life through His death and resurrection.
     next_flow_mode: ALLOW_MANY
@@ -790,7 +509,7 @@ system_global_root:
       - what is Christianity?
       - what do Christians believe?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add a short approved explanation of Christian belief here: CHRISTIANITY_EXPLANATION.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -803,7 +522,7 @@ system_global_root:
       - how do i become a Christian?
       - how do i follow Jesus?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved next-steps explanation and contact here: FOLLOW_JESUS_NEXT_STEPS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -816,7 +535,7 @@ system_global_root:
       - how do i start reading the Bible?
       - what is baptism?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved Bible, baptism, and discipleship next steps here:
         FAITH_NEXT_STEPS.'
     next_flow_mode: ALLOW_MANY
@@ -830,7 +549,7 @@ system_global_root:
       - can you pray for me?
       - how do i pray?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved prayer response and contact path here: PRAYER_SUPPORT_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -843,7 +562,7 @@ system_global_root:
       - can i ask someone a private faith question?
       - can i talk to someone about faith?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved private faith-conversation contact path here:
         FAITH_CONVERSATION_CONTACT.'
     next_flow_mode: ALLOW_MANY
@@ -857,7 +576,7 @@ system_global_root:
       - i feel really lonely
       - can i talk to someone about something personal?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Thank you for sharing that. Please add the approved non-emergency support
         contact and wording here: WELLBEING_SUPPORT_CONTACT.'
     next_flow_mode: ALLOW_MANY
@@ -871,7 +590,7 @@ system_global_root:
       - where is the toilet?
       - where is the restroom?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: The nearest toilets are on Level 4 beside the lifts. Ask a Zone team member
         if you would like someone to show you.
     next_flow_mode: ALLOW_MANY
@@ -885,7 +604,7 @@ system_global_root:
       - is there food?
       - where can i get water?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add food, drink, water, refreshment, and cost details here: FOOD_AND_WATER_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -898,7 +617,7 @@ system_global_root:
       - is there wifi?
       - can i charge my phone?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the Wi-Fi and charging policy here: WIFI_AND_CHARGING_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -911,7 +630,7 @@ system_global_root:
       - i lost something
       - where is lost and found?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the lost-and-found location and contact here: LOST_PROPERTY_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -924,7 +643,7 @@ system_global_root:
       - i do not feel well
       - where can i get first aid?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the on-site medical-help and team-member instructions here:
         ON_SITE_HELP_INSTRUCTIONS.'
     next_flow_mode: ALLOW_MANY
@@ -938,7 +657,7 @@ system_global_root:
       - is my information private?
       - what do you do with my details?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved privacy explanation and policy link here: PRIVACY_POLICY_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -951,7 +670,7 @@ system_global_root:
       - are photos taken?
       - can i opt out of photos?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved photo, video, and opt-out policy here: MEDIA_POLICY_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -964,7 +683,7 @@ system_global_root:
       - do i need parental consent?
       - can my parent come with me?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the parental-consent and guardian policy here: PARENTAL_CONSENT_DETAILS.'
     next_flow_mode: ALLOW_MANY
     return_actions: []
@@ -977,7 +696,7 @@ system_global_root:
       - what are the behaviour rules?
       - how do you keep people safe?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'Please add the approved safeguarding, reporting, and behaviour-policy
         details here: SAFEGUARDING_DETAILS.'
     next_flow_mode: ALLOW_MANY
@@ -990,7 +709,7 @@ system_global_root:
       llm_gist: The person asks a genuine question about The Zone, NCC, a youth service,
         or attending that is not covered by a more specific available question flow.
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: 'I do not have an approved answer for that yet. Please add the best contact
         for unanswered questions here: GENERAL_QUESTION_CONTACT.'
     next_flow_mode: ALLOW_MANY
@@ -1003,7 +722,7 @@ system_global_root:
       - how do i join a small group?
       - do you have cell groups?
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: We would love to help you find a group. What is your age or school stage,
         and what area are you usually in?
     next_flow_mode: ALLOW_MANY
@@ -1016,7 +735,7 @@ system_global_root:
         llm_gist: The person answers the current small-group question with their age,
           school stage, area, availability, or group preference.
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: 'Thanks for sharing. Please add the approved small-group follow-up contact
           or form here: SMALL_GROUP_CONTACT_OR_LINK.'
       next_flow_mode: ALLOW_MANY
@@ -1035,9 +754,9 @@ service:
   interaction_ends_at: '2026-10-18T18:00:00+08:00'
   service_global_root:
     key: service.zone_x.home
-    trigger: null
+    trigger:
     actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: Hey {{ user.name }}! Welcome to Zone X! What would you like help with?
     - type: send_buttons
       service_bound: true
@@ -1052,7 +771,7 @@ service:
         text: Change service
     next_flow_mode: CHECKPOINT
     return_actions:
-    - type: send_message
+    - type: send_message_paraphrased
       text: Is there anything else I can help you with at Zone X?
     - type: send_buttons
       service_bound: true
@@ -1077,7 +796,7 @@ service:
           - how do i get to Zone X?
           - where is Zone X?
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange
           Green! Take the MRT to Buona Vista and follow the signs to The Star Vista.
           You'll meet our friendly welcome team in blue near the venue entrance to
@@ -1099,7 +818,7 @@ service:
           - what should i expect at Zone X?
           - can i come alone?
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Come as you are. You can expect music, a message about Jesus, and time
           to meet other youths. It’s okay to come alone, sit quietly, or ask for someone
           to meet you before you enter.
@@ -1117,7 +836,7 @@ service:
           - can i meet someone?
           - can i talk to a friendly human?
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: What is one thing that interests you? Nothing is a valid answer too!
       next_flow_mode: ONE_AND_ONCE_ONLY
       return_actions: []
@@ -1149,7 +868,7 @@ service:
             type: action_event
             event_key: human_match.found
           actions:
-          - type: send_message
+          - type: send_message_paraphrased
             text: I found {{ matched_server.name }} from {{ matched_server.cg_name
               }}. How would you like to meet?
           - type: send_buttons
@@ -1176,7 +895,7 @@ service:
             - type: share_human_contact
               text: "{{ matched_server.name }} is expecting you. Message them here:
                 {{ matched_server.telegram_url }}"
-            - type: send_message
+            - type: send_message_paraphrased
               text: if {{ matched_server.name }} is not responding, tell me and i
                 will find someone else.
             next_flow_mode: ALLOW_MANY
@@ -1222,7 +941,7 @@ service:
                   type: action_event
                   event_key: human_match.not_found
                 actions:
-                - type: send_message
+                - type: send_message_paraphrased
                   text: Sorry, nobody else is available to meet right now. Please
                     speak to a Zone team member at the venue.
                 next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1242,7 +961,7 @@ service:
             - type: share_human_contact
               text: "{{ matched_server.name }} will come and meet you. Message them
                 here so you can find each other: {{ matched_server.telegram_url }}"
-            - type: send_message
+            - type: send_message_paraphrased
               text: if {{ matched_server.name }} is not responding, tell me and i
                 will find someone else.
             next_flow_mode: ALLOW_MANY
@@ -1288,7 +1007,7 @@ service:
                   type: action_event
                   event_key: human_match.not_found
                 actions:
-                - type: send_message
+                - type: send_message_paraphrased
                   text: Sorry, nobody else is available to meet right now. Please
                     speak to a Zone team member at the venue.
                 next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1299,7 +1018,7 @@ service:
             type: action_event
             event_key: human_match.not_found
           actions:
-          - type: send_message
+          - type: send_message_paraphrased
             text: Sorry, nobody is available to meet right now. Please try again later
               or speak to a Zone team member at the venue.
           next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1365,7 +1084,7 @@ service:
               type: action_event
               event_key: service_attendance.ended
             actions:
-            - type: send_message
+            - type: send_message_paraphrased
               text: Sorry, the service is over!
             next_flow_mode: ONE_AND_ONCE_ONLY
             return_actions: []
@@ -1375,20 +1094,20 @@ service:
           type: action_event
           event_key: service_attendance.none_available
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: There are no other ongoing services to switch to.
         next_flow_mode: ONE_AND_ONCE_ONLY
         return_actions: []
         next_flows: []
   latecomer_flow:
     key: service.zone_x.latecomer
-    trigger: null
+    trigger:
     actions:
     - type: add_service_attendance
       attendance_status: latecomer
     - type: enter_service_checkpoint
       flow_key: service.zone_x.home
-    - type: send_message
+    - type: send_message_paraphrased
       text: Yes, you can still join Zone X. Service has started, so head to the venue
         entrance and ask a Zone team member to help you find a seat.
     next_flow_mode: ALLOW_MANY
@@ -1400,7 +1119,7 @@ service:
     audience: ALL_NBNCS
     root_flow:
       key: service.zone_x.timestamp.marketing
-      trigger: null
+      trigger:
       actions:
       - type: send_photo
         asset_key: zone_x_poster_2026
@@ -1415,7 +1134,7 @@ service:
           text: Get directions
       next_flow_mode: CHECKPOINT
       return_actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Would you like to know anything else about Zone X?
       next_flows:
       - key: service.zone_x.timestamp.marketing.expect
@@ -1423,7 +1142,7 @@ service:
           type: button
           button_id: zone_x.marketing.what_to_expect
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: Come as you are. There will be music, a message about Jesus, and friendly
             people who can sit with you.
         next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1445,16 +1164,16 @@ service:
     audience: ALL_NBNCS
     root_flow:
       key: service.zone_x.timestamp.one_day_before
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing
           Arts Centre.
       - type: send_message_fixed
         text: 'Map: {{ service.map_url }}'
       next_flow_mode: CHECKPOINT
       return_actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Anything else you’d like to know before Zone X?
       next_flows: []
   - key: zone_x.doors_open
@@ -1462,9 +1181,9 @@ service:
     audience: ALL_NBNCS
     root_flow:
       key: service.zone_x.timestamp.doors_open
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Doors are open for Zone X. Are you here with us? Reply 'i am here' to
           check in.
       next_flow_mode: ONE_AND_ONCE_ONLY
@@ -1505,7 +1224,7 @@ service:
             type: action_event
             event_key: service_attendance.ended
           actions:
-          - type: send_message
+          - type: send_message_paraphrased
             text: Sorry, the service is over!
           next_flow_mode: ONE_AND_ONCE_ONLY
           return_actions: []
@@ -1515,9 +1234,9 @@ service:
     audience: SERVICE_NBNCS
     root_flow:
       key: service.zone_x.timestamp.service_questions
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Service has started. You can ask a question here at any time.
       - type: send_buttons
         service_bound: true
@@ -1528,7 +1247,7 @@ service:
           text: Who is Jesus?
       next_flow_mode: CHECKPOINT
       return_actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Is there anything else you’d like to ask about service?
       - type: send_buttons
         service_bound: true
@@ -1550,7 +1269,7 @@ service:
             - where is the toilet?
             - where is the restroom?
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: The nearest toilets are on Level 4 beside the lifts. Ask a Zone team
             member if you’d like someone to show you.
         next_flow_mode: ALLOW_MANY
@@ -1568,7 +1287,7 @@ service:
             - who is Jesus?
             - what do Christians believe about Jesus?
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: At NCC, we believe Jesus is the Son of God who came to reveal God’s
             love and give us new life through His death and resurrection. I can connect
             you with someone if you’d like to talk about this personally.
@@ -1582,7 +1301,7 @@ service:
           llm_gist: The person asks a genuine question about service that is not covered
             by a more specific open question flow.
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: I don’t have an approved answer for that question, but I can connect
             you with someone who can talk with you.
         next_flow_mode: ALLOW_MANY
@@ -1593,9 +1312,9 @@ service:
     audience: ALL_SERVICE_ATTENDEES
     root_flow:
       key: service.zone_x.timestamp.after_service
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Service has ended. What would you like to do next?
       - type: send_buttons
         service_bound: true
@@ -1606,7 +1325,7 @@ service:
           text: Ask a question
       next_flow_mode: CHECKPOINT
       return_actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Would you like help with anything else before you go?
       next_flows:
       - key: service.zone_x.after.connect
@@ -1614,7 +1333,7 @@ service:
           type: button
           button_id: zone_x.after.connect
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: I can introduce you to someone friendly. Tell me if you would like
             me to do that.
         next_flow_mode: ALLOW_MANY
@@ -1625,7 +1344,7 @@ service:
           type: button
           button_id: zone_x.after.ask
         actions:
-        - type: send_message
+        - type: send_message_paraphrased
           text: A friendly human can help with your question. Tell me if you would
             like an introduction.
         next_flow_mode: ALLOW_MANY
@@ -1636,9 +1355,9 @@ service:
     audience: ALL_SERVICE_ATTENDEES
     root_flow:
       key: service.zone_x.timestamp.thank_you
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Thank you for coming to Zone X today. We’re glad you were here. You
           can still use the service options until 6:00 pm.
       next_flow_mode: ALLOW_MANY
@@ -1649,9 +1368,9 @@ service:
     audience: ALL_SERVICE_ATTENDEES
     root_flow:
       key: service.zone_x.timestamp.interaction_ends
-      trigger: null
+      trigger:
       actions:
-      - type: send_message
+      - type: send_message_paraphrased
         text: Zone X has ended, but you can still ask for directions to Star or learn
           more about NCC here anytime.
       - type: end_service_interactions

@@ -260,18 +260,22 @@ def test_leaf_returns_only_its_nearest_nested_checkpoint() -> None:
     system = flow(
         "system.global",
         mode=NextFlowMode.CHECKPOINT,
-        return_actions=[parse_action({"type": "send_message", "text": "System"})],
+        return_actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "System"})
+        ],
     )
     service_home = flow(
         "service.zone_x.home",
         mode=NextFlowMode.CHECKPOINT,
-        return_actions=[parse_action({"type": "send_message", "text": "Home"})],
+        return_actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "Home"})
+        ],
     )
     questions = flow(
         "service.zone_x.questions",
         mode=NextFlowMode.CHECKPOINT,
         return_actions=[
-            parse_action({"type": "send_message", "text": "Ask a question"})
+            parse_action({"type": "send_message_paraphrased", "text": "Ask a question"})
         ],
     )
     nested_branch = state(
@@ -303,7 +307,9 @@ def test_leaf_returns_only_its_nearest_nested_checkpoint() -> None:
     assert transition.target_checkpoint_key == "service.zone_x.questions"
     assert transition.current_selection_ids == frozenset({"service.zone_x.questions"})
     assert "unrelated.timestamp" not in transition.current_selection_ids
-    assert [action.type for action in transition.return_actions] == ["send_message"]
+    assert [action.type for action in transition.return_actions] == [
+        "send_message_paraphrased"
+    ]
 
 
 def test_return_rejects_lineage_that_omits_a_known_nested_checkpoint() -> None:
@@ -341,13 +347,17 @@ def test_plain_leaf_returns_to_its_checkpoint_after_its_own_actions() -> None:
     leaf = button_child(
         "system.home.directions",
         mode=NextFlowMode.ONE_AND_ONCE_ONLY,
-        actions=[parse_action({"type": "send_message", "text": "Directions"})],
+        actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "Directions"})
+        ],
     )
     parent_definition = flow(
         "system.home",
         mode=NextFlowMode.CHECKPOINT,
         children=[leaf],
-        return_actions=[parse_action({"type": "send_message", "text": "Home"})],
+        return_actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "Home"})
+        ],
     )
     parent = state("system.home", checkpoints=["system.home"])
 
@@ -363,8 +373,8 @@ def test_plain_leaf_returns_to_its_checkpoint_after_its_own_actions() -> None:
     assert transition.checkpoint_return.source_selection_id == parent.id
     assert transition.checkpoint_return.target_checkpoint_key == "system.home"
     assert [action.type for action in transition.actions_to_execute] == [
-        "send_message",
-        "send_message",
+        "send_message_paraphrased",
+        "send_message_paraphrased",
     ]
 
 
@@ -380,7 +390,9 @@ def test_explicit_return_action_suppresses_the_generic_leaf_return() -> None:
         "system.global",
         mode=NextFlowMode.CHECKPOINT,
         children=[leaf],
-        return_actions=[parse_action({"type": "send_message", "text": "System"})],
+        return_actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "System"})
+        ],
     )
     parent = state("system.global", checkpoints=["system.global"])
 
@@ -404,7 +416,9 @@ def test_system_checkpoint_repeats_its_return_actions() -> None:
     system = flow(
         "system.global",
         mode=NextFlowMode.CHECKPOINT,
-        return_actions=[parse_action({"type": "send_message", "text": "System"})],
+        return_actions=[
+            parse_action({"type": "send_message_paraphrased", "text": "System"})
+        ],
     )
     branch = state(
         "system.global",
@@ -419,7 +433,9 @@ def test_system_checkpoint_repeats_its_return_actions() -> None:
     assert transition.target_checkpoint_key == "system.global"
     assert transition.current_selection_ids == frozenset({"system.global"})
     assert transition.reusable_past_selection_ids == frozenset()
-    assert [action.type for action in transition.return_actions] == ["send_message"]
+    assert [action.type for action in transition.return_actions] == [
+        "send_message_paraphrased"
+    ]
 
 
 @pytest.mark.parametrize("use_wrong_parent", [True, False])

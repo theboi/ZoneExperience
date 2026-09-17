@@ -16,7 +16,7 @@ from friendly_bot.actions.runner import ActionRunner
 from friendly_bot.config.settings import PROJECT_ROOT
 from friendly_bot.domain.actions import (
     FindAndReserveServerAction,
-    SendMessageAction,
+    SendMessageParaphrasedAction,
 )
 from friendly_bot.domain.events import ActionEvent
 from friendly_bot.domain.flows import DiscussionFlow, NextFlowMode
@@ -124,13 +124,15 @@ def _registry() -> ActionExecutorRegistry:
         del action
         cast(RecordingContext, context).emit(ActionEvent(key="human_match.found"))
 
-    async def send_message(action: SendMessageAction, context: ActionContext) -> None:
+    async def send_message(
+        action: SendMessageParaphrasedAction, context: ActionContext
+    ) -> None:
         if action.text == "raise":
             raise RuntimeError("raw provider body must not escape")
         await cast(RecordingContext, context).enqueue_text(action.text)
 
     registry.register(FindAndReserveServerAction, find_server)
-    registry.register(SendMessageAction, send_message)
+    registry.register(SendMessageParaphrasedAction, send_message)
     return registry
 
 
@@ -139,7 +141,7 @@ async def test_terminal_event_executes_one_matching_direct_child_and_stops_paren
 ):
     child = _flow(
         "system.parent.found",
-        actions=[{"type": "send_message", "text": "child copy"}],
+        actions=[{"type": "send_message_paraphrased", "text": "child copy"}],
         trigger=OnActionEventTrigger(
             type="action_event", event_key="human_match.found"
         ),
@@ -151,7 +153,7 @@ async def test_terminal_event_executes_one_matching_direct_child_and_stops_paren
                 "type": "find_and_reserve_server",
                 "service_id": "30375598-1898-4d46-a1d8-2068453944e4",
             },
-            {"type": "send_message", "text": "later parent copy"},
+            {"type": "send_message_paraphrased", "text": "later parent copy"},
         ],
         children=[child],
     )
@@ -169,7 +171,7 @@ async def test_event_never_bubbles_to_an_ancestor_or_reusable_past_selection() -
         children=[
             _flow(
                 "system.ancestor.found",
-                actions=[{"type": "send_message", "text": "must not run"}],
+                actions=[{"type": "send_message_paraphrased", "text": "must not run"}],
                 trigger=OnActionEventTrigger(
                     type="action_event", event_key="human_match.found"
                 ),
@@ -199,18 +201,20 @@ async def test_direct_error_child_wins_but_unhandled_error_uses_exact_local_send
 ) -> None:
     direct_error_parent = _flow(
         "system.direct-error",
-        actions=[{"type": "send_message", "text": "raise"}],
+        actions=[{"type": "send_message_paraphrased", "text": "raise"}],
         children=[
             _flow(
                 "system.direct-error.recovery",
-                actions=[{"type": "send_message", "text": "custom recovery"}],
+                actions=[
+                    {"type": "send_message_paraphrased", "text": "custom recovery"}
+                ],
                 trigger=OnActionEventTrigger(type="action_event", event_key="error"),
             )
         ],
     )
     unhandled_error_parent = _flow(
         "system.unhandled-error",
-        actions=[{"type": "send_message", "text": "raise"}],
+        actions=[{"type": "send_message_paraphrased", "text": "raise"}],
     )
     direct_context = _context()
     runner = ActionRunner(_registry())

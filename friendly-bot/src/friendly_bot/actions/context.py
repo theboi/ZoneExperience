@@ -118,7 +118,7 @@ class ActionContext:
     _pending_presentation: _PendingPresentation | None = field(default=None, init=False)
     _active_flow_key: str | None = field(default=None, init=False)
     _active_action_index: int | None = field(default=None, init=False)
-    _recorded_paraphrase_fallbacks: set[tuple[str, int]] = field(
+    _recorded_llm_reply_fallbacks: set[tuple[str, int]] = field(
         default_factory=set, init=False
     )
 
@@ -351,14 +351,13 @@ class ActionContext:
         self._active_action_index = action_index
         return self
 
-    async def message_template(self, action: object) -> str:
-        """Return validated planned copy for one ordinary message or its authored fallback."""
+    async def planned_message_text(self, source: str) -> str:
+        """Return a validated LLM reply or the configured source as its fallback."""
 
-        authored_template = getattr(action, "text", None)
-        if type(authored_template) is not str:
-            raise TypeError("message action must carry authored text")
+        if type(source) is not str:
+            raise TypeError("message source must be a string")
         if self._active_flow_key is None or self._active_action_index is None:
-            return authored_template
+            return source
         planned = self.reply_plan.text_for(
             self._active_flow_key, self._active_action_index
         )
@@ -366,8 +365,8 @@ class ActionContext:
             return planned
         address = (self._active_flow_key, self._active_action_index)
         if self.reply_plan.requires_fallback(*address):
-            await self._record_paraphrase_fallback(address)
-        return authored_template
+            await self._record_llm_reply_fallback(address)
+        return source
 
     @property
     def match_assignment(self) -> MatchAssignmentRecord | None:
@@ -418,15 +417,15 @@ class ActionContext:
             raise ValueError("a Telegram user id is required for a presentation")
         return chat_id
 
-    async def _record_paraphrase_fallback(self, address: tuple[str, int]) -> None:
-        if address in self._recorded_paraphrase_fallbacks:
+    async def _record_llm_reply_fallback(self, address: tuple[str, int]) -> None:
+        if address in self._recorded_llm_reply_fallbacks:
             return
-        self._recorded_paraphrase_fallbacks.add(address)
+        self._recorded_llm_reply_fallbacks.add(address)
         await self.diagnostics.record(
             correlation_id=self.correlation_id,
             severity="warning",
-            safe_summary="planned paraphrase unavailable",
-            safe_context={"reason_code": "paraphrase.validation_fallback"},
+            safe_summary="planned LLM reply unavailable",
+            safe_context={"reason_code": "llm_reply.validation_fallback"},
             at=self.now,
         )
 

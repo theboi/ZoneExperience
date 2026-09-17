@@ -20,13 +20,14 @@ class PromptDTO(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class ReplyTemplateSlot(PromptDTO):
-    """One deterministic model-visible paraphrase slot for authored copy."""
+class ReplySourceSlot(PromptDTO):
+    """One model-visible answer slot with its permitted configured source."""
 
     slot_id: str = Field(pattern=r"^r[0-9]+$")
-    template: str = Field(min_length=1)
-    template_tokens: tuple[str, ...] = ()
-    urls: tuple[str, ...] = ()
+    mode: Literal["paraphrased", "llm"]
+    source: str = Field(min_length=1)
+    source_template_tokens: tuple[str, ...] = ()
+    source_urls: tuple[str, ...] = ()
 
 
 class RoutingPromptCandidate(PromptDTO):
@@ -39,7 +40,7 @@ class RoutingPromptCandidate(PromptDTO):
     possible_qns: tuple[str, ...] = ()
     context_label: str = Field(min_length=1)
     multi_intent_mode: Literal["answer", "interactive"] = "interactive"
-    reply_slots: tuple[ReplyTemplateSlot, ...] = ()
+    reply_slots: tuple[ReplySourceSlot, ...] = ()
 
     @field_validator("gists", mode="before")
     @classmethod
@@ -121,10 +122,10 @@ class MultiIntentRequest(PromptDTO):
 
 
 class KnownFlowRequest(PromptDTO):
-    """The safe request for paraphrasing one already-determined configured flow."""
+    """The safe request for an LLM reply to one already-determined configured flow."""
 
     flow_id: str = Field(min_length=1)
-    reply_slots: tuple[ReplyTemplateSlot, ...] = ()
+    reply_slots: tuple[ReplySourceSlot, ...] = ()
     messages: tuple[str, ...] = ()
 
 

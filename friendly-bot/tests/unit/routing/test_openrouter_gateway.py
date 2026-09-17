@@ -30,7 +30,7 @@ from friendly_bot.routing.contracts import (
     PersonaSummaryRequest,
     PlannedFlowMatch,
     PlannedReply,
-    ReplyTemplateSlot,
+    ReplySourceSlot,
     RoutingPromptCandidate,
 )
 from friendly_bot.routing.openrouter_gateway import (
@@ -238,11 +238,12 @@ def _multi_intent_request() -> MultiIntentRequest:
                 context_label="current",
                 multi_intent_mode="answer",
                 reply_slots=(
-                    ReplyTemplateSlot(
+                    ReplySourceSlot(
                         slot_id="r0",
-                        template="The Zone is at {{ service.name }}. Map: https://example.com/map",
-                        template_tokens=("service.name",),
-                        urls=("https://example.com/map",),
+                        mode="paraphrased",
+                        source="The Zone is at {{ service.name }}. Map: https://example.com/map",
+                        source_template_tokens=("service.name",),
+                        source_urls=("https://example.com/map",),
                     ),
                 ),
             ),
@@ -434,6 +435,82 @@ async def test_route_and_plan_falls_back_only_an_invalid_paraphrase_slot() -> No
     )
 
 
+async def test_route_and_plan_supplies_source_grounded_reply_without_extra_links() -> (
+    None
+):
+    source = "dare is for secondary school students aged 13-17."
+    client = FakeHttpxClient(
+        [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "kind": "matches",
+                                        "matches": [
+                                            {
+                                                "flow_id": "system.information",
+                                                "replies": [
+                                                    {
+                                                        "slot_id": "r0",
+                                                        "text": "yes, dare is for secondary school students aged 13-17.",
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+    request = MultiIntentRequest(
+        messages=("is dare for my 14-year-old?",),
+        candidates=(
+            RoutingPromptCandidate(
+                flow_id="system.information",
+                gists=("the person asks about dare",),
+                context_label="system",
+                multi_intent_mode="answer",
+                reply_slots=(ReplySourceSlot(slot_id="r0", mode="llm", source=source),),
+            ),
+        ),
+    )
+
+    result = await _gateway(client).route_and_plan(request)
+
+    assert result == MultiIntentMatches(
+        kind="matches",
+        matches=(
+            PlannedFlowMatch(
+                flow_id="system.information",
+                replies=(
+                    PlannedReply(
+                        slot_id="r0",
+                        text="yes, dare is for secondary school students aged 13-17.",
+                    ),
+                ),
+            ),
+        ),
+    )
+    prompt = json.loads(client.requests[0]["json"]["messages"][1]["content"])
+    assert prompt["candidates"][0]["reply_slots"] == [
+        {
+            "slot_id": "r0",
+            "mode": "llm",
+            "source": source,
+            "source_template_tokens": [],
+            "source_urls": [],
+        }
+    ]
+
+
 async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     first_client = FakeHttpxClient(
         [
@@ -504,7 +581,7 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert (
-        "every fact, qualification, and instruction from its authored template"
+        "every fact, qualification, and instruction"
         in first_payload["messages"][0]["content"]
     )
     assert (
@@ -512,10 +589,15 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
         in first_payload["messages"][0]["content"]
     )
     assert (
-        "ALL_CAPS placeholders (including underscores) verbatim"
+        "ALL_CAPS placeholder (including underscores) verbatim"
         in first_payload["messages"][0]["content"]
     )
     assert "gist or possible_qns" in first_payload["messages"][0]["content"]
+    assert (
+        "source is the sole factual authority"
+        in first_payload["messages"][0]["content"]
+    )
+    assert "Do not use prior knowledge" in first_payload["messages"][0]["content"]
     assert (
         "Select exactly one configured flow for each clause"
         in first_payload["messages"][0]["content"]
@@ -532,6 +614,10 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     )
     assert (
         "'zone?' and 'the zone?' are ambiguous"
+        in first_payload["messages"][0]["content"]
+    )
+    assert (
+        "A bare DARE, Arrow, Varsity, or V is an exception"
         in first_payload["messages"][0]["content"]
     )
     assert (

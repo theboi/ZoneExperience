@@ -16,8 +16,9 @@ from pydantic import JsonValue, ValidationError
 from friendly_bot.domain.actions import (
     DiscussionAction,
     SendButtonsAction,
-    SendMessageAction,
     SendMessageFixedAction,
+    SendMessageLlmAction,
+    SendMessageParaphrasedAction,
     SendPhotoAction,
     parse_action,
 )
@@ -239,7 +240,8 @@ def _validate_answer_flow(node: DiscussionFlow) -> None:
     """Allow answer fragments to emit presentations but never alter branch state."""
 
     answer_action_types = (
-        SendMessageAction,
+        SendMessageParaphrasedAction,
+        SendMessageLlmAction,
         SendMessageFixedAction,
         SendButtonsAction,
         SendPhotoAction,

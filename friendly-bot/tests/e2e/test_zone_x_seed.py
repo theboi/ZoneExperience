@@ -13,7 +13,7 @@ from friendly_bot.app import (
     load_system_global_seed,
     load_zone_x_seed,
 )
-from friendly_bot.domain.actions import SendButtonsAction
+from friendly_bot.domain.actions import SendButtonsAction, SendMessageLlmAction
 from friendly_bot.domain.triggers import (
     OnAnyOfTrigger,
     OnButtonPressTrigger,
@@ -31,14 +31,14 @@ def test_system_root_sends_its_prompt_when_opened() -> None:
     root = _system_document()["root"]
 
     assert root["actions"][0] == {
-        "type": "send_message",
+        "type": "send_message_paraphrased",
         "text": (
             "Hey {{ user.name }}! Nice to meet you! Welcome to The Zone! I'm "
             "Friendly Bot, here to help you get connected to our wonderful community!"
         ),
     }
     assert root["return_actions"][0] == {
-        "type": "send_message",
+        "type": "send_message_paraphrased",
         "text": "Is there anything else I can help you with? (you can ask me any question!)",
     }
 
@@ -69,63 +69,57 @@ def test_system_root_offers_each_supported_action_as_a_button() -> None:
     ]
 
 
-def test_system_root_keeps_questions_at_the_root_and_supports_schedule_follow_up() -> (
-    None
-):
-    """A plain youth-group name can answer a preceding timing question."""
+def test_system_root_has_one_source_grounded_youth_information_flow() -> None:
+    """Common youth-group information is one root answer with one factual source."""
 
     root = load_system_global_seed(SYSTEM_SEED_PATH).root
     root_keys = {str(flow.key) for flow in root.next_flows}
 
     assert {
-        "system.global.menu.timings",
-        "system.global.schedule.dare",
-        "system.global.schedule.arrow",
-        "system.global.schedule.varsity",
-        "system.global.about.ncc",
-        "system.global.about.zone",
-        "system.global.about.dare",
-        "system.global.about.arrow",
-        "system.global.about.varsity",
+        "system.global.information",
         "system.global.travel.drive",
         "system.global.community.small_group",
         "system.global.faith.follow_jesus",
         "system.global.venue.lost_property",
         "system.global.policy.privacy",
     } <= root_keys
-
-    timings = next(
-        flow for flow in root.next_flows if flow.key == "system.global.menu.timings"
-    )
-    assert not any(isinstance(action, SendButtonsAction) for action in timings.actions)
-    assert timings.actions[0].text == (
-        "we have different youth groups for different ages! which are you referring to?"
-    )
-    assert timings.actions[1].type == "send_message_fixed"
-    assert timings.actions[1].text == (
-        "DARE: for secondary school students aged 13-17yo\n"
-        "Arrow: for post-secondary school students and NSFs aged 17-23yo\n"
-        "Varsity: for university students"
+    assert not any(
+        key.startswith(("system.global.schedule.", "system.global.about."))
+        for key in root_keys
     )
 
-    for group in ("dare", "arrow", "varsity"):
-        follow_up = next(
-            flow
-            for flow in timings.next_flows
-            if flow.key == f"system.global.menu.timings.{group}"
-        )
-        assert isinstance(follow_up.trigger, OnMessageTrigger)
-        assert group.capitalize() in follow_up.trigger.possible_qns
-
-    zone = next(
-        flow for flow in root.next_flows if flow.key == "system.global.about.zone"
+    information = next(
+        flow for flow in root.next_flows if flow.key == "system.global.information"
     )
-    assert isinstance(zone.trigger, OnAnyOfTrigger)
+    assert isinstance(information.trigger, OnAnyOfTrigger)
     assert any(
         isinstance(trigger, OnButtonPressTrigger)
         and trigger.button_id == "system.global.menu.zone"
-        for trigger in zone.trigger.triggers
+        for trigger in information.trigger.triggers
     )
+    assert any(
+        isinstance(trigger, OnButtonPressTrigger)
+        and trigger.button_id == "system.global.menu.timings"
+        for trigger in information.trigger.triggers
+    )
+    message_trigger = next(
+        trigger
+        for trigger in information.trigger.triggers
+        if isinstance(trigger, OnMessageTrigger)
+    )
+    assert message_trigger.llm_gist == (
+        "The person asks about The Zone, New Creation Church or NCC, DARE, Arrow, "
+        "Varsity or V, which youth group is for them, youth-service times, the next "
+        "gathering, service duration, service status, cost, attending without being "
+        "Christian, or The Zone's purpose; this also handles a reply that names "
+        "DARE, Arrow, Varsity, or V after a youth-group clarification."
+    )
+    assert len(information.actions) == 1
+    assert isinstance(information.actions[0], SendMessageLlmAction)
+    assert "NCC means New Creation Church." in information.actions[0].source
+    assert "DARE_SERVICE_DAY" in information.actions[0].source
+    assert "VARSITY_SERVICE_VENUE" in information.actions[0].source
+    assert not information.next_flows
 
 
 def test_system_root_options_question_reopens_the_same_button_menu() -> None:
@@ -180,7 +174,7 @@ def test_buttons_only_offer_choices_that_are_not_already_stated() -> None:
     assert [action["type"] for action in latecomer_actions] == [
         "add_service_attendance",
         "enter_service_checkpoint",
-        "send_message",
+        "send_message_paraphrased",
     ]
 
 
