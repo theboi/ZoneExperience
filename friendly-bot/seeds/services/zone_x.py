@@ -1,0 +1,1573 @@
+"""The Zone X Friendly Bot service seed."""
+
+from __future__ import annotations
+
+from typing import Final
+
+from friendly_bot.seed_types import ZoneXSeedDocument
+
+ZONE_X_SEED: Final[ZoneXSeedDocument] = {
+    "service": {
+        "key": "zone_x_2026_10_18",
+        "name": "Zone X",
+        "map_url": "https://maps.google.com/?q=The+Star+Performing+Arts+Centre",
+        "timezone": "Asia/Singapore",
+        "highkey": True,
+        "doors_open_at": "2026-10-18T13:30:00+08:00",
+        "doors_close_at": "2026-10-18T14:20:00+08:00",
+        "service_starts_at": "2026-10-18T14:30:00+08:00",
+        "service_ends_at": "2026-10-18T16:00:00+08:00",
+        "interaction_ends_at": "2026-10-18T18:00:00+08:00",
+        "service_global_root": {
+            "key": "service.zone_x.home",
+            "trigger": None,
+            "actions": [
+                {
+                    "type": "send_message",
+                    "text": "Hey {{ user.name }}! "
+                    "Welcome to Zone X! What "
+                    "would you like help with?",
+                },
+                {
+                    "type": "send_buttons",
+                    "service_bound": True,
+                    "buttons": [
+                        {
+                            "button_id": "zone_x.menu.directions",
+                            "text": "Get directions",
+                        },
+                        {
+                            "button_id": "zone_x.menu.expect",
+                            "text": "Know what to expect",
+                        },
+                        {
+                            "button_id": "zone_x.menu.connect",
+                            "text": "Meet a friendly human",
+                        },
+                        {
+                            "button_id": "zone_x.menu.change_service",
+                            "text": "Change service",
+                        },
+                    ],
+                },
+            ],
+            "next_flow_mode": "CHECKPOINT",
+            "return_actions": [
+                {
+                    "type": "send_message",
+                    "text": "Is there anything else I can help you with at Zone X?",
+                },
+                {
+                    "type": "send_buttons",
+                    "service_bound": True,
+                    "buttons": [
+                        {
+                            "button_id": "zone_x.menu.directions",
+                            "text": "Get directions",
+                        },
+                        {
+                            "button_id": "zone_x.menu.expect",
+                            "text": "Know what to expect",
+                        },
+                        {
+                            "button_id": "zone_x.menu.connect",
+                            "text": "Meet another friendly human",
+                        },
+                        {
+                            "button_id": "zone_x.menu.change_service",
+                            "text": "Change service",
+                        },
+                    ],
+                },
+            ],
+            "next_flows": [
+                {
+                    "key": "service.zone_x.directions",
+                    "trigger": {
+                        "type": "any_of",
+                        "triggers": [
+                            {"type": "button", "button_id": "zone_x.menu.directions"},
+                            {
+                                "type": "message",
+                                "possible_qns": [
+                                    "how do i get to Zone X?",
+                                    "where is Zone X?",
+                                ],
+                            },
+                        ],
+                    },
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Zone X is "
+                            "held at The "
+                            "Star "
+                            "Performing "
+                            "Arts "
+                            "Centre, 1 "
+                            "Vista "
+                            "Exchange "
+                            "Green! Take "
+                            "the MRT to "
+                            "Buona Vista "
+                            "and follow "
+                            "the signs "
+                            "to The Star "
+                            "Vista. "
+                            "You'll meet "
+                            "our "
+                            "friendly "
+                            "welcome "
+                            "team in "
+                            "blue near "
+                            "the venue "
+                            "entrance to "
+                            "guide you.",
+                        },
+                        {
+                            "type": "send_message_fixed",
+                            "text": "Map: {{ service.map_url }}",
+                        },
+                    ],
+                    "next_flow_mode": "ALLOW_MANY",
+                    "return_actions": [],
+                    "next_flows": [],
+                },
+                {
+                    "key": "service.zone_x.what_to_expect",
+                    "multi_intent_mode": "answer",
+                    "trigger": {
+                        "type": "any_of",
+                        "triggers": [
+                            {"type": "button", "button_id": "zone_x.menu.expect"},
+                            {
+                                "type": "message",
+                                "possible_qns": [
+                                    "what should i expect at Zone X?",
+                                    "can i come alone?",
+                                ],
+                            },
+                        ],
+                    },
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Come as you "
+                            "are. You "
+                            "can expect "
+                            "music, a "
+                            "message "
+                            "about "
+                            "Jesus, and "
+                            "time to "
+                            "meet other "
+                            "youths. "
+                            "It’s okay "
+                            "to come "
+                            "alone, sit "
+                            "quietly, or "
+                            "ask for "
+                            "someone to "
+                            "meet you "
+                            "before you "
+                            "enter.",
+                        }
+                    ],
+                    "next_flow_mode": "ALLOW_MANY",
+                    "return_actions": [],
+                    "next_flows": [],
+                },
+                {
+                    "key": "service.zone_x.connect.start",
+                    "trigger": {
+                        "type": "any_of",
+                        "triggers": [
+                            {"type": "button", "button_id": "zone_x.menu.connect"},
+                            {
+                                "type": "message",
+                                "possible_qns": [
+                                    "can i meet someone?",
+                                    "can i talk to a friendly human?",
+                                ],
+                            },
+                        ],
+                    },
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "What is one "
+                            "thing that "
+                            "interests "
+                            "you? "
+                            "Nothing is "
+                            "a valid "
+                            "answer "
+                            "too!",
+                        }
+                    ],
+                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                    "return_actions": [],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.connect.capture_interest",
+                            "trigger": {
+                                "type": "message",
+                                "llm_gist": "The "
+                                "person "
+                                "answers "
+                                "the "
+                                "question "
+                                "about "
+                                "an "
+                                "interest "
+                                "or "
+                                "says "
+                                "they "
+                                "do "
+                                "not "
+                                "have "
+                                "one.",
+                            },
+                            "actions": [
+                                {
+                                    "type": "save_incoming",
+                                    "field": "human_match_request.interest",
+                                    "preserve_exact_text": True,
+                                },
+                                {"type": "show_activity", "activity": "typing"},
+                                {
+                                    "type": "find_and_reserve_server",
+                                    "service_id": "{{ service.id }}",
+                                    "require_service_attendance": True,
+                                    "capacity_required": 1,
+                                    "rank_with": [
+                                        "human_match_request.interest",
+                                        "candidate.interests",
+                                        "candidate.cg_name",
+                                    ],
+                                },
+                            ],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [
+                                {
+                                    "key": "service.zone_x.connect.match_found",
+                                    "trigger": {
+                                        "type": "action_event",
+                                        "event_key": "human_match.found",
+                                    },
+                                    "actions": [
+                                        {
+                                            "type": "send_message",
+                                            "text": "I "
+                                            "found "
+                                            "{{ "
+                                            "matched_server.name "
+                                            "}} "
+                                            "from "
+                                            "{{ "
+                                            "matched_server.cg_name "
+                                            "}}. "
+                                            "How "
+                                            "would "
+                                            "you "
+                                            "like "
+                                            "to "
+                                            "meet?",
+                                        },
+                                        {
+                                            "type": "send_buttons",
+                                            "service_bound": True,
+                                            "buttons": [
+                                                {
+                                                    "button_id": "zone_x.connect.join_group",
+                                                    "text": "Join "
+                                                    "{{ "
+                                                    "matched_server.name "
+                                                    "}}",
+                                                },
+                                                {
+                                                    "button_id": "zone_x.connect.join_me",
+                                                    "text": "Ask "
+                                                    "{{ "
+                                                    "matched_server.name "
+                                                    "}} "
+                                                    "to "
+                                                    "join "
+                                                    "me",
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [
+                                        {
+                                            "key": "service.zone_x.connect.join_group",
+                                            "trigger": {
+                                                "type": "button",
+                                                "button_id": "zone_x.connect.join_group",
+                                            },
+                                            "actions": [
+                                                {
+                                                    "type": "confirm_human_match",
+                                                    "meeting_preference": "nbnc_joins_human",
+                                                },
+                                                {
+                                                    "type": "notify_matched_human",
+                                                    "text": "{{ "
+                                                    "user.name "
+                                                    "}} "
+                                                    "is "
+                                                    "at "
+                                                    "{{ "
+                                                    "service.name "
+                                                    "}} "
+                                                    "and "
+                                                    "would "
+                                                    "like "
+                                                    "to "
+                                                    "join "
+                                                    "you. "
+                                                    "Their "
+                                                    "interest: "
+                                                    "{{ "
+                                                    "human_match_request.interest "
+                                                    "}}. "
+                                                    "They "
+                                                    "may "
+                                                    "contact "
+                                                    "you "
+                                                    "on "
+                                                    "Telegram.",
+                                                },
+                                                {
+                                                    "type": "share_human_contact",
+                                                    "text": "{{ "
+                                                    "matched_server.name "
+                                                    "}} "
+                                                    "is "
+                                                    "expecting "
+                                                    "you. "
+                                                    "Message "
+                                                    "them "
+                                                    "here: "
+                                                    "{{ "
+                                                    "matched_server.telegram_url "
+                                                    "}}",
+                                                },
+                                                {
+                                                    "type": "send_message",
+                                                    "text": "if "
+                                                    "{{ "
+                                                    "matched_server.name "
+                                                    "}} "
+                                                    "is "
+                                                    "not "
+                                                    "responding, "
+                                                    "tell "
+                                                    "me "
+                                                    "and "
+                                                    "i "
+                                                    "will "
+                                                    "find "
+                                                    "someone "
+                                                    "else.",
+                                                },
+                                            ],
+                                            "next_flow_mode": "ALLOW_MANY",
+                                            "return_actions": [],
+                                            "next_flows": [
+                                                {
+                                                    "key": "service.zone_x.connect.join_group.not_responding",
+                                                    "trigger": {
+                                                        "type": "message",
+                                                        "llm_gist": "The "
+                                                        "matched "
+                                                        "person "
+                                                        "is "
+                                                        "not "
+                                                        "responding "
+                                                        "or "
+                                                        "cannot "
+                                                        "be "
+                                                        "reached.",
+                                                    },
+                                                    "actions": [
+                                                        {"type": "release_human_match"},
+                                                        {
+                                                            "type": "notify_previous_human",
+                                                            "text": "{{ "
+                                                            "user.name "
+                                                            "}} "
+                                                            "reported "
+                                                            "that "
+                                                            "they "
+                                                            "could "
+                                                            "not "
+                                                            "reach "
+                                                            "you. "
+                                                            "Their "
+                                                            "connection "
+                                                            "request "
+                                                            "will "
+                                                            "be "
+                                                            "reassigned.",
+                                                        },
+                                                        {
+                                                            "type": "exclude_previous_human_from_next_attempt"
+                                                        },
+                                                        {
+                                                            "type": "show_activity",
+                                                            "activity": "typing",
+                                                        },
+                                                        {
+                                                            "type": "find_and_reserve_server",
+                                                            "service_id": "{{ "
+                                                            "service.id "
+                                                            "}}",
+                                                            "require_service_attendance": True,
+                                                            "capacity_required": 1,
+                                                            "preserve_meeting_preference": True,
+                                                        },
+                                                    ],
+                                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                    "return_actions": [],
+                                                    "next_flows": [
+                                                        {
+                                                            "key": "service.zone_x.connect.join_group.rematch_found",
+                                                            "trigger": {
+                                                                "type": "action_event",
+                                                                "event_key": "human_match.found",
+                                                            },
+                                                            "actions": [
+                                                                {
+                                                                    "type": "notify_matched_human",
+                                                                    "text": "{{ "
+                                                                    "user.name "
+                                                                    "}} "
+                                                                    "is "
+                                                                    "at "
+                                                                    "{{ "
+                                                                    "service.name "
+                                                                    "}} "
+                                                                    "and "
+                                                                    "would "
+                                                                    "like "
+                                                                    "to "
+                                                                    "join "
+                                                                    "you. "
+                                                                    "Their "
+                                                                    "interest: "
+                                                                    "{{ "
+                                                                    "human_match_request.interest "
+                                                                    "}}. "
+                                                                    "They "
+                                                                    "may "
+                                                                    "contact "
+                                                                    "you "
+                                                                    "on "
+                                                                    "Telegram.",
+                                                                },
+                                                                {
+                                                                    "type": "share_human_contact",
+                                                                    "text": "Try "
+                                                                    "{{ "
+                                                                    "matched_server.name "
+                                                                    "}} "
+                                                                    "instead: "
+                                                                    "{{ "
+                                                                    "matched_server.telegram_url "
+                                                                    "}}",
+                                                                },
+                                                            ],
+                                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                            "return_actions": [],
+                                                            "next_flows": [],
+                                                        },
+                                                        {
+                                                            "key": "service.zone_x.connect.join_group.rematch_not_found",
+                                                            "trigger": {
+                                                                "type": "action_event",
+                                                                "event_key": "human_match.not_found",
+                                                            },
+                                                            "actions": [
+                                                                {
+                                                                    "type": "send_message",
+                                                                    "text": "Sorry, "
+                                                                    "nobody "
+                                                                    "else "
+                                                                    "is "
+                                                                    "available "
+                                                                    "to "
+                                                                    "meet "
+                                                                    "right "
+                                                                    "now. "
+                                                                    "Please "
+                                                                    "speak "
+                                                                    "to "
+                                                                    "a "
+                                                                    "Zone "
+                                                                    "team "
+                                                                    "member "
+                                                                    "at "
+                                                                    "the "
+                                                                    "venue.",
+                                                                }
+                                                            ],
+                                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                            "return_actions": [],
+                                                            "next_flows": [],
+                                                        },
+                                                    ],
+                                                }
+                                            ],
+                                        },
+                                        {
+                                            "key": "service.zone_x.connect.join_me",
+                                            "trigger": {
+                                                "type": "button",
+                                                "button_id": "zone_x.connect.join_me",
+                                            },
+                                            "actions": [
+                                                {
+                                                    "type": "confirm_human_match",
+                                                    "meeting_preference": "human_joins_nbnc",
+                                                },
+                                                {
+                                                    "type": "notify_matched_human",
+                                                    "text": "{{ "
+                                                    "user.name "
+                                                    "}} "
+                                                    "is "
+                                                    "at "
+                                                    "{{ "
+                                                    "service.name "
+                                                    "}} "
+                                                    "and "
+                                                    "would "
+                                                    "like "
+                                                    "you "
+                                                    "to "
+                                                    "join "
+                                                    "them. "
+                                                    "Their "
+                                                    "interest: "
+                                                    "{{ "
+                                                    "human_match_request.interest "
+                                                    "}}. "
+                                                    "They "
+                                                    "may "
+                                                    "contact "
+                                                    "you "
+                                                    "on "
+                                                    "Telegram.",
+                                                },
+                                                {
+                                                    "type": "share_human_contact",
+                                                    "text": "{{ "
+                                                    "matched_server.name "
+                                                    "}} "
+                                                    "will "
+                                                    "come "
+                                                    "and "
+                                                    "meet "
+                                                    "you. "
+                                                    "Message "
+                                                    "them "
+                                                    "here "
+                                                    "so "
+                                                    "you "
+                                                    "can "
+                                                    "find "
+                                                    "each "
+                                                    "other: "
+                                                    "{{ "
+                                                    "matched_server.telegram_url "
+                                                    "}}",
+                                                },
+                                                {
+                                                    "type": "send_message",
+                                                    "text": "if "
+                                                    "{{ "
+                                                    "matched_server.name "
+                                                    "}} "
+                                                    "is "
+                                                    "not "
+                                                    "responding, "
+                                                    "tell "
+                                                    "me "
+                                                    "and "
+                                                    "i "
+                                                    "will "
+                                                    "find "
+                                                    "someone "
+                                                    "else.",
+                                                },
+                                            ],
+                                            "next_flow_mode": "ALLOW_MANY",
+                                            "return_actions": [],
+                                            "next_flows": [
+                                                {
+                                                    "key": "service.zone_x.connect.join_me.not_responding",
+                                                    "trigger": {
+                                                        "type": "message",
+                                                        "llm_gist": "The "
+                                                        "matched "
+                                                        "person "
+                                                        "is "
+                                                        "not "
+                                                        "responding "
+                                                        "or "
+                                                        "cannot "
+                                                        "be "
+                                                        "reached.",
+                                                    },
+                                                    "actions": [
+                                                        {"type": "release_human_match"},
+                                                        {
+                                                            "type": "notify_previous_human",
+                                                            "text": "{{ "
+                                                            "user.name "
+                                                            "}} "
+                                                            "reported "
+                                                            "that "
+                                                            "they "
+                                                            "could "
+                                                            "not "
+                                                            "reach "
+                                                            "you. "
+                                                            "Their "
+                                                            "connection "
+                                                            "request "
+                                                            "will "
+                                                            "be "
+                                                            "reassigned.",
+                                                        },
+                                                        {
+                                                            "type": "exclude_previous_human_from_next_attempt"
+                                                        },
+                                                        {
+                                                            "type": "show_activity",
+                                                            "activity": "typing",
+                                                        },
+                                                        {
+                                                            "type": "find_and_reserve_server",
+                                                            "service_id": "{{ "
+                                                            "service.id "
+                                                            "}}",
+                                                            "require_service_attendance": True,
+                                                            "capacity_required": 1,
+                                                            "preserve_meeting_preference": True,
+                                                        },
+                                                    ],
+                                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                    "return_actions": [],
+                                                    "next_flows": [
+                                                        {
+                                                            "key": "service.zone_x.connect.join_me.rematch_found",
+                                                            "trigger": {
+                                                                "type": "action_event",
+                                                                "event_key": "human_match.found",
+                                                            },
+                                                            "actions": [
+                                                                {
+                                                                    "type": "notify_matched_human",
+                                                                    "text": "{{ "
+                                                                    "user.name "
+                                                                    "}} "
+                                                                    "is "
+                                                                    "at "
+                                                                    "{{ "
+                                                                    "service.name "
+                                                                    "}} "
+                                                                    "and "
+                                                                    "would "
+                                                                    "like "
+                                                                    "you "
+                                                                    "to "
+                                                                    "join "
+                                                                    "them. "
+                                                                    "Their "
+                                                                    "interest: "
+                                                                    "{{ "
+                                                                    "human_match_request.interest "
+                                                                    "}}. "
+                                                                    "They "
+                                                                    "may "
+                                                                    "contact "
+                                                                    "you "
+                                                                    "on "
+                                                                    "Telegram.",
+                                                                },
+                                                                {
+                                                                    "type": "share_human_contact",
+                                                                    "text": "Try "
+                                                                    "{{ "
+                                                                    "matched_server.name "
+                                                                    "}} "
+                                                                    "instead: "
+                                                                    "{{ "
+                                                                    "matched_server.telegram_url "
+                                                                    "}}",
+                                                                },
+                                                            ],
+                                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                            "return_actions": [],
+                                                            "next_flows": [],
+                                                        },
+                                                        {
+                                                            "key": "service.zone_x.connect.join_me.rematch_not_found",
+                                                            "trigger": {
+                                                                "type": "action_event",
+                                                                "event_key": "human_match.not_found",
+                                                            },
+                                                            "actions": [
+                                                                {
+                                                                    "type": "send_message",
+                                                                    "text": "Sorry, "
+                                                                    "nobody "
+                                                                    "else "
+                                                                    "is "
+                                                                    "available "
+                                                                    "to "
+                                                                    "meet "
+                                                                    "right "
+                                                                    "now. "
+                                                                    "Please "
+                                                                    "speak "
+                                                                    "to "
+                                                                    "a "
+                                                                    "Zone "
+                                                                    "team "
+                                                                    "member "
+                                                                    "at "
+                                                                    "the "
+                                                                    "venue.",
+                                                                }
+                                                            ],
+                                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                                            "return_actions": [],
+                                                            "next_flows": [],
+                                                        },
+                                                    ],
+                                                }
+                                            ],
+                                        },
+                                    ],
+                                },
+                                {
+                                    "key": "service.zone_x.connect.no_match",
+                                    "trigger": {
+                                        "type": "action_event",
+                                        "event_key": "human_match.not_found",
+                                    },
+                                    "actions": [
+                                        {
+                                            "type": "send_message",
+                                            "text": "Sorry, "
+                                            "nobody "
+                                            "is "
+                                            "available "
+                                            "to "
+                                            "meet "
+                                            "right "
+                                            "now. "
+                                            "Please "
+                                            "try "
+                                            "again "
+                                            "later "
+                                            "or "
+                                            "speak "
+                                            "to "
+                                            "a "
+                                            "Zone "
+                                            "team "
+                                            "member "
+                                            "at "
+                                            "the "
+                                            "venue.",
+                                        }
+                                    ],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "service.zone_x.change_service",
+                    "trigger": {
+                        "type": "any_of",
+                        "triggers": [
+                            {
+                                "type": "button",
+                                "button_id": "zone_x.menu.change_service",
+                            },
+                            {
+                                "type": "message",
+                                "possible_qns": [
+                                    "can i switch service?",
+                                    "i am going to a different service",
+                                ],
+                            },
+                        ],
+                    },
+                    "actions": [
+                        {
+                            "type": "resolve_service_switch_options",
+                            "preserve_historical_attendance": True,
+                            "replace_active_overlapping_service": True,
+                        }
+                    ],
+                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                    "return_actions": [],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.change_service.choice_required",
+                            "trigger": {
+                                "type": "action_event",
+                                "event_key": "service_attendance.choice_required",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_service_choice_buttons",
+                                    "button_id": "service.attendance.select",
+                                    "text": "Which service would you like to attend?",
+                                }
+                            ],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [
+                                {
+                                    "key": "service.zone_x.change_service.select",
+                                    "trigger": {
+                                        "type": "button",
+                                        "button_id": "service.attendance.select",
+                                    },
+                                    "actions": [{"type": "select_service_attendance"}],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [
+                                        {
+                                            "key": "service.zone_x.change_service.selected",
+                                            "trigger": {
+                                                "type": "action_event",
+                                                "event_key": "service_attendance.selected",
+                                            },
+                                            "actions": [
+                                                {
+                                                    "type": "enter_selected_service_checkpoint"
+                                                }
+                                            ],
+                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                            "return_actions": [],
+                                            "next_flows": [],
+                                        },
+                                        {
+                                            "key": "service.zone_x.change_service.latecomer",
+                                            "trigger": {
+                                                "type": "action_event",
+                                                "event_key": "service_attendance.latecomer",
+                                            },
+                                            "actions": [
+                                                {
+                                                    "type": "enter_selected_service_latecomer_flow"
+                                                }
+                                            ],
+                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                            "return_actions": [],
+                                            "next_flows": [],
+                                        },
+                                        {
+                                            "key": "service.zone_x.change_service.ended",
+                                            "trigger": {
+                                                "type": "action_event",
+                                                "event_key": "service_attendance.ended",
+                                            },
+                                            "actions": [
+                                                {
+                                                    "type": "send_message",
+                                                    "text": "Sorry, "
+                                                    "the "
+                                                    "service "
+                                                    "is "
+                                                    "over!",
+                                                }
+                                            ],
+                                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                            "return_actions": [],
+                                            "next_flows": [],
+                                        },
+                                    ],
+                                }
+                            ],
+                        },
+                        {
+                            "key": "service.zone_x.change_service.none_available",
+                            "trigger": {
+                                "type": "action_event",
+                                "event_key": "service_attendance.none_available",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "There "
+                                    "are "
+                                    "no "
+                                    "other "
+                                    "ongoing "
+                                    "services "
+                                    "to "
+                                    "switch "
+                                    "to.",
+                                }
+                            ],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                    ],
+                },
+            ],
+        },
+        "latecomer_flow": {
+            "key": "service.zone_x.latecomer",
+            "trigger": None,
+            "actions": [
+                {"type": "add_service_attendance", "attendance_status": "latecomer"},
+                {"type": "enter_service_checkpoint", "flow_key": "service.zone_x.home"},
+                {
+                    "type": "send_message",
+                    "text": "Yes, you can still join Zone X. "
+                    "Service has started, so head to "
+                    "the venue entrance and ask a "
+                    "Zone team member to help you "
+                    "find a seat.",
+                },
+            ],
+            "next_flow_mode": "ALLOW_MANY",
+            "return_actions": [],
+            "next_flows": [],
+        },
+        "timestamps": [
+            {
+                "key": "zone_x.marketing_starts",
+                "occurs_at": "2026-09-27T10:00:00+08:00",
+                "audience": "ALL_NBNCS",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.marketing",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_photo",
+                            "asset_key": "zone_x_poster_2026",
+                            "caption": "Zone X is "
+                            "happening on 18 "
+                            "October at The "
+                            "Star Performing "
+                            "Arts Centre. You "
+                            "can come alone. "
+                            "We’ll help you "
+                            "meet someone "
+                            "friendly.",
+                        },
+                        {
+                            "type": "send_buttons",
+                            "service_bound": True,
+                            "buttons": [
+                                {
+                                    "button_id": "zone_x.marketing.what_to_expect",
+                                    "text": "Know what to expect",
+                                },
+                                {
+                                    "button_id": "zone_x.marketing.directions",
+                                    "text": "Get directions",
+                                },
+                            ],
+                        },
+                    ],
+                    "next_flow_mode": "CHECKPOINT",
+                    "return_actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Would you like "
+                            "to know "
+                            "anything else "
+                            "about Zone "
+                            "X?",
+                        }
+                    ],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.timestamp.marketing.expect",
+                            "trigger": {
+                                "type": "button",
+                                "button_id": "zone_x.marketing.what_to_expect",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "Come "
+                                    "as "
+                                    "you "
+                                    "are. "
+                                    "There "
+                                    "will "
+                                    "be "
+                                    "music, "
+                                    "a "
+                                    "message "
+                                    "about "
+                                    "Jesus, "
+                                    "and "
+                                    "friendly "
+                                    "people "
+                                    "who "
+                                    "can "
+                                    "sit "
+                                    "with "
+                                    "you.",
+                                }
+                            ],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                        {
+                            "key": "service.zone_x.timestamp.marketing.directions",
+                            "trigger": {
+                                "type": "button",
+                                "button_id": "zone_x.marketing.directions",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message_fixed",
+                                    "text": "Take "
+                                    "the "
+                                    "MRT "
+                                    "to "
+                                    "Buona "
+                                    "Vista "
+                                    "and "
+                                    "follow "
+                                    "signs "
+                                    "to "
+                                    "The "
+                                    "Star "
+                                    "Vista. "
+                                    "Map: "
+                                    "{{ "
+                                    "service.map_url "
+                                    "}}",
+                                }
+                            ],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                    ],
+                },
+            },
+            {
+                "key": "zone_x.one_day_before",
+                "occurs_at": "2026-10-17T14:30:00+08:00",
+                "audience": "ALL_NBNCS",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.one_day_before",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Zone X is tomorrow at "
+                            "2:30 pm. Doors open "
+                            "at 1:30 pm at The "
+                            "Star Performing Arts "
+                            "Centre.",
+                        },
+                        {
+                            "type": "send_message_fixed",
+                            "text": "Map: {{ service.map_url }}",
+                        },
+                    ],
+                    "next_flow_mode": "CHECKPOINT",
+                    "return_actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Anything else you’d like to know before Zone X?",
+                        }
+                    ],
+                    "next_flows": [],
+                },
+            },
+            {
+                "key": "zone_x.doors_open",
+                "occurs_at": "2026-10-18T13:30:00+08:00",
+                "audience": "ALL_NBNCS",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.doors_open",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Doors are open for "
+                            "Zone X. Are you here "
+                            "with us? Reply 'i am "
+                            "here' to check in.",
+                        }
+                    ],
+                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                    "return_actions": [],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.timestamp.doors_open.check_in",
+                            "trigger": {
+                                "type": "message",
+                                "possible_qns": [
+                                    "i am here",
+                                    "i'm here",
+                                    "yes, i am at Zone X",
+                                ],
+                            },
+                            "actions": [{"type": "select_service_attendance"}],
+                            "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                            "return_actions": [],
+                            "next_flows": [
+                                {
+                                    "key": "service.zone_x.timestamp.doors_open.attending",
+                                    "trigger": {
+                                        "type": "action_event",
+                                        "event_key": "service_attendance.selected",
+                                    },
+                                    "actions": [
+                                        {"type": "enter_selected_service_checkpoint"}
+                                    ],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [],
+                                },
+                                {
+                                    "key": "service.zone_x.timestamp.doors_open.latecomer",
+                                    "trigger": {
+                                        "type": "action_event",
+                                        "event_key": "service_attendance.latecomer",
+                                    },
+                                    "actions": [
+                                        {
+                                            "type": "enter_selected_service_latecomer_flow"
+                                        }
+                                    ],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [],
+                                },
+                                {
+                                    "key": "service.zone_x.timestamp.doors_open.ended",
+                                    "trigger": {
+                                        "type": "action_event",
+                                        "event_key": "service_attendance.ended",
+                                    },
+                                    "actions": [
+                                        {
+                                            "type": "send_message",
+                                            "text": "Sorry, the service is over!",
+                                        }
+                                    ],
+                                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                                    "return_actions": [],
+                                    "next_flows": [],
+                                },
+                            ],
+                        }
+                    ],
+                },
+            },
+            {
+                "key": "zone_x.service_starts",
+                "occurs_at": "2026-10-18T14:30:00+08:00",
+                "audience": "SERVICE_NBNCS",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.service_questions",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Service has started. "
+                            "You can ask a "
+                            "question here at any "
+                            "time.",
+                        },
+                        {
+                            "type": "send_buttons",
+                            "service_bound": True,
+                            "buttons": [
+                                {
+                                    "button_id": "zone_x.service.toilet",
+                                    "text": "Where is the toilet?",
+                                },
+                                {
+                                    "button_id": "zone_x.service.who_is_jesus",
+                                    "text": "Who is Jesus?",
+                                },
+                            ],
+                        },
+                    ],
+                    "next_flow_mode": "CHECKPOINT",
+                    "return_actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Is there "
+                            "anything else "
+                            "you’d like to "
+                            "ask about "
+                            "service?",
+                        },
+                        {
+                            "type": "send_buttons",
+                            "service_bound": True,
+                            "buttons": [
+                                {
+                                    "button_id": "zone_x.service.toilet",
+                                    "text": "Where is the toilet?",
+                                },
+                                {
+                                    "button_id": "zone_x.service.who_is_jesus",
+                                    "text": "Who is Jesus?",
+                                },
+                            ],
+                        },
+                    ],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.service.toilet",
+                            "multi_intent_mode": "answer",
+                            "trigger": {
+                                "type": "any_of",
+                                "triggers": [
+                                    {
+                                        "type": "button",
+                                        "button_id": "zone_x.service.toilet",
+                                    },
+                                    {
+                                        "type": "message",
+                                        "possible_qns": [
+                                            "where is the toilet?",
+                                            "where is the restroom?",
+                                        ],
+                                    },
+                                ],
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "The "
+                                    "nearest "
+                                    "toilets "
+                                    "are "
+                                    "on "
+                                    "Level "
+                                    "4 "
+                                    "beside "
+                                    "the "
+                                    "lifts. "
+                                    "Ask a "
+                                    "Zone "
+                                    "team "
+                                    "member "
+                                    "if "
+                                    "you’d "
+                                    "like "
+                                    "someone "
+                                    "to "
+                                    "show "
+                                    "you.",
+                                }
+                            ],
+                            "next_flow_mode": "ALLOW_MANY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                        {
+                            "key": "service.zone_x.service.who_is_jesus",
+                            "multi_intent_mode": "answer",
+                            "trigger": {
+                                "type": "any_of",
+                                "triggers": [
+                                    {
+                                        "type": "button",
+                                        "button_id": "zone_x.service.who_is_jesus",
+                                    },
+                                    {
+                                        "type": "message",
+                                        "possible_qns": [
+                                            "who is Jesus?",
+                                            "what do Christians believe about Jesus?",
+                                        ],
+                                    },
+                                ],
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "At "
+                                    "NCC, "
+                                    "we "
+                                    "believe "
+                                    "Jesus "
+                                    "is "
+                                    "the "
+                                    "Son "
+                                    "of "
+                                    "God "
+                                    "who "
+                                    "came "
+                                    "to "
+                                    "reveal "
+                                    "God’s "
+                                    "love "
+                                    "and "
+                                    "give "
+                                    "us "
+                                    "new "
+                                    "life "
+                                    "through "
+                                    "His "
+                                    "death "
+                                    "and "
+                                    "resurrection. "
+                                    "I can "
+                                    "connect "
+                                    "you "
+                                    "with "
+                                    "someone "
+                                    "if "
+                                    "you’d "
+                                    "like "
+                                    "to "
+                                    "talk "
+                                    "about "
+                                    "this "
+                                    "personally.",
+                                }
+                            ],
+                            "next_flow_mode": "ALLOW_MANY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                        {
+                            "key": "service.zone_x.service.unknown_question",
+                            "multi_intent_mode": "answer",
+                            "trigger": {
+                                "type": "message",
+                                "llm_gist": "The "
+                                "person "
+                                "asks "
+                                "a "
+                                "genuine "
+                                "question "
+                                "about "
+                                "service "
+                                "that "
+                                "is "
+                                "not "
+                                "covered "
+                                "by "
+                                "a "
+                                "more "
+                                "specific "
+                                "open "
+                                "question "
+                                "flow.",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "I "
+                                    "don’t "
+                                    "have "
+                                    "an "
+                                    "approved "
+                                    "answer "
+                                    "for "
+                                    "that "
+                                    "question, "
+                                    "but I "
+                                    "can "
+                                    "connect "
+                                    "you "
+                                    "with "
+                                    "someone "
+                                    "who "
+                                    "can "
+                                    "talk "
+                                    "with "
+                                    "you.",
+                                }
+                            ],
+                            "next_flow_mode": "ALLOW_MANY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                    ],
+                },
+            },
+            {
+                "key": "zone_x.service_ends",
+                "occurs_at": "2026-10-18T16:00:00+08:00",
+                "audience": "ALL_SERVICE_ATTENDEES",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.after_service",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Service has ended. "
+                            "What would you like "
+                            "to do next?",
+                        },
+                        {
+                            "type": "send_buttons",
+                            "service_bound": True,
+                            "buttons": [
+                                {
+                                    "button_id": "zone_x.after.connect",
+                                    "text": "Connect with us",
+                                },
+                                {
+                                    "button_id": "zone_x.after.ask",
+                                    "text": "Ask a question",
+                                },
+                            ],
+                        },
+                    ],
+                    "next_flow_mode": "CHECKPOINT",
+                    "return_actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Would you like "
+                            "help with "
+                            "anything else "
+                            "before you "
+                            "go?",
+                        }
+                    ],
+                    "next_flows": [
+                        {
+                            "key": "service.zone_x.after.connect",
+                            "trigger": {
+                                "type": "button",
+                                "button_id": "zone_x.after.connect",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "I can "
+                                    "introduce "
+                                    "you "
+                                    "to "
+                                    "someone "
+                                    "friendly. "
+                                    "Tell "
+                                    "me if "
+                                    "you "
+                                    "would "
+                                    "like "
+                                    "me to "
+                                    "do "
+                                    "that.",
+                                }
+                            ],
+                            "next_flow_mode": "ALLOW_MANY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                        {
+                            "key": "service.zone_x.after.ask",
+                            "trigger": {
+                                "type": "button",
+                                "button_id": "zone_x.after.ask",
+                            },
+                            "actions": [
+                                {
+                                    "type": "send_message",
+                                    "text": "A "
+                                    "friendly "
+                                    "human "
+                                    "can "
+                                    "help "
+                                    "with "
+                                    "your "
+                                    "question. "
+                                    "Tell "
+                                    "me if "
+                                    "you "
+                                    "would "
+                                    "like "
+                                    "an "
+                                    "introduction.",
+                                }
+                            ],
+                            "next_flow_mode": "ALLOW_MANY",
+                            "return_actions": [],
+                            "next_flows": [],
+                        },
+                    ],
+                },
+            },
+            {
+                "key": "zone_x.thank_you",
+                "occurs_at": "2026-10-18T17:30:00+08:00",
+                "audience": "ALL_SERVICE_ATTENDEES",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.thank_you",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Thank you for coming "
+                            "to Zone X today. "
+                            "We’re glad you were "
+                            "here. You can still "
+                            "use the service "
+                            "options until 6:00 "
+                            "pm.",
+                        }
+                    ],
+                    "next_flow_mode": "ALLOW_MANY",
+                    "return_actions": [],
+                    "next_flows": [],
+                },
+            },
+            {
+                "key": "zone_x.interaction_ends",
+                "occurs_at": "2026-10-18T18:00:00+08:00",
+                "audience": "ALL_SERVICE_ATTENDEES",
+                "root_flow": {
+                    "key": "service.zone_x.timestamp.interaction_ends",
+                    "trigger": None,
+                    "actions": [
+                        {
+                            "type": "send_message",
+                            "text": "Zone X has ended, but "
+                            "you can still ask for "
+                            "directions to Star or "
+                            "learn more about NCC "
+                            "here anytime.",
+                        },
+                        {
+                            "type": "end_service_interactions",
+                            "expire_service_bound_selections": True,
+                            "release_service_match_capacity": True,
+                            "return_to_system_checkpoint": True,
+                        },
+                    ],
+                    "next_flow_mode": "ONE_AND_ONCE_ONLY",
+                    "return_actions": [],
+                    "next_flows": [],
+                },
+            },
+        ],
+    }
+}

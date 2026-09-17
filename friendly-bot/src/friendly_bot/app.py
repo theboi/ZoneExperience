@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import runpy
 import signal
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired, run
 from typing import Final, Literal, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -135,16 +134,14 @@ _ZONE_X_TEMPLATE_CONTEXT: Final = TemplateContextSchema(
         "user.name",
     }
 )
-_SEED_MODULE_RENDERER: Final = PROJECT_ROOT / "scripts" / "render_seed_module.mjs"
-_SEED_MODULE_TIMEOUT_SECONDS: Final = 5
 
 
 class SeedModuleLoadError(RuntimeError):
-    """Raised when a local TypeScript seed module cannot be rendered safely."""
+    """Raised when a local Python seed module cannot be loaded safely."""
 
 
 class ZoneXTimestampSeed(BaseModel):
-    """One canonical timestamp root decoded from the TypeScript source of truth."""
+    """One canonical timestamp root decoded from the Python source of truth."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -175,7 +172,7 @@ class ZoneXServiceSeed(BaseModel):
 
 
 class ZoneXSeed(BaseModel):
-    """One service-specific Zone X TypeScript seed module."""
+    """One service-specific Zone X Python seed module."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -1428,51 +1425,35 @@ def _direct_action_event_child(
 
 
 def load_zone_x_seed(path: Path) -> ZoneXSeed:
-    """Decode one Zone X TypeScript module; YAML is never a runtime input."""
+    """Decode one Zone X Python module; YAML is never a runtime input."""
 
-    raw = load_seed_module(path)
+    raw = load_seed_module(path, export_name="ZONE_X_SEED")
     return ZoneXSeed.model_validate(_normalize_seed_document(raw))
 
 
 def load_system_global_seed(path: Path) -> SystemGlobalSeed:
-    """Decode the one system-global TypeScript module shared by every service."""
+    """Decode the one system-global Python module shared by every service."""
 
-    raw = load_seed_module(path)
+    raw = load_seed_module(path, export_name="SYSTEM_GLOBAL_SEED")
     return SystemGlobalSeed.model_validate(_normalize_seed_document(raw))
 
 
-def load_seed_module(path: Path) -> dict[str, object]:
-    """Render a default-exported local TypeScript seed object into JSON-safe data."""
+def load_seed_module(path: Path, *, export_name: str) -> dict[str, object]:
+    """Load one named, JSON-safe object from a local Python seed module."""
 
     if not isinstance(path, Path):
         raise TypeError("seed module path must be a pathlib path")
-    if path.suffix != ".ts":
-        raise SeedModuleLoadError("seed modules must use the .ts extension")
+    if path.suffix != ".py":
+        raise SeedModuleLoadError("seed modules must use the .py extension")
+    if not isinstance(export_name, str) or not export_name:
+        raise TypeError("seed module export name must be a nonempty string")
     try:
-        rendered = run(
-            [
-                "node",
-                "--experimental-strip-types",
-                str(_SEED_MODULE_RENDERER),
-                str(path.resolve()),
-            ],
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=_SEED_MODULE_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as exc:
-        raise SeedModuleLoadError(
-            "TypeScript seed modules require Node.js 22.6 or later"
-        ) from exc
-    except (CalledProcessError, TimeoutExpired) as exc:
-        raise SeedModuleLoadError("could not load TypeScript seed module") from exc
-    try:
-        raw = json.loads(rendered.stdout)
-    except json.JSONDecodeError as exc:
-        raise SeedModuleLoadError("could not decode TypeScript seed module") from exc
+        namespace = runpy.run_path(str(path))
+    except Exception as exc:
+        raise SeedModuleLoadError("could not load Python seed module") from exc
+    raw = namespace.get(export_name)
     if not isinstance(raw, dict):
-        raise SeedModuleLoadError("TypeScript seed module must export an object")
+        raise SeedModuleLoadError("Python seed module must export an object")
     return cast(dict[str, object], raw)
 
 
@@ -1635,9 +1616,9 @@ async def build_application(*, debug: bool = False) -> FriendlyBotRuntime:
             )
         )
         system_global_seed = load_system_global_seed(
-            PROJECT_ROOT / "seeds" / "system-global.ts"
+            PROJECT_ROOT / "seeds" / "system_global.py"
         )
-        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "services" / "zone-x.ts")
+        seed = load_zone_x_seed(PROJECT_ROOT / "seeds" / "services" / "zone_x.py")
         async with unit_of_work_factory() as unit_of_work:
             zone_x = await publish_zone_x_seed(seed, system_global_seed, unit_of_work)
         application = FriendlyBotApplication(

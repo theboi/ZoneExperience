@@ -26,7 +26,6 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
 - Run the guarded commands as the macOS user who owns this checkout. The guard derives the local UID namespace automatically.
 - Install Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
-- Install Node.js 22.6 or newer. The runtime uses Node's built-in TypeScript support to load the local seed modules; `brew install node` installs a compatible version.
 - Install Colima, the Docker CLI, and Docker Compose with Homebrew; Docker Desktop is not required:
 
   ```sh
@@ -97,7 +96,7 @@ Do not override these values, change the port, or point the bot at an arbitrary 
 
    The process publishes the bundled Zone X seed idempotently, verifies Telegram webhook state, obtains one PostgreSQL advisory lock, then runs polling, outbox delivery, and service scheduling together. A second process against the same database should refuse to start rather than compete for Telegram updates.
 
-   The authored configuration lives in `seeds/system-global.ts` and `seeds/services/zone-x.ts`. Each module must default-export one object. It is validated through the same Pydantic publication boundary before any flow is stored.
+   The authored configuration lives in `seeds/system_global.py` and `seeds/services/zone_x.py`. Each module exports one statically typed object and is validated through the same Pydantic publication boundary before any flow is stored. `uv run mypy` checks both seed modules and application source.
 
    To inspect OpenRouter routing during local debugging, run:
 
@@ -143,7 +142,7 @@ If the generated `.runtime/u<uid>/postgres.env` file is missing, `reset` creates
 | `unexpected macOS user`, `unexpected checkout`, or another `unexpected runtime` error | Run from the intended `ZoneExperience/friendly-bot` checkout as its owning macOS user; do not pass overrides to bypass the guard. |
 | Alembic cannot connect to PostgreSQL | Confirm the guarded `up` command completed, use the generated local password in `.env`, and keep `127.0.0.1:5833`. |
 | `OpenRouter configuration is invalid` or a privacy-attestation error | Verify the API key is present and the attestation exactly matches the value shown above; recheck the OpenRouter privacy setting. |
-| `TypeScript seed modules require Node.js 22.6 or later` or `could not load TypeScript seed module` | Install a current Node.js release, then confirm `node --experimental-strip-types --version` succeeds and that each seed module has a default object export. |
+| `could not load Python seed module` or `Python seed module must export an object` | Check the seed file for a valid Python import and the expected named exported seed object. Run `uv run mypy` to find static type errors before starting the bot. |
 | An error message names an error log | Open the named file under `.runtime/error-logs/`. It contains the local traceback and safe context, is permission-restricted, and is already excluded from Git. |
 | OpenRouter routing is temporarily unavailable or returns an invalid response | Friendly Bot records a redacted diagnostic, writes a local error log, sends its filename to the user, commits that update, and continues polling. Restore the provider rather than weakening the privacy configuration. |
 | Telegram webhook preflight fails | Check the dedicated bot token and Telegram connectivity. The runtime will not poll unless it can safely inspect and, when configured, clear the webhook. |

@@ -21,8 +21,8 @@ from friendly_bot.domain.triggers import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SYSTEM_SEED_PATH = PROJECT_ROOT / "seeds" / "system-global.ts"
-ZONE_X_SEED_PATH = PROJECT_ROOT / "seeds" / "services" / "zone-x.ts"
+SYSTEM_SEED_PATH = PROJECT_ROOT / "seeds" / "system_global.py"
+ZONE_X_SEED_PATH = PROJECT_ROOT / "seeds" / "services" / "zone_x.py"
 
 
 def test_system_root_sends_its_prompt_when_opened() -> None:
@@ -184,7 +184,7 @@ def test_buttons_only_offer_choices_that_are_not_already_stated() -> None:
     ]
 
 
-def test_split_typescript_modules_are_semantically_equal_to_canonical_yaml() -> None:
+def test_split_python_modules_are_semantically_equal_to_canonical_yaml() -> None:
     """Seed drift must fail before immutable roots can be published."""
 
     completed = run(
@@ -192,8 +192,10 @@ def test_split_typescript_modules_are_semantically_equal_to_canonical_yaml() -> 
             "ruby",
             "tests/e2e/verify_zone_x_seed.rb",
             "docs/examples/zone-x-service-example.md",
-            "seeds/system-global.ts",
-            "seeds/services/zone-x.ts",
+            "seeds/system_global.py",
+            "SYSTEM_GLOBAL_SEED",
+            "seeds/services/zone_x.py",
+            "ZONE_X_SEED",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -248,22 +250,22 @@ def test_zone_x_service_seed_contains_only_service_configuration() -> None:
     assert parsed.service.key == "zone_x_2026_10_18"
 
 
-def test_seed_modules_must_default_export_an_object(tmp_path: Path) -> None:
-    """Configuration remains a TypeScript module rather than a JSON-shaped text file."""
+def test_seed_modules_must_export_a_named_object(tmp_path: Path) -> None:
+    """Configuration remains a typed Python module rather than a text data file."""
 
-    invalid_module = tmp_path / "invalid.ts"
-    invalid_module.write_text("export default ['not an object'] as const;\n")
+    invalid_module = tmp_path / "invalid.py"
+    invalid_module.write_text("INVALID_SEED = ['not an object']\n")
 
-    with pytest.raises(SeedModuleLoadError, match="could not load"):
-        load_seed_module(invalid_module)
+    with pytest.raises(SeedModuleLoadError, match="must export an object"):
+        load_seed_module(invalid_module, export_name="INVALID_SEED")
 
 
 def _system_document() -> dict[str, object]:
-    return load_seed_module(SYSTEM_SEED_PATH)
+    return load_seed_module(SYSTEM_SEED_PATH, export_name="SYSTEM_GLOBAL_SEED")
 
 
 def _service_document() -> dict[str, object]:
-    return load_seed_module(ZONE_X_SEED_PATH)
+    return load_seed_module(ZONE_X_SEED_PATH, export_name="ZONE_X_SEED")
 
 
 def _flow(root: dict[str, object], key: str) -> dict[str, object]:

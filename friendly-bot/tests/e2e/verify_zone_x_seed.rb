@@ -7,24 +7,26 @@ yaml_text = markdown.match(/^```yaml\n(.*?)^```$/m)&.captures&.first
 abort("canonical YAML fence not found") if yaml_text.nil?
 
 canonical = YAML.safe_load(yaml_text, aliases: false)
-renderer = File.expand_path("../../scripts/render_seed_module.mjs", __dir__)
+renderer = File.expand_path("../../scripts/render_seed_module.py", __dir__)
 
-def load_seed_module(renderer, path)
+def load_seed_module(renderer, path, export_name)
   rendered, error, status = Open3.capture3(
-    "node",
-    "--experimental-strip-types",
+    "uv",
+    "run",
+    "python",
     renderer,
-    path
+    path,
+    export_name
   )
-  abort("could not render TypeScript seed module") unless status.success?
+  abort("could not render Python seed module") unless status.success?
 
   JSON.parse(rendered)
 rescue JSON::ParserError
-  abort("could not decode TypeScript seed module")
+  abort("could not decode Python seed module")
 end
 
-system_global = load_seed_module(renderer, ARGV.fetch(1))
-service = load_seed_module(renderer, ARGV.fetch(2))
+system_global = load_seed_module(renderer, ARGV.fetch(1), ARGV.fetch(2))
+service = load_seed_module(renderer, ARGV.fetch(3), ARGV.fetch(4))
 seed = {
   "system_global_root" => system_global.fetch("root"),
   "service" => service.fetch("service")
@@ -49,4 +51,4 @@ def first_difference(expected, actual, path = "")
 end
 
 pointer = first_difference(canonical, seed)
-abort("Zone X YAML/TypeScript semantic mismatch at #{pointer}") unless pointer.nil?
+abort("Zone X YAML/Python semantic mismatch at #{pointer}") unless pointer.nil?

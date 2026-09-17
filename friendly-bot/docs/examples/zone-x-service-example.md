@@ -16,7 +16,7 @@
 
 ## 1. How to read this service
 
-The YAML below is the normative human-readable representation of the first development service. It shows the complete Zone X service, including its service-global checkpoint, latecomer flow, every configured development timestamp, and the complete system-global root. Runtime source data is split into the default-exported TypeScript objects in `seeds/system-global.ts` and `seeds/services/zone-x.ts`; the two modules together must be equivalent to this configuration. Published flow versions are stored as PostgreSQL `JSONB`.
+The YAML below is the normative human-readable representation of the first development service. It shows the complete Zone X service, including its service-global checkpoint, latecomer flow, every configured development timestamp, and the complete system-global root. Runtime source data is split into the statically typed Python objects in `seeds/system_global.py` and `seeds/services/zone_x.py`; the two modules together must be equivalent to this configuration. Published flow versions are stored as PostgreSQL `JSONB`.
 
 The configuration uses these rules:
 
@@ -34,7 +34,7 @@ The configuration uses these rules:
 - An unexpected failure emits `error`. A direct `error` child handles it; otherwise the harness invokes its hardcoded error sender. The hardcoded path is not a `DiscussionFlow` and is not part of published configuration. Action events never bubble.
 - All bot prose originates in actions. The LLM may select only eligible flow keys or reserved harness outcomes and may paraphrase only addressed `send_message` actions; a paraphrase must directly answer a user's question while retaining all authored facts and instructions.
 
-The flow graph, keys, behavior, copy, and outcomes below are the development baseline. The implementation stores equivalent TypeScript seed modules, renders their default exports locally, and validates the resulting data before publication. Any necessary serialization normalization must update this document and the living authorities in the same commit.
+The flow graph, keys, behavior, copy, and outcomes below are the development baseline. The implementation loads equivalent Python seed modules, checks their static types, and validates the resulting data before publication. Any necessary serialization normalization must update this document and the living authorities in the same commit.
 
 ## 2. Canonical development configuration
 

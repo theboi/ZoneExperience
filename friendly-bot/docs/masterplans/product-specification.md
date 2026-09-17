@@ -75,7 +75,7 @@ One highkey service before door close enrolls automatically. Multiple services w
 
 Timestamp audiences are all NBNCs, all servers, all leaders, service NBNCs, service servers, service leaders, or all service attendees. Role inheritance applies to operational audiences.
 
-Zone X is the first seeded development service and end-to-end acceptance fixture. It provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service. Its implemented configuration must be equivalent to the canonical [Zone X service document](../examples/zone-x-service-example.md) and live in TypeScript modules that default-export the system-global and service objects.
+Zone X is the first seeded development service and end-to-end acceptance fixture. It provides directions, what-to-expect information, human connection before service, constrained fixed-answer service questions during service, and human connection after service. Its implemented configuration must be equivalent to the canonical [Zone X service document](../examples/zone-x-service-example.md) and live in statically typed Python modules that export the system-global and service objects.
 
 ### 4.3 Records and persistence
 
@@ -108,7 +108,7 @@ Every emitted application error and debug diagnostic creates a sanitized notific
 - Current, reusable-past, and global selections route according to their approved importance and reuse semantics.
 - Leaves and never-mind requests return through the nearest checkpoint on the selected branch.
 - Service enrollment, overlaps, latecomers, timestamps, audiences, and expiry behave as specified.
-- The canonical Zone X TypeScript seed modules expose the approved before, during, and after behaviors with only locally validated configured model paraphrases and pass the end-to-end service acceptance suite.
+- The canonical Zone X Python seed modules expose the approved before, during, and after behaviors with only locally validated configured model paraphrases and pass the end-to-end service acceptance suite.
 - Normal, rematch, capacity, and safety matching never select ineligible people.
 - Restart recovery does not duplicate logical Telegram updates or timestamp delivery.
 - OpenRouter prompt construction and provider policy enforce the approved privacy boundary.

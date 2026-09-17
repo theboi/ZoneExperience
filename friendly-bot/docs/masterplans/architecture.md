@@ -48,14 +48,14 @@ The Git repository and `friendly-bot/` directory exist, but no Friendly Bot appl
 | ARCH-010 | Model real-world Zone gatherings as services; reserve event terminology for typed action outcomes | Domain language | Ryan The | 2026-09-12 | Real-world `Event` naming |
 | ARCH-011 | Let actions emit one terminal `ActionEvent` handled only by a direct child event trigger; invoke a non-configurable hardcoded sender for an unhandled `error` | Flow execution | Ryan The | 2026-09-12 | Per-action fallback flows, configured default-error flows, and error bubbling |
 | ARCH-012 | Use distinct hardcoded actions for server-only normal matching and leader-or-staff-only safety matching | Matching eligibility | Ryan The | 2026-09-12 | Role-inherited normal matching |
-| ARCH-013 | Use Zone X as the first canonical TypeScript seed modules and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-17 | Illustrative-only Zone X example |
+| ARCH-013 | Use Zone X as the first canonical statically typed Python seed modules and end-to-end service acceptance fixture | Development baseline | Ryan The | 2026-09-17 | Illustrative-only Zone X example |
 | ARCH-014 | Store each person's role once on the shared user identity; operational profiles reference that identity and do not duplicate role | Identity data | Ryan The | 2026-09-12 | Duplicate user/profile role columns |
 
 ## 4. Architecture contract
 
 ### 4.1 System context
 
-The local Python runtime integrates with Telegram Bot API, local PostgreSQL, and OpenRouter. Telegram and OpenRouter are the only required remote services. Node.js 22.6 or newer renders trusted local TypeScript seed modules before Python validates and publishes them. The process is started through `python -m friendly_bot`.
+The local Python runtime integrates with Telegram Bot API, local PostgreSQL, and OpenRouter. Telegram and OpenRouter are the only required remote services. The process loads trusted local Python seed modules before it validates and publishes them. The process is started through `python -m friendly_bot`.
 
 ### 4.2 Component boundaries
 
@@ -81,9 +81,9 @@ An action may synchronously emit one terminal `ActionEvent`. Emission stops the 
 
 Action classes declare their possible non-error event keys. Publication requires exactly one direct handler for each declared outcome and at most one direct `error` handler. Event-driven cycles without a Telegram-input boundary are invalid.
 
-Flow definitions are authored as TypeScript modules that default-export objects, rendered locally to JSON-safe data, validated into typed Pydantic objects, and published as immutable PostgreSQL `JSONB`. Active open selections remain pinned to their version when a later version is published. Human-readable YAML may be used only in explanatory documentation.
+Flow definitions are authored as statically typed Python modules that export JSON-safe objects, validated into typed Pydantic objects, and published as immutable PostgreSQL `JSONB`. Active open selections remain pinned to their version when a later version is published. Human-readable YAML may be used only in explanatory documentation.
 
-The first shipped service definition is the Zone X TypeScript seed modules. They must be behaviorally equivalent to the canonical human-readable Zone X document and drive the end-to-end service acceptance suite.
+The first shipped service definition is the Zone X Python seed modules. They must be behaviorally equivalent to the canonical human-readable Zone X document and drive the end-to-end service acceptance suite.
 
 ### 4.4 Runtime state boundary
 
@@ -133,7 +133,7 @@ Every emitted error and debug diagnostic creates a sanitized diagnostic record a
 | --- | --- | --- |
 | [`product-specification.md`](product-specification.md) | Architecture implements and is constrained by approved product behavior | Update when product behavior changes technical boundaries |
 | [`../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md`](../superpowers/specs/2026-09-11-friendly-bot-mvp-design.md) | Historical approved design source | Promote approved changes into both living authorities when changed |
-| [`../examples/zone-x-service-example.md`](../examples/zone-x-service-example.md) | Canonical human-readable source for the first service TypeScript seed modules and acceptance fixture | Keep behaviorally equivalent to the TypeScript modules and service tests |
+| [`../examples/zone-x-service-example.md`](../examples/zone-x-service-example.md) | Canonical human-readable source for the first service Python seed modules and acceptance fixture | Keep behaviorally equivalent to the Python modules and service tests |
 
 ## 6. Unresolved decisions
 
