@@ -322,8 +322,8 @@ class FriendlyBotApplication:
                 now=now,
                 presentations=presentations,
             )
-        elif _has_duplicate_system_roots(
-            branches, root_flow_key=self._zone_x.system_root.root_flow_key
+        elif _requires_system_root_reset(
+            branches, current_version_id=self._zone_x.system_root.id
         ):
             await unit_of_work.open_selections.reset_global_root(
                 _root_selection(
@@ -1357,19 +1357,19 @@ def _root_selection(
     )
 
 
-def _has_duplicate_system_roots(
-    branches: tuple[OpenSelectionState, ...], *, root_flow_key: str
+def _requires_system_root_reset(
+    branches: tuple[OpenSelectionState, ...], *, current_version_id: UUID
 ) -> bool:
-    """Detect stale immutable system-root versions before they duplicate intents."""
+    """Replace a missing, duplicate, or stale system selection with the seed root."""
 
+    system_branches = tuple(
+        branch
+        for branch in branches
+        if branch.service_id is None and branch.is_global_interruptive
+    )
     return (
-        sum(
-            branch.service_id is None
-            and branch.is_global_interruptive
-            and branch.parent_flow_key == root_flow_key
-            for branch in branches
-        )
-        > 1
+        len(system_branches) != 1
+        or system_branches[0].flow_version_id != current_version_id
     )
 
 

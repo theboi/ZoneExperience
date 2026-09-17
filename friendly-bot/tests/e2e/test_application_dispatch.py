@@ -594,9 +594,12 @@ def _routing_candidate(
 
 
 def _multi_fixture(
-    root: DiscussionFlow, router: ResultRouter
+    root: DiscussionFlow,
+    router: ResultRouter,
+    *,
+    version: FlowVersionRecord | None = None,
 ) -> tuple[FriendlyBotApplication, FakeUnitOfWork, UserRecord]:
-    version = _version(root)
+    version = version or _version(root)
     user = UserRecord(
         id=uuid4(),
         telegram_user_id=77,
@@ -737,6 +740,30 @@ async def test_dispatch_repairs_duplicate_system_roots_before_routing() -> None:
     assert repaired.parent_flow_key == current.parent_flow_key
     assert repaired.is_global_interruptive is True
     assert service_branch in uow.open_selections.branches
+
+
+async def test_dispatch_replaces_a_stale_system_root_before_routing() -> None:
+    """A new immutable seed version must replace an old global selection."""
+
+    router = ResultRouter(
+        MultiIntentRoutingResult((), None, (), RoutingTerminal.NO_MATCH)
+    )
+    application, uow, user = _fixture(router=cast(ConstrainedRouter, router))
+    current = uow.open_selections.branches[0]
+    uow.open_selections.branches[:] = [replace(current, flow_version_id=uuid4())]
+
+    result = await application.dispatch(
+        user_id=user.id,
+        incoming=_message(user, message_id=9, text="what is the zone?"),
+        unit_of_work=cast(UnitOfWork, uow),
+    )
+
+    assert result.kind == "no_match"
+    assert router.typed_calls == 1
+    replacement = uow.open_selections.branches[0]
+    assert replacement.flow_version_id == current.flow_version_id
+    assert replacement.parent_flow_key == current.parent_flow_key
+    assert replacement.is_global_interruptive is True
 
 
 async def test_ambiguous_topic_asks_the_user_for_context() -> None:
@@ -1015,8 +1042,7 @@ async def test_typed_dispatch_runs_all_answer_fragments_without_transition() -> 
             terminal=None,
         )
     )
-    app, uow, user = _multi_fixture(root, router)
-    uow.flow_versions.versions[version.id] = version
+    app, uow, user = _multi_fixture(root, router, version=version)
     uow.open_selections.branches[0] = replace(
         uow.open_selections.branches[0],
         flow_version_id=version.id,
@@ -1093,8 +1119,7 @@ async def test_typed_dispatch_defers_extra_interactive_matches_in_order() -> Non
             terminal=None,
         )
     )
-    app, uow, user = _multi_fixture(root, router)
-    uow.flow_versions.versions[version.id] = version
+    app, uow, user = _multi_fixture(root, router, version=version)
     uow.open_selections.branches[0] = replace(
         uow.open_selections.branches[0],
         flow_version_id=version.id,
@@ -1160,8 +1185,7 @@ async def test_completed_interactive_flow_resumes_one_pending_intent() -> None:
             terminal=None,
         )
     )
-    app, uow, user = _multi_fixture(root, router)
-    uow.flow_versions.versions[version.id] = version
+    app, uow, user = _multi_fixture(root, router, version=version)
     uow.open_selections.branches[0] = replace(
         uow.open_selections.branches[0],
         flow_version_id=version.id,
@@ -1221,8 +1245,7 @@ async def test_interruptive_safety_result_excludes_other_matches() -> None:
             terminal=None,
         )
     )
-    app, uow, user = _multi_fixture(root, router)
-    uow.flow_versions.versions[version.id] = version
+    app, uow, user = _multi_fixture(root, router, version=version)
     uow.open_selections.branches[0] = replace(
         uow.open_selections.branches[0],
         flow_version_id=version.id,
