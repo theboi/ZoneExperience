@@ -230,7 +230,26 @@ system_global_root:
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
-  - key: system.global.menu.directions
+  - key: system.global.information.zone.timings
+    multi_intent_mode: answer
+    trigger:
+      type: any_of
+      triggers:
+      - type: button
+        button_id: system.global.menu.timings
+      - type: message
+        llm_gist: The person asks about anything related to The Zone, or one of its
+          youth groups DARE, Arrow or Varsity/V.
+    actions:
+    - type: send_message_fixed
+      text: |-
+        DARE: for secondary school students aged 13-17yo
+        Arrow: for post-secondary school students and NSFs aged 17-23yo
+        Varsity: for university students
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.information.directions.to_star
     multi_intent_mode: answer
     trigger:
       type: any_of
@@ -238,10 +257,7 @@ system_global_root:
       - type: button
         button_id: system.global.menu.directions
       - type: message
-        possible_qns:
-        - how do i get to The Zone?
-        - where is The Zone?
-        - how do i get to Star Vista?
+        llm_gist: The person is lost or asks for directions to Star Vista/church
     actions:
     - type: send_message_paraphrased
       text: Our services are held at Star Vista! Take the MRT to Buona Vista and follow
@@ -250,6 +266,31 @@ system_global_root:
       text: |-
         1 Vista Exchange Green, Singapore 138617
         https://maps.google.com/?q=The+Star+Performing+Arts+Centre
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.information.directions.within_star
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      llm_gist: The person asks for directions within Star Vista/church
+    actions:
+    - type: send_message_paraphrased
+      text: Once you've reached Star Vista, head to Level 5! (the lift only brings
+        you to Level 3, then you need to take the escalators). Wheelchair assistance
+        is available upon request.
+    next_flow_mode: ALLOW_MANY
+    return_actions: []
+    next_flows: []
+  - key: system.global.information.handicap_assistance
+    multi_intent_mode: answer
+    trigger:
+      type: message
+      llm_gist: The person asks about/for accessibility/handicap assistance.
+    actions:
+    - type: send_message_paraphrased
+      text: If you need help getting to service, let me know again to confirm and
+        I will get you in contact with someone who can help!
     next_flow_mode: ALLOW_MANY
     return_actions: []
     next_flows: []
