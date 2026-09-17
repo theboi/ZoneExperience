@@ -566,11 +566,10 @@ async def test_multi_intent_prompt_keeps_the_instruction_static() -> None:
     assert first_payload["messages"][1] != second_payload["messages"][1]
     assert "system.directions" not in first_payload["messages"][0]["content"]
     assert (
-        "every character you generate in lowercase"
-        in first_payload["messages"][0]["content"]
+        "Write your own wording in lowercase" in first_payload["messages"][0]["content"]
     )
     assert (
-        "including the first word, names, and titles"
+        "Preserve the source's capitalization for names, titles, acronyms"
         in first_payload["messages"][0]["content"]
     )
     assert (

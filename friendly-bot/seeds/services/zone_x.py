@@ -24,9 +24,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
             "actions": [
                 {
                     "type": "send_message_paraphrased",
-                    "text": "Hey {{ user.name }}! "
-                    "Welcome to Zone X! What "
-                    "would you like help with?",
+                    "text": "Hey {{ user.name }}! Welcome to Zone X! What would you like help with?",
                 },
                 {
                     "type": "send_buttons",
@@ -99,30 +97,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Zone X is "
-                            "held at The "
-                            "Star "
-                            "Performing "
-                            "Arts "
-                            "Centre, 1 "
-                            "Vista "
-                            "Exchange "
-                            "Green! Take "
-                            "the MRT to "
-                            "Buona Vista "
-                            "and follow "
-                            "the signs "
-                            "to The Star "
-                            "Vista. "
-                            "You'll meet "
-                            "our "
-                            "friendly "
-                            "welcome "
-                            "team in "
-                            "blue near "
-                            "the venue "
-                            "entrance to "
-                            "guide you.",
+                            "text": "Zone X is held at The Star Performing Arts Centre, 1 Vista Exchange Green! Take the MRT to Buona Vista and follow the signs to The Star Vista. You'll meet our friendly welcome team in blue near the venue entrance to guide you.",
                         },
                         {
                             "type": "send_message_fixed",
@@ -152,25 +127,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Come as you "
-                            "are. You "
-                            "can expect "
-                            "music, a "
-                            "message "
-                            "about "
-                            "Jesus, and "
-                            "time to "
-                            "meet other "
-                            "youths. "
-                            "It’s okay "
-                            "to come "
-                            "alone, sit "
-                            "quietly, or "
-                            "ask for "
-                            "someone to "
-                            "meet you "
-                            "before you "
-                            "enter.",
+                            "text": "Come as you are. You can expect music, a message about Jesus, and time to meet other youths. It’s okay to come alone, sit quietly, or ask for someone to meet you before you enter.",
                         }
                     ],
                     "next_flow_mode": "ALLOW_MANY",
@@ -195,14 +152,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "What is one "
-                            "thing that "
-                            "interests "
-                            "you? "
-                            "Nothing is "
-                            "a valid "
-                            "answer "
-                            "too!",
+                            "text": "What is one thing that interests you? Nothing is a valid answer too!",
                         }
                     ],
                     "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -212,21 +162,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "key": "service.zone_x.connect.capture_interest",
                             "trigger": {
                                 "type": "message",
-                                "llm_gist": "The "
-                                "person "
-                                "answers "
-                                "the "
-                                "question "
-                                "about "
-                                "an "
-                                "interest "
-                                "or "
-                                "says "
-                                "they "
-                                "do "
-                                "not "
-                                "have "
-                                "one.",
+                                "llm_gist": "The person answers the question about an interest or says they do not have one.",
                             },
                             "actions": [
                                 {
@@ -259,21 +195,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                     "actions": [
                                         {
                                             "type": "send_message_paraphrased",
-                                            "text": "I "
-                                            "found "
-                                            "{{ "
-                                            "matched_server.name "
-                                            "}} "
-                                            "from "
-                                            "{{ "
-                                            "matched_server.cg_name "
-                                            "}}. "
-                                            "How "
-                                            "would "
-                                            "you "
-                                            "like "
-                                            "to "
-                                            "meet?",
+                                            "text": "I found {{ matched_server.name }} from {{ matched_server.cg_name }}. How would you like to meet?",
                                         },
                                         {
                                             "type": "send_buttons",
@@ -281,20 +203,11 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                             "buttons": [
                                                 {
                                                     "button_id": "zone_x.connect.join_group",
-                                                    "text": "Join "
-                                                    "{{ "
-                                                    "matched_server.name "
-                                                    "}}",
+                                                    "text": "Join {{ matched_server.name }}",
                                                 },
                                                 {
                                                     "button_id": "zone_x.connect.join_me",
-                                                    "text": "Ask "
-                                                    "{{ "
-                                                    "matched_server.name "
-                                                    "}} "
-                                                    "to "
-                                                    "join "
-                                                    "me",
+                                                    "text": "Ask {{ matched_server.name }} to join me",
                                                 },
                                             ],
                                         },
@@ -315,64 +228,15 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                 },
                                                 {
                                                     "type": "notify_matched_human",
-                                                    "text": "{{ "
-                                                    "user.name "
-                                                    "}} "
-                                                    "is "
-                                                    "at "
-                                                    "{{ "
-                                                    "service.name "
-                                                    "}} "
-                                                    "and "
-                                                    "would "
-                                                    "like "
-                                                    "to "
-                                                    "join "
-                                                    "you. "
-                                                    "Their "
-                                                    "interest: "
-                                                    "{{ "
-                                                    "human_match_request.interest "
-                                                    "}}. "
-                                                    "They "
-                                                    "may "
-                                                    "contact "
-                                                    "you "
-                                                    "on "
-                                                    "Telegram.",
+                                                    "text": "{{ user.name }} is at {{ service.name }} and would like to join you. Their interest: {{ human_match_request.interest }}. They may contact you on Telegram.",
                                                 },
                                                 {
                                                     "type": "share_human_contact",
-                                                    "text": "{{ "
-                                                    "matched_server.name "
-                                                    "}} "
-                                                    "is "
-                                                    "expecting "
-                                                    "you. "
-                                                    "Message "
-                                                    "them "
-                                                    "here: "
-                                                    "{{ "
-                                                    "matched_server.telegram_url "
-                                                    "}}",
+                                                    "text": "{{ matched_server.name }} is expecting you. Message them here: {{ matched_server.telegram_url }}",
                                                 },
                                                 {
                                                     "type": "send_message_paraphrased",
-                                                    "text": "if "
-                                                    "{{ "
-                                                    "matched_server.name "
-                                                    "}} "
-                                                    "is "
-                                                    "not "
-                                                    "responding, "
-                                                    "tell "
-                                                    "me "
-                                                    "and "
-                                                    "i "
-                                                    "will "
-                                                    "find "
-                                                    "someone "
-                                                    "else.",
+                                                    "text": "if {{ matched_server.name }} is not responding, tell me and i will find someone else.",
                                                 },
                                             ],
                                             "next_flow_mode": "ALLOW_MANY",
@@ -382,37 +246,13 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                     "key": "service.zone_x.connect.join_group.not_responding",
                                                     "trigger": {
                                                         "type": "message",
-                                                        "llm_gist": "The "
-                                                        "matched "
-                                                        "person "
-                                                        "is "
-                                                        "not "
-                                                        "responding "
-                                                        "or "
-                                                        "cannot "
-                                                        "be "
-                                                        "reached.",
+                                                        "llm_gist": "The matched person is not responding or cannot be reached.",
                                                     },
                                                     "actions": [
                                                         {"type": "release_human_match"},
                                                         {
                                                             "type": "notify_previous_human",
-                                                            "text": "{{ "
-                                                            "user.name "
-                                                            "}} "
-                                                            "reported "
-                                                            "that "
-                                                            "they "
-                                                            "could "
-                                                            "not "
-                                                            "reach "
-                                                            "you. "
-                                                            "Their "
-                                                            "connection "
-                                                            "request "
-                                                            "will "
-                                                            "be "
-                                                            "reassigned.",
+                                                            "text": "{{ user.name }} reported that they could not reach you. Their connection request will be reassigned.",
                                                         },
                                                         {
                                                             "type": "exclude_previous_human_from_next_attempt"
@@ -423,9 +263,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                         },
                                                         {
                                                             "type": "find_and_reserve_server",
-                                                            "service_id": "{{ "
-                                                            "service.id "
-                                                            "}}",
+                                                            "service_id": "{{ service.id }}",
                                                             "require_service_attendance": True,
                                                             "capacity_required": 1,
                                                             "preserve_meeting_preference": True,
@@ -443,42 +281,11 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             "actions": [
                                                                 {
                                                                     "type": "notify_matched_human",
-                                                                    "text": "{{ "
-                                                                    "user.name "
-                                                                    "}} "
-                                                                    "is "
-                                                                    "at "
-                                                                    "{{ "
-                                                                    "service.name "
-                                                                    "}} "
-                                                                    "and "
-                                                                    "would "
-                                                                    "like "
-                                                                    "to "
-                                                                    "join "
-                                                                    "you. "
-                                                                    "Their "
-                                                                    "interest: "
-                                                                    "{{ "
-                                                                    "human_match_request.interest "
-                                                                    "}}. "
-                                                                    "They "
-                                                                    "may "
-                                                                    "contact "
-                                                                    "you "
-                                                                    "on "
-                                                                    "Telegram.",
+                                                                    "text": "{{ user.name }} is at {{ service.name }} and would like to join you. Their interest: {{ human_match_request.interest }}. They may contact you on Telegram.",
                                                                 },
                                                                 {
                                                                     "type": "share_human_contact",
-                                                                    "text": "Try "
-                                                                    "{{ "
-                                                                    "matched_server.name "
-                                                                    "}} "
-                                                                    "instead: "
-                                                                    "{{ "
-                                                                    "matched_server.telegram_url "
-                                                                    "}}",
+                                                                    "text": "Try {{ matched_server.name }} instead: {{ matched_server.telegram_url }}",
                                                                 },
                                                             ],
                                                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -494,25 +301,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             "actions": [
                                                                 {
                                                                     "type": "send_message_paraphrased",
-                                                                    "text": "Sorry, "
-                                                                    "nobody "
-                                                                    "else "
-                                                                    "is "
-                                                                    "available "
-                                                                    "to "
-                                                                    "meet "
-                                                                    "right "
-                                                                    "now. "
-                                                                    "Please "
-                                                                    "speak "
-                                                                    "to "
-                                                                    "a "
-                                                                    "Zone "
-                                                                    "team "
-                                                                    "member "
-                                                                    "at "
-                                                                    "the "
-                                                                    "venue.",
+                                                                    "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue.",
                                                                 }
                                                             ],
                                                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -536,73 +325,15 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                 },
                                                 {
                                                     "type": "notify_matched_human",
-                                                    "text": "{{ "
-                                                    "user.name "
-                                                    "}} "
-                                                    "is "
-                                                    "at "
-                                                    "{{ "
-                                                    "service.name "
-                                                    "}} "
-                                                    "and "
-                                                    "would "
-                                                    "like "
-                                                    "you "
-                                                    "to "
-                                                    "join "
-                                                    "them. "
-                                                    "Their "
-                                                    "interest: "
-                                                    "{{ "
-                                                    "human_match_request.interest "
-                                                    "}}. "
-                                                    "They "
-                                                    "may "
-                                                    "contact "
-                                                    "you "
-                                                    "on "
-                                                    "Telegram.",
+                                                    "text": "{{ user.name }} is at {{ service.name }} and would like you to join them. Their interest: {{ human_match_request.interest }}. They may contact you on Telegram.",
                                                 },
                                                 {
                                                     "type": "share_human_contact",
-                                                    "text": "{{ "
-                                                    "matched_server.name "
-                                                    "}} "
-                                                    "will "
-                                                    "come "
-                                                    "and "
-                                                    "meet "
-                                                    "you. "
-                                                    "Message "
-                                                    "them "
-                                                    "here "
-                                                    "so "
-                                                    "you "
-                                                    "can "
-                                                    "find "
-                                                    "each "
-                                                    "other: "
-                                                    "{{ "
-                                                    "matched_server.telegram_url "
-                                                    "}}",
+                                                    "text": "{{ matched_server.name }} will come and meet you. Message them here so you can find each other: {{ matched_server.telegram_url }}",
                                                 },
                                                 {
                                                     "type": "send_message_paraphrased",
-                                                    "text": "if "
-                                                    "{{ "
-                                                    "matched_server.name "
-                                                    "}} "
-                                                    "is "
-                                                    "not "
-                                                    "responding, "
-                                                    "tell "
-                                                    "me "
-                                                    "and "
-                                                    "i "
-                                                    "will "
-                                                    "find "
-                                                    "someone "
-                                                    "else.",
+                                                    "text": "if {{ matched_server.name }} is not responding, tell me and i will find someone else.",
                                                 },
                                             ],
                                             "next_flow_mode": "ALLOW_MANY",
@@ -612,37 +343,13 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                     "key": "service.zone_x.connect.join_me.not_responding",
                                                     "trigger": {
                                                         "type": "message",
-                                                        "llm_gist": "The "
-                                                        "matched "
-                                                        "person "
-                                                        "is "
-                                                        "not "
-                                                        "responding "
-                                                        "or "
-                                                        "cannot "
-                                                        "be "
-                                                        "reached.",
+                                                        "llm_gist": "The matched person is not responding or cannot be reached.",
                                                     },
                                                     "actions": [
                                                         {"type": "release_human_match"},
                                                         {
                                                             "type": "notify_previous_human",
-                                                            "text": "{{ "
-                                                            "user.name "
-                                                            "}} "
-                                                            "reported "
-                                                            "that "
-                                                            "they "
-                                                            "could "
-                                                            "not "
-                                                            "reach "
-                                                            "you. "
-                                                            "Their "
-                                                            "connection "
-                                                            "request "
-                                                            "will "
-                                                            "be "
-                                                            "reassigned.",
+                                                            "text": "{{ user.name }} reported that they could not reach you. Their connection request will be reassigned.",
                                                         },
                                                         {
                                                             "type": "exclude_previous_human_from_next_attempt"
@@ -653,9 +360,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                         },
                                                         {
                                                             "type": "find_and_reserve_server",
-                                                            "service_id": "{{ "
-                                                            "service.id "
-                                                            "}}",
+                                                            "service_id": "{{ service.id }}",
                                                             "require_service_attendance": True,
                                                             "capacity_required": 1,
                                                             "preserve_meeting_preference": True,
@@ -673,43 +378,11 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             "actions": [
                                                                 {
                                                                     "type": "notify_matched_human",
-                                                                    "text": "{{ "
-                                                                    "user.name "
-                                                                    "}} "
-                                                                    "is "
-                                                                    "at "
-                                                                    "{{ "
-                                                                    "service.name "
-                                                                    "}} "
-                                                                    "and "
-                                                                    "would "
-                                                                    "like "
-                                                                    "you "
-                                                                    "to "
-                                                                    "join "
-                                                                    "them. "
-                                                                    "Their "
-                                                                    "interest: "
-                                                                    "{{ "
-                                                                    "human_match_request.interest "
-                                                                    "}}. "
-                                                                    "They "
-                                                                    "may "
-                                                                    "contact "
-                                                                    "you "
-                                                                    "on "
-                                                                    "Telegram.",
+                                                                    "text": "{{ user.name }} is at {{ service.name }} and would like you to join them. Their interest: {{ human_match_request.interest }}. They may contact you on Telegram.",
                                                                 },
                                                                 {
                                                                     "type": "share_human_contact",
-                                                                    "text": "Try "
-                                                                    "{{ "
-                                                                    "matched_server.name "
-                                                                    "}} "
-                                                                    "instead: "
-                                                                    "{{ "
-                                                                    "matched_server.telegram_url "
-                                                                    "}}",
+                                                                    "text": "Try {{ matched_server.name }} instead: {{ matched_server.telegram_url }}",
                                                                 },
                                                             ],
                                                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -725,25 +398,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                                             "actions": [
                                                                 {
                                                                     "type": "send_message_paraphrased",
-                                                                    "text": "Sorry, "
-                                                                    "nobody "
-                                                                    "else "
-                                                                    "is "
-                                                                    "available "
-                                                                    "to "
-                                                                    "meet "
-                                                                    "right "
-                                                                    "now. "
-                                                                    "Please "
-                                                                    "speak "
-                                                                    "to "
-                                                                    "a "
-                                                                    "Zone "
-                                                                    "team "
-                                                                    "member "
-                                                                    "at "
-                                                                    "the "
-                                                                    "venue.",
+                                                                    "text": "Sorry, nobody else is available to meet right now. Please speak to a Zone team member at the venue.",
                                                                 }
                                                             ],
                                                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -765,28 +420,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                     "actions": [
                                         {
                                             "type": "send_message_paraphrased",
-                                            "text": "Sorry, "
-                                            "nobody "
-                                            "is "
-                                            "available "
-                                            "to "
-                                            "meet "
-                                            "right "
-                                            "now. "
-                                            "Please "
-                                            "try "
-                                            "again "
-                                            "later "
-                                            "or "
-                                            "speak "
-                                            "to "
-                                            "a "
-                                            "Zone "
-                                            "team "
-                                            "member "
-                                            "at "
-                                            "the "
-                                            "venue.",
+                                            "text": "Sorry, nobody is available to meet right now. Please try again later or speak to a Zone team member at the venue.",
                                         }
                                     ],
                                     "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -890,11 +524,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                                             "actions": [
                                                 {
                                                     "type": "send_message_paraphrased",
-                                                    "text": "Sorry, "
-                                                    "the "
-                                                    "service "
-                                                    "is "
-                                                    "over!",
+                                                    "text": "Sorry, the service is over!",
                                                 }
                                             ],
                                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -914,15 +544,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "There "
-                                    "are "
-                                    "no "
-                                    "other "
-                                    "ongoing "
-                                    "services "
-                                    "to "
-                                    "switch "
-                                    "to.",
+                                    "text": "There are no other ongoing services to switch to.",
                                 }
                             ],
                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -941,11 +563,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                 {"type": "enter_service_checkpoint", "flow_key": "service.zone_x.home"},
                 {
                     "type": "send_message_paraphrased",
-                    "text": "Yes, you can still join Zone X. "
-                    "Service has started, so head to "
-                    "the venue entrance and ask a "
-                    "Zone team member to help you "
-                    "find a seat.",
+                    "text": "Yes, you can still join Zone X. Service has started, so head to the venue entrance and ask a Zone team member to help you find a seat.",
                 },
             ],
             "next_flow_mode": "ALLOW_MANY",
@@ -964,15 +582,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                         {
                             "type": "send_photo",
                             "asset_key": "zone_x_poster_2026",
-                            "caption": "Zone X is "
-                            "happening on 18 "
-                            "October at The "
-                            "Star Performing "
-                            "Arts Centre. You "
-                            "can come alone. "
-                            "We’ll help you "
-                            "meet someone "
-                            "friendly.",
+                            "caption": "Zone X is happening on 18 October at The Star Performing Arts Centre. You can come alone. We’ll help you meet someone friendly.",
                         },
                         {
                             "type": "send_buttons",
@@ -993,11 +603,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "return_actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Would you like "
-                            "to know "
-                            "anything else "
-                            "about Zone "
-                            "X?",
+                            "text": "Would you like to know anything else about Zone X?",
                         }
                     ],
                     "next_flows": [
@@ -1010,26 +616,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "Come "
-                                    "as "
-                                    "you "
-                                    "are. "
-                                    "There "
-                                    "will "
-                                    "be "
-                                    "music, "
-                                    "a "
-                                    "message "
-                                    "about "
-                                    "Jesus, "
-                                    "and "
-                                    "friendly "
-                                    "people "
-                                    "who "
-                                    "can "
-                                    "sit "
-                                    "with "
-                                    "you.",
+                                    "text": "Come as you are. There will be music, a message about Jesus, and friendly people who can sit with you.",
                                 }
                             ],
                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -1045,23 +632,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_fixed",
-                                    "text": "Take "
-                                    "the "
-                                    "MRT "
-                                    "to "
-                                    "Buona "
-                                    "Vista "
-                                    "and "
-                                    "follow "
-                                    "signs "
-                                    "to "
-                                    "The "
-                                    "Star "
-                                    "Vista. "
-                                    "Map: "
-                                    "{{ "
-                                    "service.map_url "
-                                    "}}",
+                                    "text": "Take the MRT to Buona Vista and follow signs to The Star Vista. Map: {{ service.map_url }}",
                                 }
                             ],
                             "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -1081,11 +652,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Zone X is tomorrow at "
-                            "2:30 pm. Doors open "
-                            "at 1:30 pm at The "
-                            "Star Performing Arts "
-                            "Centre.",
+                            "text": "Zone X is tomorrow at 2:30 pm. Doors open at 1:30 pm at The Star Performing Arts Centre.",
                         },
                         {
                             "type": "send_message_fixed",
@@ -1112,10 +679,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Doors are open for "
-                            "Zone X. Are you here "
-                            "with us? Reply 'i am "
-                            "here' to check in.",
+                            "text": "Doors are open for Zone X. Are you here with us? Reply 'i am here' to check in.",
                         }
                     ],
                     "next_flow_mode": "ONE_AND_ONCE_ONLY",
@@ -1194,10 +758,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Service has started. "
-                            "You can ask a "
-                            "question here at any "
-                            "time.",
+                            "text": "Service has started. You can ask a question here at any time.",
                         },
                         {
                             "type": "send_buttons",
@@ -1218,11 +779,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "return_actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Is there "
-                            "anything else "
-                            "you’d like to "
-                            "ask about "
-                            "service?",
+                            "text": "Is there anything else you’d like to ask about service?",
                         },
                         {
                             "type": "send_buttons",
@@ -1262,27 +819,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "The "
-                                    "nearest "
-                                    "toilets "
-                                    "are "
-                                    "on "
-                                    "Level "
-                                    "4 "
-                                    "beside "
-                                    "the "
-                                    "lifts. "
-                                    "Ask a "
-                                    "Zone "
-                                    "team "
-                                    "member "
-                                    "if "
-                                    "you’d "
-                                    "like "
-                                    "someone "
-                                    "to "
-                                    "show "
-                                    "you.",
+                                    "text": "The nearest toilets are on Level 4 beside the lifts. Ask a Zone team member if you’d like someone to show you.",
                                 }
                             ],
                             "next_flow_mode": "ALLOW_MANY",
@@ -1311,45 +848,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "At "
-                                    "NCC, "
-                                    "we "
-                                    "believe "
-                                    "Jesus "
-                                    "is "
-                                    "the "
-                                    "Son "
-                                    "of "
-                                    "God "
-                                    "who "
-                                    "came "
-                                    "to "
-                                    "reveal "
-                                    "God’s "
-                                    "love "
-                                    "and "
-                                    "give "
-                                    "us "
-                                    "new "
-                                    "life "
-                                    "through "
-                                    "His "
-                                    "death "
-                                    "and "
-                                    "resurrection. "
-                                    "I can "
-                                    "connect "
-                                    "you "
-                                    "with "
-                                    "someone "
-                                    "if "
-                                    "you’d "
-                                    "like "
-                                    "to "
-                                    "talk "
-                                    "about "
-                                    "this "
-                                    "personally.",
+                                    "text": "At NCC, we believe Jesus is the Son of God who came to reveal God’s love and give us new life through His death and resurrection. I can connect you with someone if you’d like to talk about this personally.",
                                 }
                             ],
                             "next_flow_mode": "ALLOW_MANY",
@@ -1361,49 +860,12 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "multi_intent_mode": "answer",
                             "trigger": {
                                 "type": "message",
-                                "llm_gist": "The "
-                                "person "
-                                "asks "
-                                "a "
-                                "genuine "
-                                "question "
-                                "about "
-                                "service "
-                                "that "
-                                "is "
-                                "not "
-                                "covered "
-                                "by "
-                                "a "
-                                "more "
-                                "specific "
-                                "open "
-                                "question "
-                                "flow.",
+                                "llm_gist": "The person asks a genuine question about service that is not covered by a more specific open question flow.",
                             },
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "I "
-                                    "don’t "
-                                    "have "
-                                    "an "
-                                    "approved "
-                                    "answer "
-                                    "for "
-                                    "that "
-                                    "question, "
-                                    "but I "
-                                    "can "
-                                    "connect "
-                                    "you "
-                                    "with "
-                                    "someone "
-                                    "who "
-                                    "can "
-                                    "talk "
-                                    "with "
-                                    "you.",
+                                    "text": "I don’t have an approved answer for that question, but I can connect you with someone who can talk with you.",
                                 }
                             ],
                             "next_flow_mode": "ALLOW_MANY",
@@ -1423,9 +885,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Service has ended. "
-                            "What would you like "
-                            "to do next?",
+                            "text": "Service has ended. What would you like to do next?",
                         },
                         {
                             "type": "send_buttons",
@@ -1446,11 +906,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "return_actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Would you like "
-                            "help with "
-                            "anything else "
-                            "before you "
-                            "go?",
+                            "text": "Would you like help with anything else before you go?",
                         }
                     ],
                     "next_flows": [
@@ -1463,20 +919,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "I can "
-                                    "introduce "
-                                    "you "
-                                    "to "
-                                    "someone "
-                                    "friendly. "
-                                    "Tell "
-                                    "me if "
-                                    "you "
-                                    "would "
-                                    "like "
-                                    "me to "
-                                    "do "
-                                    "that.",
+                                    "text": "I can introduce you to someone friendly. Tell me if you would like me to do that.",
                                 }
                             ],
                             "next_flow_mode": "ALLOW_MANY",
@@ -1492,21 +935,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                             "actions": [
                                 {
                                     "type": "send_message_paraphrased",
-                                    "text": "A "
-                                    "friendly "
-                                    "human "
-                                    "can "
-                                    "help "
-                                    "with "
-                                    "your "
-                                    "question. "
-                                    "Tell "
-                                    "me if "
-                                    "you "
-                                    "would "
-                                    "like "
-                                    "an "
-                                    "introduction.",
+                                    "text": "A friendly human can help with your question. Tell me if you would like an introduction.",
                                 }
                             ],
                             "next_flow_mode": "ALLOW_MANY",
@@ -1526,13 +955,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Thank you for coming "
-                            "to Zone X today. "
-                            "We’re glad you were "
-                            "here. You can still "
-                            "use the service "
-                            "options until 6:00 "
-                            "pm.",
+                            "text": "Thank you for coming to Zone X today. We’re glad you were here. You can still use the service options until 6:00 pm.",
                         }
                     ],
                     "next_flow_mode": "ALLOW_MANY",
@@ -1550,11 +973,7 @@ ZONE_X_SEED: Final[ZoneXSeedDocument] = {
                     "actions": [
                         {
                             "type": "send_message_paraphrased",
-                            "text": "Zone X has ended, but "
-                            "you can still ask for "
-                            "directions to Star or "
-                            "learn more about NCC "
-                            "here anytime.",
+                            "text": "Zone X has ended, but you can still ask for directions to Star or learn more about NCC here anytime.",
                         },
                         {
                             "type": "end_service_interactions",
